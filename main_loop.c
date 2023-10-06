@@ -28,8 +28,11 @@
 
 enum Status { QUIT = -1, ERR = -2, EMOD = -3, FATAL = -4 };
 
+//TODO: extract literals to a config header for statics
+//TODO: this should default to length defined in system
 static char def_filename[1024] = "";	/* default filename */
 static char errmsg[80] = "";		/* error message buffer */
+//TODO: should this be 80? why ?
 static char prompt_str[80] = "*";	/* command prompt */
 static int first_addr = 0, second_addr = 0;
 static bool prompt_on = false;		/* if set, show command prompt */
@@ -228,9 +231,15 @@ static int next_addr( const char ** const ibufpp, int * const addr_cnt )
                 ++*ibufpp;
                 addr = ( ( ch == '.' ) ? current_addr() : last_addr() );
                 break;
-      case '/':
+      //forward search.
+      case '/': if( !first ) { invalid_address(); return -2; };
+                addr = next_matching_node_addr( ibufpp, true );
+                if( addr < 0 ) return -2;
+                if( ch == **ibufpp ) ++*ibufpp;
+                break;
+      //backward search.
       case '?': if( !first ) { invalid_address(); return -2; };
-                addr = next_matching_node_addr( ibufpp, ch == '/' );
+                addr = next_matching_node_addr( ibufpp,  false );
                 if( addr < 0 ) return -2;
                 if( ch == **ibufpp ) ++*ibufpp;
                 break;
@@ -379,8 +388,7 @@ static bool command_s( const char ** const ibufpp, int * const gflagsp,
       default : if( sflags )
                   { set_error_msg( "Invalid command suffix" ); return false; }
       }
-    }
-  while( sflags && **ibufpp != '\n' );
+    }  while( sflags && **ibufpp != '\n' );
   if( sflags && !prev_pattern() )
     { set_error_msg( "No previous substitution" ); return false; }
   if( sflags & SGG ) snum = 0;			/* override numeric arg */
@@ -429,6 +437,11 @@ static int exec_command( const char ** const ibufpp, const int prev_status,
   c = *(*ibufpp)++;
   switch( c )
     {
+//TODO: need a way to change directory so we dont have to leave ed. sync with get_cwd with a change directory command.
+//TODO: need a organized way to add commands in the form of c functions. essentially allow commands to be longer than one character and create a directory to hold extensions/mods. ensure this is idiomatic.
+//NOTE: this may be realized with a fallthrough on this case statement
+//TODO: need a way to repeat commands given command history, possibly with an integer offset to history buffer
+//NOTE: this may be unecessary given the aforementioned functions, if a command is repeated often it should be automated such that such repetition becomes trivial.
     case 'a': if( !get_command_suffix( ibufpp, &gflags ) ) return ERR;
               if( !isglobal ) clear_undo_stack();
               if( !append_lines( ibufpp, second_addr, isglobal ) ) return ERR;
@@ -498,12 +511,14 @@ static int exec_command( const char ** const ibufpp, const int prev_status,
               if( !append_lines( ibufpp, second_addr - 1, isglobal ) )
                 return ERR;
               break;
+    //TODO: also need to split lines, possibly with regex (research if this exists)
     case 'j': if( !check_addr_range( current_addr(), current_addr() + 1, addr_cnt ) ||
                   !get_command_suffix( ibufpp, &gflags ) ) return ERR;
               if( !isglobal ) clear_undo_stack();
               if( first_addr != second_addr &&
                   !join_lines( first_addr, second_addr, isglobal ) ) return ERR;
               break;
+//TODO: I would like this to support whole words. this may require a data structure for strings. this may be done by altering mark_line_node to accept a word and assigning more to n
     case 'k': n = *(*ibufpp)++;
               if( second_addr == 0 ) { invalid_address(); return ERR; }
               if( !get_command_suffix( ibufpp, &gflags ) ||
@@ -558,6 +573,7 @@ static int exec_command( const char ** const ibufpp, const int prev_status,
               if( !isglobal ) clear_undo_stack();
               if( !copy_lines( first_addr, second_addr, addr ) ) return ERR;
               break;
+    //TODO: also need a redo with doubly linked list possibly.
     case 'u': if( unexpected_address( addr_cnt ) ||
                   !get_command_suffix( ibufpp, &gflags ) ||
                   !undo( isglobal ) ) return ERR;
@@ -617,6 +633,7 @@ static int exec_command( const char ** const ibufpp, const int prev_status,
               if( !scripted() ) printf( "!\n" );
               break;
     case '\n': first_addr = 1;
+              //TODO: dont add newline when printing next line with enter
               if( !check_addr_range( first_addr, current_addr() +
                                      ( traditional() || !isglobal ), addr_cnt ) ||
                   !display_lines( second_addr, second_addr, 0 ) )

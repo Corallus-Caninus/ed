@@ -73,6 +73,7 @@ bool display_lines( int from, const int to, const int gflags )
     const char * const s = get_sbuf_line( bp );
     if( !s ) return false;
     set_current_addr( from++ );
+    //TODO: shim in a pretty printer
     put_tty_line( s, bp->len, gflags );
     bp = bp->q_forw;
     }

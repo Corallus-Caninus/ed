@@ -48,8 +48,8 @@ static void translit_text( char * p, int len, const char from, const char to )
   {
   while( --len >= 0 )
     {
-    if( *p == from ) *p = to;
-    ++p;
+      if( *p == from ) *p = to;
+      ++p;
     }
   }
 
@@ -120,6 +120,7 @@ static regex_t * get_compiled_pattern( const char ** const ibufpp )
     { set_error_msg( "Invalid pattern delimiter" ); return 0; }
   if( delimiter == '\n' || *++*ibufpp == '\n' || **ibufpp == delimiter )
     {
+    //TODO: impossible non mutated init condition this is always true
     if( !exp ) set_error_msg( "No previous pattern" );
     return exp;
     }
@@ -313,7 +314,7 @@ static int apply_subst_template( const char * const boln,
    template; return size of the modified text */
 static int replace_matching_text( const line_t * const lp, const int gflags,
                                   const int snum )
-  {
+  {    //TODO: this is practically sufficient but may be better abstracted to some config header as well as rest of statics (the se_max)
   enum { se_max = 30 };	/* max subexpressions in a regular expression */
   regmatch_t rm[se_max];
   char * txt = get_sbuf_line( lp );
