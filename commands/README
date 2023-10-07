@@ -1,0 +1,5 @@
+This directory holds custom commands for ed. Anytime some automation is introduced as an extension from vanilla ed it will be added here in a .c file.
+The format for these commands will be void funcname(int* start, int* end, ...args...){
+These commands can be passed null for start and end addresses if they do not take them.
+The file command_parser.c contains the main loop for command parsing, called at the end of the main switch statement in main_loop.c
+Dependency is as follows, all .c files are included in command_parse which is included in main_loop.c
