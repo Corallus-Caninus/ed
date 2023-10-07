@@ -22,18 +22,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "config.h"
 
 #include "ed.h"
 
 
 enum Status { QUIT = -1, ERR = -2, EMOD = -3, FATAL = -4 };
 
-//TODO: extract literals to a config header for statics
-//TODO: this should default to length defined in system
-static char def_filename[1024] = "";	/* default filename */
-static char errmsg[80] = "";		/* error message buffer */
-//TODO: should this be 80? why ?
-static char prompt_str[80] = "*";	/* command prompt */
+//TODO: remove all warnings generated from gcc since we are standardizing on this compiler
+static char def_filename[FILENAME_SIZE] = "";	/* default filename */
+static char errmsg[ERROR_MESSAGE_LENGTH] = "";		/* error message buffer */
+static char prompt_str[PROMPT_MAX_LENGTH] = "*";	/* command prompt */
 static int first_addr = 0, second_addr = 0;
 static bool prompt_on = false;		/* if set, show command prompt */
 static bool verbose = false;		/* if set, print all error messages */
@@ -62,7 +61,7 @@ void set_prompt( const char * const s )
 void set_verbose( void ) { verbose = true; }
 
 
-static const line_t * mark[26];			/* line markers */
+static const line_t * mark[LINE_MARKER_LENGTH];			/* line markers */
 static int markno;				/* line marker count */
 
 static bool mark_line_node( const line_t * const lp, int c )
@@ -442,6 +441,10 @@ static int exec_command( const char ** const ibufpp, const int prev_status,
 //NOTE: this may be realized with a fallthrough on this case statement
 //TODO: need a way to repeat commands given command history, possibly with an integer offset to history buffer
 //NOTE: this may be unecessary given the aforementioned functions, if a command is repeated often it should be automated such that such repetition becomes trivial.
+     //TODO: insert a handle here for sanitizing commands, keep the same default handler
+//TODO: parse commands here; we need to evaluate if this is a word that doesnt collide with the fallthrough combinations here
+//NOTE: this may be as simple as having a new char that indicates all following chars in ibufpp are the indicated command
+//NOTE: case '~' is not taken
     case 'a': if( !get_command_suffix( ibufpp, &gflags ) ) return ERR;
               if( !isglobal ) clear_undo_stack();
               if( !append_lines( ibufpp, second_addr, isglobal ) ) return ERR;
