@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "config.h"
+#include "commands/command_parser.c"
 
 #include "ed.h"
 
@@ -444,7 +445,11 @@ static int exec_command( const char ** const ibufpp, const int prev_status,
      //TODO: insert a handle here for sanitizing commands, keep the same default handler
 //TODO: parse commands here; we need to evaluate if this is a word that doesnt collide with the fallthrough combinations here
 //NOTE: this may be as simple as having a new char that indicates all following chars in ibufpp are the indicated command
-//NOTE: case '~' is not taken
+//TODO: ensure ~ here doesnt break order of operations for parser
+//TODO: test this unexpected address sanitizer
+    case '~': if( unexpected_address( addr_cnt ) ) return ERR;
+parse_commands(*ibufpp);
+              break;     
     case 'a': if( !get_command_suffix( ibufpp, &gflags ) ) return ERR;
               if( !isglobal ) clear_undo_stack();
               if( !append_lines( ibufpp, second_addr, isglobal ) ) return ERR;
