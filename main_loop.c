@@ -638,7 +638,7 @@ exec_command (const char **const ibufpp, const int prev_status,
 //TODO: parse commands here; we need to evaluate if this is a word that doesnt collide with the fallthrough combinations here
 //NOTE: this may be as simple as having a new char that indicates all following chars in ibufpp are the indicated command
 //TODO: ensure ~ here doesnt break order of operations for parser
-//TODO: test this unexpected address sanitizer
+//TODO: test this unexpected address sanitizer ensure this doesnt cause problems for rest of cases.
     case '~':
       //TODO: handle the proper idiomatic address etc errors
       parse_commands (*ibufpp, first_addr, second_addr);

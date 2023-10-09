@@ -868,6 +868,10 @@ specified (in parenthesis).
      the printed line.
 
 
+`(.,.)~COMMAND'
+     Calls any of the extension commands in the ./command/ directory. These commands have
+     access to the buffer and optionally take address lines. For more information see
+     ./commands/.
 
 File: ed.info,  Node: Limitations,  Next: Diagnostics,  Prev: Commands,  Up: Top
 
