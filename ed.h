@@ -151,3 +151,6 @@ void set_window_lines( const int lines );
 const char * strip_escapes( const char * p );
 int window_columns( void );
 int window_lines( void );
+
+/* defined in commands/command_parser.c */
+int parse_command(const char *, int*, int*);

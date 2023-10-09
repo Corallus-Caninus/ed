@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "ed.h"
+//TODO: move these into main header ed.h
 #include "config.h"
 #include "commands/command_parser.c"
 
@@ -641,7 +642,7 @@ exec_command (const char **const ibufpp, const int prev_status,
 //TODO: test this unexpected address sanitizer ensure this doesnt cause problems for rest of cases.
     case '~':
       //TODO: handle the proper idiomatic address etc errors
-      parse_commands (*ibufpp, first_addr, second_addr);
+      parse_command (*ibufpp, &first_addr, &second_addr);
       break;
     case 'a':
       if (!get_command_suffix (ibufpp, &gflags))
@@ -764,7 +765,7 @@ exec_command (const char **const ibufpp, const int prev_status,
 	  !join_lines (first_addr, second_addr, isglobal))
 	return ERR;
       break;
-//TODO: I would like this to support whole words. this may require a data structure for strings. this may be done by altering mark_line_node to accept a word and assigning more to n
+    //TODO: I would like this to support whole words. this may require a data structure for strings. this may be done by altering mark_line_node to accept a word and assigning more to n
     case 'k':
       n = *(*ibufpp)++;
       if (second_addr == 0)
