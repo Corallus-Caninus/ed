@@ -19,7 +19,7 @@ mandir = $(datarootdir)/man
 program_prefix = 
 CC = gcc
 CPPFLAGS = 
-CFLAGS = -Wall -W -O3
+CFLAGS = -Wall -W -g
 LDFLAGS = 
 
 DISTNAME = $(pkgname)-$(pkgversion)
