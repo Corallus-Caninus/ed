@@ -119,6 +119,7 @@ void show_strerror( const char * const filename, const int errcode );
 bool traditional( void );
 
 /* defined in main_loop.c */
+static const char *get_filename (const char **const ibufpp);
 int main_loop( const bool loose );
 void set_def_filename( const char * const s );
 void set_error_msg( const char * msg );
@@ -153,4 +154,4 @@ int window_columns( void );
 int window_lines( void );
 
 /* defined in commands/command_parser.c */
-int parse_command(const char *, int*, int*);
+int parse_command(const char ** const, int*, int*);

@@ -642,7 +642,8 @@ exec_command (const char **const ibufpp, const int prev_status,
 //TODO: test this unexpected address sanitizer ensure this doesnt cause problems for rest of cases.
     case '~':
       //TODO: handle the proper idiomatic address etc errors
-      parse_command (*ibufpp, &first_addr, &second_addr);
+      //TODO: ibufpp should pass pointer to c str by value here but look for immutable errors here otherwise
+      parse_command (ibufpp, &first_addr, &second_addr);
       break;
     case 'a':
       if (!get_command_suffix (ibufpp, &gflags))
