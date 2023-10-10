@@ -26,7 +26,8 @@ mandir='$(datarootdir)/man'
 program_prefix=
 CC=
 CPPFLAGS=
-CFLAGS='-Wall -W -O3'
+#CFLAGS='-Wall -W -O3'
+CFLAGS='-Wall -W -g'
 LDFLAGS=
 
 # Loop over all args
