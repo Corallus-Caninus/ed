@@ -18,6 +18,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "ed.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -29,7 +30,6 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 
-#include "ed.h"
 
 
 jmp_buf jmp_state;

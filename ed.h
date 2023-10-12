@@ -18,6 +18,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+
 #ifndef __cplusplus
 enum Bool { false = 0, true = 1 };
 typedef enum Bool bool;
@@ -153,5 +154,5 @@ const char * strip_escapes( const char * p );
 int window_columns( void );
 int window_lines( void );
 
-/* defined in commands/command_parser.c */
-int parse_command(const char ** const, int*, int*);
+/* defined in extensions/extension_parser.c */
+int parse_extension(const char ** const, const char*, int*, int*);

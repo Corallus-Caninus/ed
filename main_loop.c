@@ -17,16 +17,18 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "ed.h"
 #include <ctype.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ed.h"
-//TODO: move these into main header ed.h
+//TODO: move these into main header "ed.h"
+//TODO: consider removing Makefile system in favour of preprocessor directives for conditional compilation.
+//TODO: also consider rewriting Makefile to support multiple directories
 #include "config.h"
-#include "commands/command_parser.c"
+#include "extensions/extension_parser.c"
 
 
 enum Status
@@ -643,7 +645,7 @@ exec_command (const char **const ibufpp, const int prev_status,
     case '~':
       //TODO: handle the proper idiomatic address etc errors
       //TODO: ibufpp should pass pointer to c str by value here but look for immutable errors here otherwise
-      parse_command (ibufpp, &first_addr, &second_addr);
+      parse_extension (ibufpp, fnp, &first_addr, &second_addr);
       break;
     case 'a':
       if (!get_command_suffix (ibufpp, &gflags))

@@ -7,7 +7,7 @@
 
 /* EXTENSION PROTOTPYES */
 void test_print (int *, int *);
-void funcs(const char **, int*, int*);
+void funcs(const char **, const char*, int*, int*);
 // END OF EXTENSION PROTOTYPES //
 
 /* CALL TABLE */
@@ -28,7 +28,8 @@ static const enum Extension
 /* PARSER */
 //TODO: ibufpp might be pass by value here, if so just pass by reference
 //Extensions should have argument format: inline int EXTENSION_NAME(const char ** const ibufpp, int *first_addr, int *second_addr, char* args)
-int parse_extension (const char ** const ibufpp, int *first_addr, int *second_addr)
+//TODO: pass in filename here
+int parse_extension (const char ** const ibufpp, const char* filename, int *first_addr, int *second_addr)
 {
   printf ("%s %i, %i \n", ibufpp, *first_addr, *second_addr);	//TODO: remove after testing
 
@@ -51,7 +52,7 @@ int parse_extension (const char ** const ibufpp, int *first_addr, int *second_ad
 	test_print(&first_addr,&second_addr);
          break;
     case FUNCS:
-	funcs(&ibufpp, &first_addr, &second_addr);
+	funcs(&ibufpp, &filename, &first_addr, &second_addr);
         break;
     default:
       printf ("extension not found..\n");
@@ -66,9 +67,9 @@ inline void test_print(int *first_addr, int *second_addr){
 }
 
 //uses ctags c library to list all funcs from first_addr to second_addr in ibufpp
-inline void funcs(const char ** const ibufpp, int *first_addr, int *second_addr){
+inline void funcs(const char ** const ibufpp, const char *filename, int *first_addr, int *second_addr){
    //char* ctags_extension = calloc(100);
-     const char* filename = get_filename(ibufpp);
+//     const char* filename = get_filename(ibufpp);
     printf(filename);
 //TODO: calloc needs to be static bytes for ctags -x + dynamic filename
 //   strcat(ctags_extension, "ctags -x ");

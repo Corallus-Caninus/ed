@@ -18,6 +18,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "ed.h"
 #include <stddef.h>
 #include <errno.h>
 #include <sys/types.h>
@@ -26,7 +27,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ed.h"
 
 
 static regex_t * global_pat = 0;

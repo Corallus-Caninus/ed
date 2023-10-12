@@ -22,7 +22,8 @@
     (eg, bug) which caused ed to panic.
 */
 /*
- * CREDITS
+ * CRED
+ #define EDITS
  *
  *      This program is based on the editor algorithm described in
  *      Brian W. Kernighan and P. J. Plauger's book "Software Tools
@@ -33,6 +34,7 @@
  *
  */
 
+#include "ed.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,7 +42,6 @@
 #include <locale.h>
 
 #include "carg_parser.h"
-#include "ed.h"
 
 
 static const char * const Program_name = "GNU Ed";

@@ -26,6 +26,7 @@
     Public License.
 */
 
+#include "ed.h"
 #include <stdlib.h>
 #include <string.h>
 

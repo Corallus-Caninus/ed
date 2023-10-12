@@ -17,6 +17,7 @@ srctrigger=ed.h
 LC_ALL=C
 export LC_ALL
 srcdir=
+#extdir=./extensions
 prefix=/usr/local
 exec_prefix='$(prefix)'
 bindir='$(exec_prefix)/bin'
@@ -95,7 +96,7 @@ done
 # Find the source files, if location was not specified.
 srcdirtext=
 if [ -z "${srcdir}" ] ; then
-	srcdirtext="or . or .." ; srcdir=.
+	srcdirtext="or . or .."; srcdir=.
 	if [ ! -r "${srcdir}/${srctrigger}" ] ; then srcdir=.. ; fi
 	if [ ! -r "${srcdir}/${srctrigger}" ] ; then
 		## the sed command below emulates the dirname command

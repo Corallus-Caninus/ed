@@ -18,6 +18,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "ed.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -27,7 +28,6 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 
-#include "ed.h"
 
 
 static int current_addr_ = 0;	/* current address in editor buffer */
