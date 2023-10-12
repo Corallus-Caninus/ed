@@ -1,25 +1,25 @@
 #include <string.h>
-//TODO: calling this commands is a bit confusing given the info file. consider "mods" or "extensions"
+//TODO: calling this extensions is a bit confusing given the info file. consider "mods" or "extensions"
 //TODO: extract to config? this should be automated but if manually entered it should be extracted.
-#define  NUM_COMMANDS 1+1 //TODO: is this correct? could this be 1?
+#define  NUM_EXTENSIONS 1+1 //TODO: is this correct? could this be 1?
 
 //extern void get_filename (const char **const ibufpp);
 
-/* COMMAND PROTOTPYES */
+/* EXTENSION PROTOTPYES */
 void test_print (int *, int *);
 void funcs(const char **, int*, int*);
-// END OF COMMAND PROTOTYPES //
+// END OF EXTENSION PROTOTYPES //
 
 /* CALL TABLE */
-static const char *commands_s[] =
+static const char *extensions_s[] =
 {
 	"test_print\n",
 	"funcs\n",
 };
 
-/* JUMP TABLE COMMAND ENUMERATION */
-// These are ordered exactly as in commands_s
-static const enum Command
+/* JUMP TABLE EXTENSION ENUMERATION */
+// These are ordered exactly as in extensions_s
+static const enum Extension
 {
   TEST_PRINT=1, // start at 1 so 0 is default "not found" in switch statement
   FUNCS,
@@ -27,24 +27,25 @@ static const enum Command
 
 /* PARSER */
 //TODO: ibufpp might be pass by value here, if so just pass by reference
-int parse_command (const char ** const ibufpp, int *first_addr, int *second_addr)
+//Extensions should have argument format: inline int EXTENSION_NAME(const char ** const ibufpp, int *first_addr, int *second_addr, char* args)
+int parse_extension (const char ** const ibufpp, int *first_addr, int *second_addr)
 {
   printf ("%s %i, %i \n", ibufpp, *first_addr, *second_addr);	//TODO: remove after testing
 
-  //find the command enum from the call table given the ibufpp 
-  int command_index=0;
-  enum Command command_select;
-  for (int i=1; i<NUM_COMMANDS; i++)
+  //find the extension enum from the call table given the ibufpp 
+  int extension_index=0;
+  enum Extension extension_select;
+  for (int i=1; i<NUM_EXTENSIONS; i++)
     {
-	if(strcmp(commands_s[i-1],ibufpp)==0){
-		command_index=i;
+	if(strcmp(extensions_s[i-1],*ibufpp)==0){
+		extension_index=i;
 	break;
 	}
     }
-    command_select = (enum Command) command_index;
+    extension_select = (enum Extension) extension_index;
 
-  //call the command given the selection, this can be used for error handling and data preperation as in main_loop.c enum
-  switch (command_select)
+  //call the extension given the selection, this can be used for error handling and data preperation as in main_loop.c enum
+  switch (extension_select)
     {
     case TEST_PRINT:
 	test_print(&first_addr,&second_addr);
@@ -53,12 +54,12 @@ int parse_command (const char ** const ibufpp, int *first_addr, int *second_addr
 	funcs(&ibufpp, &first_addr, &second_addr);
         break;
     default:
-      printf ("command not found..\n");
+      printf ("extension not found..\n");
     }
   return 0;			//TODO: error codes with breaks
 }
 
-/* BEGIN COMMAND DECLARATIONS */
+/* BEGIN EXTENSION DECLARATIONS */
 
 inline void test_print(int *first_addr, int *second_addr){
 	printf("inside test_print!\n");
@@ -66,12 +67,12 @@ inline void test_print(int *first_addr, int *second_addr){
 
 //uses ctags c library to list all funcs from first_addr to second_addr in ibufpp
 inline void funcs(const char ** const ibufpp, int *first_addr, int *second_addr){
-   //char* ctags_command = calloc(100);
+   //char* ctags_extension = calloc(100);
      const char* filename = get_filename(ibufpp);
     printf(filename);
 //TODO: calloc needs to be static bytes for ctags -x + dynamic filename
-//   strcat(ctags_command, "ctags -x ");
-   //ctags_command -x $cur_filename
+//   strcat(ctags_extension, "ctags -x ");
+   //ctags_extension -x $cur_filename
 }
 
 //TODO: //ask a chatbot via curl or local algorithm the given prompt, with context from first_addr to second_addr and insert the response into ibufpp at current address
