@@ -31,12 +31,12 @@ static const enum Extension
 //TODO: pass in filename here
 int parse_extension (const char ** const ibufpp, const char* filename, int *first_addr, int *second_addr)
 {
-  printf ("%s %i, %i \n", ibufpp, *first_addr, *second_addr);	//TODO: remove after testing
+  printf ("%s %i, %i \n", *ibufpp, *first_addr, *second_addr);	//TODO: remove after testing
 
   //find the extension enum from the call table given the ibufpp 
   int extension_index=0;
   enum Extension extension_select;
-  for (int i=1; i<NUM_EXTENSIONS; i++)
+  for (int i=1; i<=NUM_EXTENSIONS; i++)
     {
 	if(strcmp(extensions_s[i-1],*ibufpp)==0){
 		extension_index=i;
@@ -52,7 +52,7 @@ int parse_extension (const char ** const ibufpp, const char* filename, int *firs
 	test_print(&first_addr,&second_addr);
          break;
     case FUNCS:
-	funcs(&ibufpp, &filename, &first_addr, &second_addr);
+	funcs(&ibufpp, filename, &first_addr, &second_addr);
         break;
     default:
       printf ("extension not found..\n");
@@ -70,6 +70,7 @@ inline void test_print(int *first_addr, int *second_addr){
 inline void funcs(const char ** const ibufpp, const char *filename, int *first_addr, int *second_addr){
    //char* ctags_extension = calloc(100);
 //     const char* filename = get_filename(ibufpp);
+printf("inside funcs\n");
     printf(filename);
 //TODO: calloc needs to be static bytes for ctags -x + dynamic filename
 //   strcat(ctags_extension, "ctags -x ");

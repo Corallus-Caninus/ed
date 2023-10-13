@@ -643,6 +643,19 @@ exec_command (const char **const ibufpp, const int prev_status,
 //TODO: ensure ~ here doesnt break order of operations for parser
 //TODO: test this unexpected address sanitizer ensure this doesnt cause problems for rest of cases.
     case '~':
+//const char* tmp_ibufpp;
+//strcpy(tmp_ibufpp, *ibufpp);
+//fnp = get_filename (tmp_ibufpp);
+//if (!fnp)
+//	return ERR;
+//      if (fnp[0] == '!')
+//	{
+//	  set_error_msg ("Invalid redirection");
+//	  return ERR;
+//	}
+//      if (fnp[0])
+//	set_def_filename (fnp);
+fnp = def_filename;
       //TODO: handle the proper idiomatic address etc errors
       //TODO: ibufpp should pass pointer to c str by value here but look for immutable errors here otherwise
       parse_extension (ibufpp, fnp, &first_addr, &second_addr);
