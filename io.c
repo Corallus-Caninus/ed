@@ -23,8 +23,6 @@
 #include <stdio.h>
 #include <string.h>
 
-
-
 /* print text to stdout */
 static void put_tty_line( const char * p, int len, const int gflags )
   {
@@ -32,8 +30,10 @@ static void put_tty_line( const char * p, int len, const int gflags )
   const char escchars[] = "abfnrtv\\";
   int col = 0;
 
-  if( gflags & GNP ) { printf( "%d\t", current_addr() ); col = 8; }
+  //TODO: shim in a pretty printer either here or in display_lines
+  if( !(gflags & GPR || gflags & GLS) ) { printf( "%d\t", current_addr() ); col = 8; }
   while( --len >= 0 )
+    //TODO: may be a bug lookout for kat syntax highlighting
     {
     const unsigned char ch = *p++;
     if( !( gflags & GLS ) ) putchar( ch );
@@ -70,10 +70,10 @@ bool display_lines( int from, const int to, const int gflags )
   if( !from ) { set_error_msg( "Invalid address" ); return false; }
   while( bp != ep )
     {
+    //TODO: check for GPR and default conditions TODO test
     const char * const s = get_sbuf_line( bp );
     if( !s ) return false;
     set_current_addr( from++ );
-    //TODO: shim in a pretty printer
     put_tty_line( s, bp->len, gflags );
     bp = bp->q_forw;
     }
