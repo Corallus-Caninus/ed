@@ -612,24 +612,17 @@ command_s (const char **const ibufpp, int *const gflagsp,
 
 
 //NOTE: skeleton
-static bool exec_global (const char **const ibufpp, char **const ibufpp_prev, const int gflags,
-			 const bool interactive);
+static bool exec_global (const char **const ibufpp,
+			 const int gflags, const bool interactive);
 
 /* execute the next command in command buffer; return error status */
 static int
-exec_command (const char **const ibufpp, char **const ibufpp_prev, const int prev_status,
-	      const bool isglobal)
+exec_command (const char **const ibufpp,
+	      const int prev_status, const bool isglobal)
 {
   const char *fnp;
   int gflags = 0;
   int addr, c, n;
-   char * ibufpp_preserve = NULL;
-
-//TODO: this could be a data structure of linked lists, possibly in main function. think of how this can be made more efficent
-if(strlen(*ibufpp) > 1){
-     ibufpp_preserve = realloc(ibufpp_preserve,(1+strlen(*ibufpp)) * sizeof(char));
-     strcpy(ibufpp_preserve,*ibufpp);
-} 
 
   const int addr_cnt = extract_addr_range (ibufpp);
   if (addr_cnt < 0)
@@ -638,15 +631,12 @@ if(strlen(*ibufpp) > 1){
   c = *(*ibufpp)++;
   switch (c)
     {
-//TODO: add simple features like a macro system for storing commands that can be executed with string substitution
-//TODO: allow ed to manage reading in multiple files as one large **line_t
 //TODO: need a organized way to add commands in the form of c functions. essentially allow commands to be longer than one  character and create a directory to hold extensions/mods. ensure this is idiomatic.
 //TODO: extensions dont allow command list, we need to ensure were doing everything idiomatically
     case '`':
       fnp = def_filename;
       //TODO: handle the proper idiomatic address etc errors
-      //TODO: ibufpp should pass pointer to c str by value here but look for immutable errors here otherwise
-	printf("parsing extensions");	   
+      printf ("parsing extensions");
       parse_extension (ibufpp, fnp, &first_addr, &second_addr);
       break;
     case 'a':
@@ -736,7 +726,7 @@ if(strlen(*ibufpp) > 1){
 	return ERR;
       n = (c == 'G' || c == 'V');	/* interactive */
       if ((n && !get_command_suffix (ibufpp, &gflags)) ||
-	  !exec_global (ibufpp, ibufpp_prev, gflags, n))
+	  !exec_global (ibufpp, gflags, n))
 	return ERR;
       break;
     case 'h':
@@ -860,7 +850,6 @@ if(strlen(*ibufpp) > 1){
       if (!copy_lines (first_addr, second_addr, addr))
 	return ERR;
       break;
-      //TODO: also need a redo with doubly linked list possibly.
     case 'u':
       if (unexpected_address (addr_cnt) ||
 	  !get_command_suffix (ibufpp, &gflags) || !undo (isglobal))
@@ -956,21 +945,12 @@ if(strlen(*ibufpp) > 1){
 	printf ("!\n");
       break;
     case '\n':
-//exec_command (const char **const ibufpp, char **const ibufpp_prev, const int prev_status,
-//	      const bool isglobal)
-
-//TODO: set ibufpp to prev and pass prev correctly here as null again after free
-*ibufpp = *ibufpp_prev;
-exec_command(ibufpp, ibufpp_prev, prev_status, isglobal);
-//TODO: we need this too also to preserve address, just run last cmd instead of display_lines
-//    //TODO: get this to repeat the last command while still allowing regex fast search logic as an address
-//      first_addr = 1;
-//      if (!check_addr_range (first_addr, current_addr () +
-//			     (traditional () || !isglobal), addr_cnt) ||
-//	  !display_lines (second_addr, second_addr, 0))
-//	return ERR;
-
-     return 0;
+      first_addr = 1;
+      if (!check_addr_range
+	  (first_addr, current_addr () + (traditional () || !isglobal),
+	   addr_cnt) || !display_lines (second_addr, second_addr, 0))
+	return ERR;
+      return 0;
       break;
     case '#':
       while (*(*ibufpp)++ != '\n');
@@ -982,12 +962,6 @@ exec_command(ibufpp, ibufpp_prev, prev_status, isglobal);
   if (gflags && !display_lines (current_addr (), current_addr (), gflags))
     return ERR;
 
-// stash the previous command in command history
-if(ibufpp_preserve != NULL &&strlen(ibufpp_preserve) > 1){
-     *ibufpp_prev = realloc(*ibufpp_prev,(1+strlen(ibufpp_preserve)) * sizeof(char));
-     strcpy(*ibufpp_prev,ibufpp_preserve);
-}
-//TODO: free preserve
   return 0;
 }
 
@@ -995,8 +969,8 @@ if(ibufpp_preserve != NULL &&strlen(ibufpp_preserve) > 1){
 /* apply command list in the command buffer to the active lines in a
    range; return false if error */
 static bool
-exec_global (const char **const ibufpp, char **const ibufpp_prev, const int gflags,
-	     const bool interactive)
+exec_global (const char **const ibufpp,
+	     const int gflags, const bool interactive)
 {
   static char *buf = 0;
   static int bufsz = 0;
@@ -1061,21 +1035,22 @@ exec_global (const char **const ibufpp, char **const ibufpp_prev, const int gfla
 	}
       *ibufpp = cmd;
       while (**ibufpp)
-	if (exec_command (ibufpp, ibufpp_prev, 0, true) < 0)
+	if (exec_command (ibufpp, 0, true) < 0)
 	  return false;
     }
   return true;
 }
 
 
-//TODO: store previous command history (start with just one for repeat last command feature)
 //TODO: free routine on exit for ibufp_prev and maybe ibufp, not really necessary since Im pretty sure they leak and let linux process free but I'd like to free correctly with a valgrind check
+//TODO: add simple features like a macro system for storing commands that can be executed with string substitution
+//TODO: allow ed to manage reading in multiple files as one large **line_t
 int
 main_loop (const bool loose)
 {
   extern jmp_buf jmp_state;
-  const char *ibufp;		/* pointer to command buffer */
-  const char *ibufp_prev = NULL;		/* pointer to previous command buffer */
+  const char *ibufp = NULL;	/* pointer to command buffer */
+  const char *ibufp_prev = NULL;	/* pointer to previous command buffer */
   volatile int err_status = 0;	/* program exit status */
   volatile int linenum = 0;	/* script line number */
   int len, status;
@@ -1130,9 +1105,20 @@ main_loop (const bool loose)
 	  status = ERR;
 	  continue;
 	}
+      ++linenum;
+      //if only a newline, repeat last command.
+      if (len == 1)
+	{
+	  ibufp = ibufp_prev;
+	  status = exec_command (&ibufp, status, false);
+	}
       else
-	++linenum;
-      status = exec_command (&ibufp, &ibufp_prev, status, false);
+	{
+	  ibufp_prev =
+	    realloc (ibufp_prev, (1 + strlen (ibufp)) * sizeof (char));
+	  strcpy (ibufp_prev, ibufp);
+	  status = exec_command (&ibufp, status, false);
+	}
       if (status == 0)
 	continue;
       if (status == QUIT)
