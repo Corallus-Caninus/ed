@@ -636,7 +636,6 @@ exec_command (const char **const ibufpp,
     case '`':
       fnp = def_filename;
       //TODO: handle the proper idiomatic address etc errors
-      printf ("parsing extensions");
       parse_extension (ibufpp, fnp, &first_addr, &second_addr);
       break;
     case 'a':
@@ -1053,7 +1052,7 @@ main_loop (const bool loose)
   const char *ibufp_prev = NULL;	/* pointer to previous command buffer */
   volatile int err_status = 0;	/* program exit status */
   volatile int linenum = 0;	/* script line number */
-  int len, status;
+  int len, status = 0;
 
   disable_interrupts ();
   set_signals ();
