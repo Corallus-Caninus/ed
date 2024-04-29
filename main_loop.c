@@ -632,7 +632,7 @@ exec_command (const char **const ibufpp,
   switch (c)
     {
 //TODO: need a organized way to add commands in the form of c functions. essentially allow commands to be longer than one  character and create a directory to hold extensions/mods. ensure this is idiomatic.
-//TODO: extensions dont allow command list, we need to ensure were doing everything idiomatically
+//TODO: extensions dont allow command list, we need to ensure were doing everything idiomatically we need all the features such as writting the output in extensions
     case '`':
       fnp = def_filename;
       //TODO: handle the proper idiomatic address etc errors
@@ -1047,6 +1047,9 @@ exec_global (const char **const ibufpp,
 int
 main_loop (const bool loose)
 {
+//TODO: store macros here for templating ibufp commands, this will solve a lot of repetition.
+char *theme_file = NULL;
+highlight_init(theme_file);
   extern jmp_buf jmp_state;
   const char *ibufp = NULL;	/* pointer to command buffer */
   const char *ibufp_prev = NULL;	/* pointer to previous command buffer */
