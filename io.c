@@ -29,56 +29,54 @@
 //TODO: need to highlight_init in main.c
 //TODO: need to alloc, kat has bugz
 static void
-//put_tty_line (const char *p, int len, const int gflags)
-put_tty_line (char *p, int len, const int gflags)
+put_tty_line (const char *p, int len, const int gflags)
+//put_tty_line (char *p, int len, const int gflags)
 {
   const char escapes[] = "\a\b\f\n\r\t\v\\";
   const char escchars[] = "abfnrtv\\";
   int col = 0;
-      char *highlighted = NULL;
-//      char *highlight_theme = NULL;
-//      highlight_init (highlight_theme);
-//TODO: make this leaner
-highlighted = highlight_alloc_line();
-      p = highlight_line (p, highlighted, (size_t) len);
+  char *highlighted = NULL;
+  //TODO: make this leaner
+  highlighted = highlight_alloc_line ();
+  highlighted = highlight_line (p, highlighted, (size_t) len);
 
   if (!(gflags & GPR || gflags & GLS))
     {
       printf ("%d\t", current_addr ());
       col = 8;
     }
-printf(p);
+  printf (highlighted);
 //TODO: read this, understand it and put back the l print feature for printing escape tokens
 //  while (--len >= 0)
 //    {
 //      const unsigned char ch = *p++;
 //      if (!(gflags & GLS))
-//	putchar (ch);
+//      putchar (ch);
 //      else
-//	{
-//	  if (++col > window_columns ())
-//	    {
-//	      col = 1;
-//	      fputs ("\\\n", stdout);
-//	    }
-//	  if (ch >= 32 && ch <= 126 && ch != '\\')
-//	    putchar (ch);
-//	  else
-//	    {
-//	      char *const p = strchr (escapes, ch);
-//	      ++col;
-//	      putchar ('\\');
-//	      if (ch && p)
-//		putchar (escchars[p - escapes]);
-//	      else
-//		{
-//		  col += 2;
-//		  putchar (((ch >> 6) & 7) + '0');
-//		  putchar (((ch >> 3) & 7) + '0');
-//		  putchar ((ch & 7) + '0');
-//		}
-//	    }
-//	}
+//      {
+//        if (++col > window_columns ())
+//          {
+//            col = 1;
+//            fputs ("\\\n", stdout);
+//          }
+//        if (ch >= 32 && ch <= 126 && ch != '\\')
+//          putchar (ch);
+//        else
+//          {
+//            char *const p = strchr (escapes, ch);
+//            ++col;
+//            putchar ('\\');
+//            if (ch && p)
+//              putchar (escchars[p - escapes]);
+//            else
+//              {
+//                col += 2;
+//                putchar (((ch >> 6) & 7) + '0');
+//                putchar (((ch >> 3) & 7) + '0');
+//                putchar ((ch & 7) + '0');
+//              }
+//          }
+//      }
 //    }
 //  if (!traditional () && (gflags & GLS))
 //    putchar ('$');
