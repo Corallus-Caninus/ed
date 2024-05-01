@@ -30,6 +30,9 @@
 
 enum Status
 { QUIT = -1, ERR = -2, EMOD = -3, FATAL = -4 };
+//TODO: implement to differentiate returns from address parser.
+enum Parse_Signal
+{ ERR=-2,TUPLE=-1};
 
 //TODO: remove all warnings generated from gcc since we are standardizing on this compiler
 static char def_filename[FILENAME_SIZE] = "";	/* default filename */
@@ -71,11 +74,12 @@ set_verbose (void)
 }
 
 
+//TODO: allow this to store second addresses so 'x can be linenum or tuple of linenum
 static const line_t *mark[LINE_MARKER_LENGTH];	/* line markers */
 static int markno;		/* line marker count */
 
 static bool
-mark_line_node (const line_t * const lp, int c)
+mark_line_node (const line_t *const lp, int c)
 {
   c -= 'a';
   if (c < 0 || c >= 26)
@@ -91,7 +95,7 @@ mark_line_node (const line_t * const lp, int c)
 
 
 void
-unmark_line_node (const line_t * const lp)
+unmark_line_node (const line_t *const lp)
 {
   int i;
   for (i = 0; markno && i < 26; ++i)
@@ -276,23 +280,23 @@ next_addr (const char **const ibufpp, int *const addr_cnt)
 	  if (!first)
 	    {
 	      invalid_address ();
-	      return -2;
+	      return -3;
 	    };
 	  if (!parse_int (&addr, *ibufpp, ibufpp))
-	    return -2;
+	    return -3;
 	}
       else
 	switch (ch)
 	  {
 	  case '+':
 	  case '\t':
-	  case ' ':
+//        case ' ':
 	  case '-':
 	    *ibufpp = skip_blanks (++*ibufpp);
 	    if (isdigit ((unsigned char) **ibufpp))
 	      {
 		if (!parse_int (&n, *ibufpp, ibufpp))
-		  return -2;
+		  return -3;
 		addr += ((ch == '-') ? -n : n);
 	      }
 	    else if (ch == '+')
@@ -305,7 +309,7 @@ next_addr (const char **const ibufpp, int *const addr_cnt)
 	    if (!first)
 	      {
 		invalid_address ();
-		return -2;
+		return -3;
 	      };
 	    ++*ibufpp;
 	    addr = ((ch == '.') ? current_addr () : last_addr ());
@@ -315,11 +319,11 @@ next_addr (const char **const ibufpp, int *const addr_cnt)
 	    if (!first)
 	      {
 		invalid_address ();
-		return -2;
+		return -3;
 	      };
 	    addr = next_matching_node_addr (ibufpp, true);
 	    if (addr < 0)
-	      return -2;
+	      return -3;
 	    if (ch == **ibufpp)
 	      ++ * ibufpp;
 	    break;
@@ -328,25 +332,28 @@ next_addr (const char **const ibufpp, int *const addr_cnt)
 	    if (!first)
 	      {
 		invalid_address ();
-		return -2;
+		return -3;
 	      };
 	    addr = next_matching_node_addr (ibufpp, false);
 	    if (addr < 0)
-	      return -2;
+	      return -3;
 	    if (ch == **ibufpp)
 	      ++ * ibufpp;
 	    break;
+//TODO: move this to extract_addr_range
 	  case '\'':
-	    if (!first)
-	      {
-		invalid_address ();
-		return -2;
-	      };
+//          if (!first)
+//            {
+//              invalid_address ();
+//              return -3;
+//            };
 	    ++*ibufpp;
-	    addr = get_marked_node_addr (*(*ibufpp)++);
-	    if (addr < 0)
-	      return -2;
-	    break;
+//          addr = get_marked_node_addr (*(*ibufpp)++);
+//          if (addr < 0)
+//            return -3;
+//TODO: these error sigs should really be an enum..
+	    return -1;		//signal that we are parsing a tuple, not a single address multiple times
+//          break;
 	  case '%':
 	  case ',':
 	  case ';':
@@ -360,11 +367,11 @@ next_addr (const char **const ibufpp, int *const addr_cnt)
 	      }			/* FALL THROUGH */
 	  default:
 	    if (*ibufpp == s)
-	      return -1;	/* EOF */
+	      return -2;	/* EOF */
 	    if (addr < 0 || addr > last_addr ())
 	      {
 		invalid_address ();
-		return -2;
+		return -3;
 	      }
 	    ++*addr_cnt;
 	    return addr;
@@ -386,11 +393,42 @@ extract_addr_range (const char **const ibufpp)
   while (true)
     {
       addr = next_addr (ibufpp, &addr_cnt);
-      if (addr < 0)
+      if (addr < -1)
 	break;
+      //parse address tuple
+      else if (addr == -1)
+	{
+//TODO: parse a markno tuple
+//TODO: make this support more features like literal addressing etc, also shouldnt need 'n' for print default
+//TODO: refactor for control flow and concise
+	  addr = get_marked_node_addr (*(*ibufpp)++);
+	  if (addr < 0)
+	    {
+	      return -2;
+	    }
+	  else
+	    {
+	      first_addr = second_addr;
+	      second_addr = addr;
+	      addr_cnt++;
+	      addr = get_marked_node_addr (*(*ibufpp)++);
+	      if (addr < 0)
+		{
+		  return addr_cnt;
+		}
+	      else
+		{
+		  first_addr = second_addr;
+		  second_addr = addr;
+		  addr_cnt++;
+		  return (addr_cnt);
+		}
+	    }
+	}
+//TODO: END OF PARSE MARKNO TUPLE
       first_addr = second_addr;
       second_addr = addr;
-      if (**ibufpp != ',' && **ibufpp != ';')
+      if (**ibufpp != ',' && **ibufpp != ';' && **ibufpp != ' ')
 	break;
       if (**ibufpp == ';')
 	set_current_addr (addr);
@@ -398,7 +436,7 @@ extract_addr_range (const char **const ibufpp)
     }
   if (addr_cnt == 1 || second_addr != addr)
     first_addr = second_addr;
-  return ((addr != -2) ? addr_cnt : -1);
+  return ((addr != -3) ? addr_cnt : -2);
 }
 
 
@@ -1048,8 +1086,8 @@ int
 main_loop (const bool loose)
 {
 //TODO: store macros here for templating ibufp commands, this will solve a lot of repetition.
-char *theme_file = NULL;
-highlight_init(theme_file);
+  char *theme_file = NULL;
+  highlight_init (theme_file);
   extern jmp_buf jmp_state;
   const char *ibufp = NULL;	/* pointer to command buffer */
   const char *ibufp_prev = NULL;	/* pointer to previous command buffer */
