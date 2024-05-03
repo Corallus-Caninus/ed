@@ -31,8 +31,8 @@
 enum Status
 { QUIT = -1, ERR = -2, EMOD = -3, FATAL = -4 };
 //TODO: implement to differentiate returns from address parser.
-enum Parse_Signal
-{ ERR=-2,TUPLE=-1};
+//enum Parse_Signal
+//{ ERR=-2,TUPLE=-1};
 
 //TODO: remove all warnings generated from gcc since we are standardizing on this compiler
 static char def_filename[FILENAME_SIZE] = "";	/* default filename */
@@ -1088,6 +1088,7 @@ main_loop (const bool loose)
 //TODO: store macros here for templating ibufp commands, this will solve a lot of repetition.
   char *theme_file = NULL;
   highlight_init (theme_file);
+//TODO: also initialize a line for the highlighter since we may not be getting correct highlight state given highlighter errors
   extern jmp_buf jmp_state;
   const char *ibufp = NULL;	/* pointer to command buffer */
   const char *ibufp_prev = NULL;	/* pointer to previous command buffer */

@@ -19,7 +19,7 @@ mandir = $(datarootdir)/man
 program_prefix = 
 CC = gcc
 CPPFLAGS = 
-CFLAGS = -I./kat/ -I./kat/include -g
+CFLAGS = -Wall -W -g
 LDFLAGS = 
 
 DISTNAME = $(pkgname)-$(pkgversion)
@@ -32,7 +32,8 @@ SHELL = /bin/sh
 
 objs = buffer.o carg_parser.o global.o io.o \
        main.o main_loop.o regex.o signal.o \
-kat/highlight.o kat/hashtable.o
+kat/highlight.o kat/hashtable.o 
+#TODO: build kat too when building this, should be able to use as a submodule and the build file should still be valid
 
 
 .PHONY : all install install-bin install-info install-man install-strip \
@@ -60,6 +61,7 @@ main.o : main.c
 $(objs)       : Makefile ed.h
 carg_parser.o : carg_parser.h
 main.o        : carg_parser.h
+#io.o : kat/include/highlight.h
 #TODO: this requires kat already built, at least trigger the kat build command before this makefile
 
 

@@ -19,6 +19,7 @@
 */
 
 
+#include <stddef.h>
 #ifndef __cplusplus
 enum Bool { false = 0, true = 1 };
 typedef enum Bool bool;
@@ -33,7 +34,6 @@ enum Gflags
   GSG = 0x10			/* global substitute */
   };
 
-
 typedef struct line		/* Line node */
   {
   struct line * q_forw;
@@ -42,6 +42,7 @@ typedef struct line		/* Line node */
   int len;			/* length of line */
   }
 line_t;
+
 
 
 typedef struct
@@ -156,3 +157,8 @@ int window_lines( void );
 
 /* defined in extensions/extension_parser.c */
 int parse_extension(const char ** const, const char*, int*, int*);
+
+/* defined in kat */
+void highlight_init(const char*);
+char* highlight_alloc_line(void);
+char* highlight_line(const char*, char*, size_t);
