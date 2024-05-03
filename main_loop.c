@@ -42,6 +42,8 @@ static int first_addr = 0, second_addr = 0;
 static bool prompt_on = false;	/* if set, show command prompt */
 static bool verbose = false;	/* if set, print all error messages */
 
+//static const char* sharpie = "";
+
 
 void
 set_def_filename (const char *const s)
@@ -1088,6 +1090,7 @@ main_loop (const bool loose)
 //TODO: store macros here for templating ibufp commands, this will solve a lot of repetition.
   char *theme_file = NULL;
   highlight_init (theme_file);
+sharpie_alloc();
 //TODO: also initialize a line for the highlighter since we may not be getting correct highlight state given highlighter errors
   extern jmp_buf jmp_state;
   const char *ibufp = NULL;	/* pointer to command buffer */

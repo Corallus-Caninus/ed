@@ -23,29 +23,32 @@
 #include <stdio.h>
 #include <string.h>
 //TODO: why do we get a bad return from highlight_line if this isnt included but highlight.c is linked?
-#include "kat/include/highlight.h"
+
+static const char *sharpie = "";
+void
+sharpie_alloc ()
+{
+  sharpie = highlight_alloc_line ();
+}
 
 /* print text to stdout */
 //TODO: need to highlight_init in main.c
 //TODO: need to alloc, kat has bugz
 static void
 put_tty_line (const char *p, int len, const int gflags)
-//put_tty_line (char *p, int len, const int gflags)
 {
-  const char escapes[] = "\a\b\f\n\r\t\v\\";
-  const char escchars[] = "abfnrtv\\";
+  const char escapes[] = "\a\b\f\n\r\t\v\\";	//" TODO: fix this escapo in kat
+  const char escchars[] = "abfnrtv\\";	//"
   int col = 0;
-  char *highlighted = NULL;
-  //TODO: make this leaner
-  highlighted = highlight_alloc_line ();
-  highlighted = highlight_line (p, highlighted, (size_t) len);
+  //TODO: make this leaner move this allocation into main_loop, probably just global space but try to be idiomatic with the ed project.
+  sharpie = highlight_line (p, sharpie, (size_t) len);
 
   if (!(gflags & GPR || gflags & GLS))
     {
       printf ("%d\t", current_addr ());
       col = 8;
     }
-  printf (highlighted);
+  puts (sharpie);
 //TODO: read this, understand it and put back the l print feature for printing escape tokens
 //  while (--len >= 0)
 //    {
@@ -80,7 +83,7 @@ put_tty_line (const char *p, int len, const int gflags)
 //    }
 //  if (!traditional () && (gflags & GLS))
 //    putchar ('$');
-  putchar ('\n');
+//  putchar ('\n');
 }
 
 
