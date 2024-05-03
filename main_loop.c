@@ -28,6 +28,7 @@
 #include "extensions/extension_parser.c"
 
 
+//TODO: shift this error by 1 and add -1 as a parse signal?Need to update all usage of -1 -2 etc outside the parser too
 enum Status
 { QUIT = -1, ERR = -2, EMOD = -3, FATAL = -4 };
 //TODO: implement to differentiate returns from address parser.
@@ -401,8 +402,7 @@ extract_addr_range(const char **const ibufpp)
       else if (addr == -1)
 	{
 //TODO: parse a markno tuple
-//TODO: make this support more features like literal addressing etc, also shouldnt need 'n' for print default
-//TODO: in exec_command, if an address is given print all lines not the last
+//TODO: put back the original feature and only parse tuples here by eagerly checking in next_addr for second_addr and signaling accordingly
 //TODO: refactor for control flow and concise
 	  addr = get_marked_node_addr(*(*ibufpp)++);
 	  if (addr < 0)
@@ -417,6 +417,10 @@ extract_addr_range(const char **const ibufpp)
 	      addr = get_marked_node_addr(*(*ibufpp)++);
 	      if (addr < 0)
 		{
+//TODO: this isnt correct, not newlining like next_addr
+		  first_addr = second_addr;
+//TODO: this is SLOPPY
+		  (*(*ibufpp)--);
 		  return addr_cnt;
 		}
 	      else
