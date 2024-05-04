@@ -31,9 +31,8 @@
 //TODO: shift this error by 1 and add -1 as a parse signal?Need to update all usage of -1 -2 etc outside the parser too
 enum Status
 { QUIT = -1, ERR = -2, EMOD = -3, FATAL = -4 };
-//TODO: implement to differentiate returns from address parser.
-//enum Parse_Signal
-//{ ERR=-2,TUPLE=-1};
+//TODO: regex all the prior enums and implement this
+//{ DONE = -1, QUIT = -2, ERR = -3, EMOD = -4, FATAL = -5 };
 
 //TODO: remove all warnings generated from gcc since we are standardizing on this compiler
 static char def_filename[FILENAME_SIZE] = "";	/* default filename */
@@ -43,7 +42,6 @@ static int first_addr = 0, second_addr = 0;
 static bool prompt_on = false;	/* if set, show command prompt */
 static bool verbose = false;	/* if set, print all error messages */
 
-//static const char* sharpie = "";
 
 
 void
@@ -267,6 +265,7 @@ invalid_address(void)
 
 
 /* return the next line address in the command buffer */
+//TODO: add ENUM here once adding the parsers signal feature
 static int
 next_addr(const char **const ibufpp, int *const addr_cnt)
 {
@@ -343,20 +342,32 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	    if (ch == **ibufpp)
 	      ++ * ibufpp;
 	    break;
-//TODO: move this to extract_addr_range
 	  case '\'':
-//          if (!first)
-//            {
-//              invalid_address ();
-//              return -3;
-//            };
+	    if (!first)
+	      {
+		invalid_address();
+		return -3;
+	      };
 	    ++*ibufpp;
-//          addr = get_marked_node_addr (*(*ibufpp)++);
-//          if (addr < 0)
-//            return -3;
-//TODO: these error sigs should really be an enum..
-	    return -1;		//signal that we are parsing a tuple, not a single address multiple times
-//          break;
+	    addr = get_marked_node_addr(*(*ibufpp)++);
+           //check eagerly for a second address markno
+	    int is_second = get_marked_node_addr(*(*ibufpp)++);
+	    if (is_second < 0)
+	      {
+		(*(*ibufpp)--);
+	      }
+	    else
+	      {
+		first_addr = addr;
+		second_addr = is_second;
+		++*addr_cnt;
+		++*addr_cnt;
+//signal we parsed a tuple
+		return -1;
+	      }
+	    if (addr < 0)
+	      return -3;
+	    break;
 	  case '%':
 	  case ',':
 	  case ';':
@@ -397,42 +408,13 @@ extract_addr_range(const char **const ibufpp)
     {
       addr = next_addr(ibufpp, &addr_cnt);
       if (addr < -1)
-	break;
-      //parse address tuple
+	{
+	  break;
+	}
       else if (addr == -1)
 	{
-//TODO: parse a markno tuple
-//TODO: put back the original feature and only parse tuples here by eagerly checking in next_addr for second_addr and signaling accordingly
-//TODO: refactor for control flow and concise
-	  addr = get_marked_node_addr(*(*ibufpp)++);
-	  if (addr < 0)
-	    {
-	      return -2;
-	    }
-	  else
-	    {
-	      first_addr = second_addr;
-	      second_addr = addr;
-	      addr_cnt++;
-	      addr = get_marked_node_addr(*(*ibufpp)++);
-	      if (addr < 0)
-		{
-//TODO: this isnt correct, not newlining like next_addr
-		  first_addr = second_addr;
-//TODO: this is SLOPPY
-		  (*(*ibufpp)--);
-		  return addr_cnt;
-		}
-	      else
-		{
-		  first_addr = second_addr;
-		  second_addr = addr;
-		  addr_cnt++;
-		  return (addr_cnt);
-		}
-	    }
+	  return (addr_cnt);
 	}
-//TODO: END OF TODO PARSE MARKNO TUPLE
       first_addr = second_addr;
       second_addr = addr;
       if (**ibufpp != ',' && **ibufpp != ';' && **ibufpp != ' ')
