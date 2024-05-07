@@ -1,21 +1,21 @@
 /*  GNU ed - The GNU line editor.
-    Copyright (C) 1993, 1994 Andrew Moore, Talke Studio
-    Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011, 2012
-    Free Software Foundation, Inc.
+   Copyright (C) 1993, 1994 Andrew Moore, Talke Studio
+   Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011, 2012
+   Free Software Foundation, Inc.
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 #include "ed.h"
 #include <ctype.h>
@@ -32,6 +32,7 @@
 enum Status
 { QUIT = -1, ERR = -2, EMOD = -3, FATAL = -4 };
 //TODO: regex all the prior enums and implement this
+//TODO: this also needs to check all return comparisons to ensure we are <0 at least
 //{ DONE = -1, QUIT = -2, ERR = -3, EMOD = -4, FATAL = -5 };
 
 //TODO: remove all warnings generated from gcc since we are standardizing on this compiler
@@ -75,12 +76,13 @@ set_verbose(void)
 }
 
 
-//TODO: allow this to store second addresses so 'x can be linenum or tuple of linenum
+//TODO: structure this and clean this up a bit.
 static const line_t *mark[LINE_MARKER_LENGTH];	/* line markers */
+static const line_t *second_mark[LINE_MARKER_LENGTH];	/* line markers for tuple marks dependent on mark */
 static int markno;		/* line marker count */
 
 static bool
-mark_line_node(const line_t *const lp, int c)
+mark_line_node(const line_t *const lp, const line_t *const slp, int c)
 {
   c -= 'a';
   if (c < 0 || c >= 26)
@@ -91,6 +93,14 @@ mark_line_node(const line_t *const lp, int c)
   if (!mark[c])
     ++markno;
   mark[c] = lp;
+  if (lp != slp)		//is an address tuple
+    {
+      second_mark[c] = slp;
+    }
+  else
+    {
+      second_mark[c] = 0;
+    }
   return true;
 }
 
@@ -103,11 +113,12 @@ unmark_line_node(const line_t *const lp)
     if (mark[i] == lp)
       {
 	mark[i] = 0;
+	second_mark[i] = 0;
 	--markno;
       }
 }
 
-
+//TODO: return two for handling k tuples
 /* return address of a marked line */
 static int
 get_marked_node_addr(int c)
@@ -116,11 +127,23 @@ get_marked_node_addr(int c)
   if (c < 0 || c >= 26)
     {
       set_error_msg("Invalid mark character");
-      return -1;
+      return QUIT;
     }
   return get_line_node_addr(mark[c]);
 }
 
+/* return address of a secondary marked line */
+static int
+get_second_marked_node_addr(int c)
+{
+  c -= 'a';
+  if (c < 0 || c >= 26)
+    {
+      set_error_msg("Invalid mark character");
+      return QUIT;
+    }
+  return get_line_node_addr(second_mark[c]);
+}
 
 /* Return pointer to copy of shell command in the command buffer */
 static const char *
@@ -282,23 +305,23 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	  if (!first)
 	    {
 	      invalid_address();
-	      return -3;
+	      return EMOD;
 	    };
 	  if (!parse_int(&addr, *ibufpp, ibufpp))
-	    return -3;
+	    return EMOD;
 	}
       else
 	switch (ch)
 	  {
 	  case '+':
 	  case '\t':
-//        case ' ':
+	    //        case ' ':
 	  case '-':
 	    *ibufpp = skip_blanks(++*ibufpp);
 	    if (isdigit((unsigned char) **ibufpp))
 	      {
 		if (!parse_int(&n, *ibufpp, ibufpp))
-		  return -3;
+		  return EMOD;
 		addr += ((ch == '-') ? -n : n);
 	      }
 	    else if (ch == '+')
@@ -311,7 +334,7 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	    if (!first)
 	      {
 		invalid_address();
-		return -3;
+		return EMOD;
 	      };
 	    ++*ibufpp;
 	    addr = ((ch == '.') ? current_addr() : last_addr());
@@ -321,11 +344,11 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	    if (!first)
 	      {
 		invalid_address();
-		return -3;
+		return EMOD;
 	      };
 	    addr = next_matching_node_addr(ibufpp, true);
 	    if (addr < 0)
-	      return -3;
+	      return EMOD;
 	    if (ch == **ibufpp)
 	      ++ * ibufpp;
 	    break;
@@ -334,11 +357,11 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	    if (!first)
 	      {
 		invalid_address();
-		return -3;
+		return EMOD;
 	      };
 	    addr = next_matching_node_addr(ibufpp, false);
 	    if (addr < 0)
-	      return -3;
+	      return EMOD;
 	    if (ch == **ibufpp)
 	      ++ * ibufpp;
 	    break;
@@ -346,11 +369,24 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	    if (!first)
 	      {
 		invalid_address();
-		return -3;
+		return EMOD;
 	      };
 	    ++*ibufpp;
-	    addr = get_marked_node_addr(*(*ibufpp)++);
-           //check eagerly for a second address markno
+	    //Check if the markno stores a tuple or just singular line
+	    int current_char = (*(*ibufpp)++);
+	    int addr_tuple = 0;
+
+	    addr = get_marked_node_addr(current_char);
+	    addr_tuple = get_second_marked_node_addr(current_char);
+	    if (addr_tuple > 0)
+	      {
+		first_addr = addr;
+		second_addr = addr_tuple;
+		++*addr_cnt;
+		++*addr_cnt;
+		return QUIT;
+	      }
+	    //check eagerly for a second address markno
 	    int is_second = get_marked_node_addr(*(*ibufpp)++);
 	    if (is_second < 0)
 	      {
@@ -362,11 +398,11 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 		second_addr = is_second;
 		++*addr_cnt;
 		++*addr_cnt;
-//signal we parsed a tuple
-		return -1;
+		//signal we parsed a tuple
+		return QUIT;
 	      }
 	    if (addr < 0)
-	      return -3;
+	      return EMOD;
 	    break;
 	  case '%':
 	  case ',':
@@ -381,11 +417,11 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	      }			/* FALL THROUGH */
 	  default:
 	    if (*ibufpp == s)
-	      return -2;	/* EOF */
+	      return ERR;	/* EOF */
 	    if (addr < 0 || addr > last_addr())
 	      {
 		invalid_address();
-		return -3;
+		return EMOD;
 	      }
 	    ++*addr_cnt;
 	    return addr;
@@ -397,7 +433,6 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 
 /* get line addresses from the command buffer until an invalid address
    is seen. Return number of addresses read */
-static int
 extract_addr_range(const char **const ibufpp)
 {
   int addr;
@@ -411,7 +446,7 @@ extract_addr_range(const char **const ibufpp)
 	{
 	  break;
 	}
-      else if (addr == -1)
+      else if (addr == QUIT)
 	{
 	  return (addr_cnt);
 	}
@@ -489,7 +524,7 @@ get_command_suffix(const char **const ibufpp, int *const gflagsp)
   while (true)
     {
       const char ch = **ibufpp;
-//TODO: switch this up
+      //TODO: switch this up
       if (ch == 'l')
 	*gflagsp |= GLS;
       else if (ch == 'n')
@@ -657,8 +692,8 @@ exec_command(const char **const ibufpp,
   c = *(*ibufpp)++;
   switch (c)
     {
-//TODO: need a organized way to add commands in the form of c functions. essentially allow commands to be longer than one  character and create a directory to hold extensions/mods. ensure this is idiomatic.
-//TODO: extensions dont allow command list, we need to ensure were doing everything idiomatically we need all the features such as writting the output in extensions
+      //TODO: need a organized way to add commands in the form of c functions. essentially allow commands to be longer than one  character and create a directory to hold extensions/mods. ensure this is idiomatic.
+      //TODO: extensions dont allow command list, we need to ensure were doing everything idiomatically we need all the features such as writting the output in extensions
     case '`':
       fnp = def_filename;
       //TODO: handle the proper idiomatic address etc errors
@@ -790,7 +825,9 @@ exec_command(const char **const ibufpp,
 	  return ERR;
 	}
       if (!get_command_suffix(ibufpp, &gflags) ||
-	  !mark_line_node(search_line_node(second_addr), n))
+	  !mark_line_node(search_line_node(first_addr),
+			  search_line_node(second_addr), n))
+	//        !mark_line_node(search_line_node(second_addr), n))//NOTE: ORIGINAL
 	return ERR;
       break;
     case 'l':
@@ -968,7 +1005,7 @@ exec_command(const char **const ibufpp,
 	printf("!\n");
       break;
     case '\n':
-//TODO: test and debug, ensure this if propogates idiomatically like the else
+      //TODO: test and debug, ensure this if propogates idiomatically like the else
       if (first_addr != second_addr)
 	{
 	  if (!display_lines(first_addr, second_addr, 0))
@@ -1080,11 +1117,11 @@ exec_global(const char **const ibufpp,
 int
 main_loop(const bool loose)
 {
-//TODO: store macros here for templating ibufp commands, this will solve a lot of repetition.
+  //TODO: store macros here for templating ibufp commands, this will solve a lot of repetition.
   char *theme_file = NULL;
   highlight_init(theme_file);
   sharpie_alloc();
-//TODO: also initialize a line for the highlighter since we may not be getting correct highlight state given highlighter errors
+  //TODO: also initialize a line for the highlighter since we may not be getting correct highlight state given highlighter errors
   extern jmp_buf jmp_state;
   const char *ibufp = NULL;	/* pointer to command buffer */
   const char *ibufp_prev = NULL;	/* pointer to previous command buffer */
