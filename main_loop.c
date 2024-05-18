@@ -291,6 +291,7 @@ invalid_address(void)
 //TODO: add ENUM here once adding the parsers signal feature
 static int
 next_addr(const char **const ibufpp, int *const addr_cnt)
+//TODO: do we still need this?
 {
   const char *const s = *ibufpp = skip_blanks(*ibufpp);
   int addr = current_addr();
@@ -386,14 +387,11 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 		++*addr_cnt;
 		return QUIT;
 	      }
-	    //check eagerly for a second address markno
-	    int is_second = get_marked_node_addr(*(*ibufpp)++);
-	    if (is_second < 0)
+	    //check eagerly for a secod address markno
+	    int is_second = get_marked_node_addr((*(*ibufpp)));
+	    if (is_second > 0)
 	      {
-		(*(*ibufpp)--);
-	      }
-	    else
-	      {
+		(*(*ibufpp)++);
 		first_addr = addr;
 		second_addr = is_second;
 		++*addr_cnt;
@@ -692,7 +690,6 @@ exec_command(const char **const ibufpp,
   c = *(*ibufpp)++;
   switch (c)
     {
-      //TODO: need a organized way to add commands in the form of c functions. essentially allow commands to be longer than one  character and create a directory to hold extensions/mods. ensure this is idiomatic.
       //TODO: extensions dont allow command list, we need to ensure were doing everything idiomatically we need all the features such as writting the output in extensions
     case '`':
       fnp = def_filename;
