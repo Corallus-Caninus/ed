@@ -387,7 +387,7 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 		++*addr_cnt;
 		return QUIT;
 	      }
-	    //check eagerly for a secod address markno
+	    //check eagerly for a second address markno
 	    int is_second = get_marked_node_addr((*(*ibufpp)));
 	    if (is_second > 0)
 	      {
