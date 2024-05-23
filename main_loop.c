@@ -431,6 +431,7 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 
 /* get line addresses from the command buffer until an invalid address
    is seen. Return number of addresses read */
+int
 extract_addr_range(const char **const ibufpp)
 {
   int addr;
