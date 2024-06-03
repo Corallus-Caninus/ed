@@ -344,11 +344,10 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	  case '/':
 	    if (!first)
 	      {
-//		invalid_address();
-//		return EMOD;
-	    ++*addr_cnt;
-	    return addr;
-break;
+		// we are using / as an address tuple for numpad mode so kick it back to the parser
+		++*addr_cnt;
+		return addr;
+		break;
 	      };
 	    addr = next_matching_node_addr(ibufpp, true);
 	    if (addr < 0)
@@ -456,7 +455,7 @@ extract_addr_range(const char **const ibufpp)
       first_addr = second_addr;
       second_addr = addr;
       if (**ibufpp != ';' && **ibufpp != ',' && **ibufpp != ' '
-	   && **ibufpp != '/')
+	  && **ibufpp != '/')
 	break;
       if (**ibufpp == ';')
 	set_current_addr(addr);
