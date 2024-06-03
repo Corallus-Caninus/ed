@@ -28,12 +28,9 @@
 #include "extensions/extension_parser.c"
 
 
-//TODO: shift this error by 1 and add -1 as a parse signal?Need to update all usage of -1 -2 etc outside the parser too
 enum Status
 { QUIT = -1, ERR = -2, EMOD = -3, FATAL = -4 };
-//TODO: regex all the prior enums and implement this
-//TODO: this also needs to check all return comparisons to ensure we are <0 at least
-//{ DONE = -1, QUIT = -2, ERR = -3, EMOD = -4, FATAL = -5 };
+//{ DONE = -1, QUIT = -2, ERR = -3, EMOD = -4, FATAL = -5 }; //TODO: why isnt this implemented?
 
 //TODO: remove all warnings generated from gcc since we are standardizing on this compiler
 static char def_filename[FILENAME_SIZE] = "";	/* default filename */
@@ -444,7 +441,7 @@ extract_addr_range(const char **const ibufpp)
   while (true)
     {
       addr = next_addr(ibufpp, &addr_cnt);
-      if (addr < -1)
+      if (addr < QUIT)
 	{
 	  break;
 	}
@@ -457,13 +454,14 @@ extract_addr_range(const char **const ibufpp)
       if (**ibufpp != ';' && **ibufpp != ',' && **ibufpp != ' '
 	  && **ibufpp != '/')
 	break;
+//TODO: unreachable? remove this after lints
       if (**ibufpp == ';')
 	set_current_addr(addr);
       ++*ibufpp;
     }
   if (addr_cnt == 1 || second_addr != addr)
     first_addr = second_addr;
-  return ((addr != -3) ? addr_cnt : -2);
+  return ((addr != EMOD) ? addr_cnt : ERR);
 }
 
 
@@ -1139,7 +1137,7 @@ main_loop(const bool loose)
     enable_interrupts();
   else
     {
-      status = -1;
+      status = QUIT;
       fputs("\n?\n", stderr);
       set_error_msg("Interrupt");
     }
