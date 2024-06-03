@@ -74,6 +74,7 @@ set_verbose(void)
 
 
 //TODO: structure this and clean this up a bit.
+//TODO: extract common functionality amongst the markno features
 static const line_t *mark[LINE_MARKER_LENGTH];	/* line markers */
 static const line_t *second_mark[LINE_MARKER_LENGTH];	/* line markers for tuple marks dependent on mark */
 static int markno;		/* line marker count */
@@ -100,7 +101,6 @@ mark_line_node(const line_t *const lp, const line_t *const slp, int c)
     }
   return true;
 }
-
 
 void
 unmark_line_node(const line_t *const lp)
@@ -141,6 +141,54 @@ get_second_marked_node_addr(int c)
     }
   return get_line_node_addr(second_mark[c]);
 }
+//TODO: ----------------------------------NUMPAD MARKERS---------------------------------------
+static const line_t *mark_num[LINE_MARKER_LENGTH];	/* line markers */
+static const line_t *second_mark_num[LINE_MARKER_LENGTH];	/* line markers for tuple marks dependent on mark */
+static int markno_num;		/* line marker count */
+static bool
+mark_num_line_node(const line_t *const lp, const line_t *const second_lp, int c)
+{
+  if (!mark_num[c])
+    ++markno_num;
+  mark_num[c] = lp;
+  if (lp != second_lp)		//is an address tuple
+    {
+      second_mark_num[c] = second_lp;
+    }
+  else
+    {
+      second_mark_num[c] = 0;
+    }
+  return true;
+}
+
+void
+unmark_num_line_node(const line_t *const lp)
+{
+  int i;
+  for (i = 0; markno_num && i < 26; ++i)
+    if (mark_num[i] == lp)
+      {
+	mark_num[i] = 0;
+	second_mark_num[i] = 0;
+	--markno_num;
+      }
+}
+
+/* return address of a marked_num line */
+static int
+get_marked_num_node_addr(int c)
+{
+  return get_line_node_addr(mark_num[c]);
+}
+
+/* return address of a secondary marked_num line */
+static int
+get_second_marked_num_node_addr(int c)
+{
+  return get_line_node_addr(second_mark_num[c]);
+}
+//---------------------------------------------------------------------------------------------
 
 /* Return pointer to copy of shell command in the command buffer */
 static const char *
@@ -366,7 +414,6 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	      ++ * ibufpp;
 	    break;
 	  case '\'':
-	  case '}':
 	    if (!first)
 	      {
 		invalid_address();
@@ -394,6 +441,43 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 		(*(*ibufpp)++);
 		first_addr = addr;
 		second_addr = is_second;
+		++*addr_cnt;
+		++*addr_cnt;
+		//signal we parsed a tuple
+		return QUIT;
+	      }
+	    if (addr < 0)
+	      return EMOD;
+	    break;
+	  case '*':
+		//TODO: mark_num_num instead of mark
+	    if (!first)
+	      {
+		invalid_address();
+		return EMOD;
+	      };
+	    ++*ibufpp;
+	    //Check if the mark_numno stores a tuple or just singular line
+	    int num_current_char = (*(*ibufpp)++);
+	    int num_addr_tuple = 0;
+
+	    addr = get_marked_num_node_addr(num_current_char);
+	    num_addr_tuple = get_second_marked_num_node_addr(num_current_char);
+	    if (num_addr_tuple > 0)
+	      {
+		first_addr = addr;
+		second_addr = num_addr_tuple;
+		++*addr_cnt;
+		++*addr_cnt;
+		return QUIT;
+	      }
+	    //check eagerly for a second address mark_numno
+	    int num_is_second = get_marked_num_node_addr((*(*ibufpp)));
+	    if (num_is_second > 0)
+	      {
+		(*(*ibufpp)++);
+		first_addr = addr;
+		second_addr = num_is_second;
 		++*addr_cnt;
 		++*addr_cnt;
 		//signal we parsed a tuple
@@ -693,10 +777,10 @@ exec_command(const char **const ibufpp,
   c = *(*ibufpp)++;
   switch (c)
     {
-      //TODO: extensions dont allow command list, we need to ensure were doing everything idiomatically we need all the features such as writting the output in extensions
     case '`':
-      fnp = def_filename;
+      //TODO: extensions dont allow command list, we need to ensure were doing everything idiomatically we need all the features such as writting the output in extensions
       //TODO: handle the proper idiomatic address etc errors
+      fnp = def_filename;
       parse_extension(ibufpp, fnp, &first_addr, &second_addr);
       break;
     case 'a':
@@ -817,8 +901,19 @@ exec_command(const char **const ibufpp,
 	  !join_lines(first_addr, second_addr, isglobal))
 	return ERR;
       break;
-    case 'k':
     case ']':
+      n = *(*ibufpp)++;
+      if (second_addr == 0)
+	{
+	  invalid_address();
+	  return ERR;
+	}
+      if (!get_command_suffix(ibufpp, &gflags) ||
+	  !mark_num_line_node(search_line_node(first_addr),
+			  search_line_node(second_addr), n))
+	return ERR;
+      break;
+    case 'k':
       n = *(*ibufpp)++;
       if (second_addr == 0)
 	{
