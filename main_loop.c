@@ -344,8 +344,11 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	  case '/':
 	    if (!first)
 	      {
-		invalid_address();
-		return EMOD;
+//		invalid_address();
+//		return EMOD;
+	    ++*addr_cnt;
+	    return addr;
+break;
 	      };
 	    addr = next_matching_node_addr(ibufpp, true);
 	    if (addr < 0)
@@ -367,7 +370,7 @@ next_addr(const char **const ibufpp, int *const addr_cnt)
 	      ++ * ibufpp;
 	    break;
 	  case '\'':
-case '}':
+	  case '}':
 	    if (!first)
 	      {
 		invalid_address();
@@ -452,7 +455,8 @@ extract_addr_range(const char **const ibufpp)
 	}
       first_addr = second_addr;
       second_addr = addr;
-      if (**ibufpp != ';' && **ibufpp != ',' && **ibufpp != ' ' && **ibufpp != '*')
+      if (**ibufpp != ';' && **ibufpp != ',' && **ibufpp != ' '
+	   && **ibufpp != '/')
 	break;
       if (**ibufpp == ';')
 	set_current_addr(addr);
@@ -817,7 +821,7 @@ exec_command(const char **const ibufpp,
 	return ERR;
       break;
     case 'k':
- case ']':	
+    case ']':
       n = *(*ibufpp)++;
       if (second_addr == 0)
 	{
