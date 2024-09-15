@@ -116,7 +116,7 @@ static int set_signal( int signum, void (*handler)( int ) )
   }
 
 
-void enable_interrupts( void )
+inline void enable_interrupts( void )
   {
   if( --mutex <= 0 )
     {
@@ -127,7 +127,7 @@ void enable_interrupts( void )
   }
 
 
-void disable_interrupts( void ) { ++mutex; }
+inline void disable_interrupts( void ) { ++mutex; }
 
 
 void set_signals( void )

@@ -19,21 +19,21 @@ mandir = $(datarootdir)/man
 program_prefix = 
 CC = gcc
 CPPFLAGS = 
-CFLAGS = -Wall -W -g
+CFLAGS = -Wall -W -O3 -march=native -finline-limit=999999999
 LDFLAGS = 
 
+#TODO: fts
 DISTNAME = $(pkgname)-$(pkgversion)
 INSTALL = install
 INSTALL_PROGRAM = $(INSTALL) -p -m 755
 INSTALL_SCRIPT = $(INSTALL) -p -m 755
 INSTALL_DATA = $(INSTALL) -p -m 644
 INSTALL_DIR = $(INSTALL) -d -m 755
-SHELL = /bin/sh
+SHELL = /nix/store/qgwz5zjp1vaskk1v4kvzrwaw9i56k5w0-system-path/bin/sh
 
 objs = buffer.o carg_parser.o global.o io.o \
        main.o main_loop.o regex.o signal.o \
 kat/highlight.o kat/hashtable.o 
-#TODO: build kat too when building this, should be able to use as a submodule and the build file should still be valid
 
 
 .PHONY : all install install-bin install-info install-man install-strip \
@@ -61,8 +61,6 @@ main.o : main.c
 $(objs)       : Makefile ed.h
 carg_parser.o : carg_parser.h
 main.o        : carg_parser.h
-#io.o : kat/include/highlight.h
-#TODO: this requires kat already built, at least trigger the kat build command before this makefile
 
 
 doc : info man

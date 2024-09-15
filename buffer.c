@@ -713,6 +713,7 @@ static bool u_modified = false;
 
 
 //TODO: why does this happen so often? the undo stack ends up being only 1 entry, this may be due to undo being registered in the undo list?
+//TODO: why is this the only time we unmark_line_node? docs say this should happen when marked lines are removed/no longer valid
 void
 clear_undo_stack(void)
 {

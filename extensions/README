@@ -1,3 +1,4 @@
+TODO: clean this up to explain the easiest way to add a custom extension command to ed
 This directory holds custom extensions for ed. Anytime some automation is introduced as an extension from vanilla ed it will be added here in a .c file.
 The format for these extensions will be int funcname(const char *ibufpp, int *start, int *end, ...args...){
 Where start and end are the line addresses from main_loop.c, int is the return error code, and ibufpp is the main line buffer for editing.
