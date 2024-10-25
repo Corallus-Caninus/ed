@@ -112,6 +112,11 @@ file(const char *filename)
 {
   printf("%s \n", filename);
 }
+inline void
+prompt(const char*prompt)
+{
+  printf("%s \n", prompt);
+}
 
 inline void
 entry(const char **const ibufpp, int **first_addr, int **second_addr)
