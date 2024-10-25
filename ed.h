@@ -169,3 +169,7 @@ char *highlight_line(const char *, char *, size_t);
 //TODO: implement:
 void highlight_free(char *);
 void highlight_finish(void);
+
+// Markno related variables
+extern const line_t *mark[LINE_MARKER_LENGTH];
+extern int markno;

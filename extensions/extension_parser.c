@@ -9,6 +9,7 @@ void file(const char *);
 //TODO: do we need to pass pointer to pointer?
 void funcs(const char **const, const char *, int **, int **);
 void entry(const char **const, int **first_addr, int **second_addr);
+void marknos(const char **const, int **first_addr, int **second_addr);
 
 //TODO: make this faster, for now this at least short circuits hopefully faster than strcmp alternative
 bool
@@ -35,16 +36,18 @@ static const char *extensions_s[] = {
   "file\n",
   "funcs\n",
   "entry\n",
+  "marknos\n",
 };
 
 /* JUMP TABLE EXTENSION ENUMERATION */
 // These are ordered exactly as in extensions_s
-#define  NUM_EXTENSIONS 3
+#define  NUM_EXTENSIONS 4
 static const enum Extension
 {
   FILENAME = 1,			// start at 1 so 0 is default "not found" in switch statement
   FUNCS,
   ENTRY,
+  MARKNOS,
 };
 
 /* PARSER */
@@ -88,6 +91,9 @@ parse_extension(const char **const ibufpp, const char *filename,
       break;
     case ENTRY:
       entry(ibufpp, &first_addr, &second_addr);
+      break;
+    case MARKNOS:
+      marknos(ibufpp, &first_addr, &second_addr);
       break;
     default:
       printf("extension not found..\n");
@@ -142,3 +148,18 @@ entry(const char **const ibufpp, int **first_addr, int **second_addr)
 
 //TODO: //uses ctags c library to list all structs from first_addr to second_addr in ibufpp
 //TODO: inline void structs(const char * ibufpp, int *first_addr, int *second_addr)
+
+// This extension prints all currently registered marknos.
+inline void
+marknos(const char **const ibufpp, int **first_addr, int **second_addr)
+{
+  printf("Marknos: ");
+  for (int i = 0; i < 26; ++i)
+    {
+      if (mark[i])
+	{
+	  printf("%c", i + 'a');
+	}
+    }
+  printf("\n");
+}
