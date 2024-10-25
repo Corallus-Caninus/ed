@@ -36,7 +36,7 @@ static const char *extensions_s[] = {
   "file\n",
   "funcs\n",
   "entry\n",
-  "marknos\n",
+  "mos\n",
 };
 
 /* JUMP TABLE EXTENSION ENUMERATION */
@@ -158,7 +158,7 @@ marknos(const char **const ibufpp, int **first_addr, int **second_addr)
     {
       if (mark[i])
 	{
-	  printf("%c", i + 'a');
+	  printf("%c,  %i | ", i + 'a', get_line_node_addr(mark[i]));
 	}
     }
   printf("\n");

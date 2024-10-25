@@ -75,9 +75,9 @@ set_verbose(void)
 
 //TODO: structure this and clean this up a bit.
 //TODO: extract common functionality amongst the markno features
-static const line_t *mark[LINE_MARKER_LENGTH];	/* line markers */
+ const line_t *mark[LINE_MARKER_LENGTH];	/* line markers */
 static const line_t *second_mark[LINE_MARKER_LENGTH];	/* line markers for tuple marks dependent on mark */
-static int markno;		/* line marker count */
+ int markno;		/* line marker count */
 
 static bool
 mark_line_node(const line_t *const lp, const line_t *const slp, int c)

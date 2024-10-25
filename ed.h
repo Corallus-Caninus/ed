@@ -171,5 +171,6 @@ void highlight_free(char *);
 void highlight_finish(void);
 
 // Markno related variables
+#define LINE_MARKER_LENGTH 26
 extern const line_t *mark[LINE_MARKER_LENGTH];
 extern int markno;
