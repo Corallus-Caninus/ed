@@ -124,6 +124,15 @@ for _ in range(0,num_epochs):
 
   optimizer.step(closure)
   optimizer.state["n_iter"]=2
+
+  # Print model response
+  prompt = "The Factor programming language is "
+  input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
+  with torch.no_grad():
+    generated_ids = model.generate(input_ids, max_length=50, num_return_sequences=1)
+    generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    print(f"Model response: {generated_text}")
+
   model.save_pretrained("El-Chapo")
 #  try:
 #  except:
