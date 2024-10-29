@@ -10,6 +10,16 @@ from lbfgs import LBFGS
 #torch.set_num_threads(12)
 from datasets import load_dataset
 import datasets
+from accelerate import Accelerator
+from accelerate import FullyShardedDataParallelPlugin
+from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
+
+fsdp_plugin = FullyShardedDataParallelPlugin(
+    state_dict_config=FullStateDictConfig(offload_to_cpu=False, rank0_only=False),
+    optim_state_dict_config=FullOptimStateDictConfig(offload_to_cpu=False, rank0_only=False),
+)
+
+accelerator = Accelerator(fsdp_plugin=fsdp_plugin)
 #import peft
 
 #tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf")
@@ -21,6 +31,7 @@ import datasets
 
 #------------------------TRAINING-----------------------
 import torch
+from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Dataset, DataLoader
 import time
 
@@ -75,7 +86,7 @@ model.train()
 
 # Define the optimizer
 #TODO: how can we exit with optimality instead of infinity?
-optimizer = LBFGS(model.parameters(), lr=1, history_size=5, tolerance_change=1e-6, max_iter=25, max_eval=50, line_search_fn="strong_wolfe")
+optimizer = LBFGS(model.parameters(), lr=1, history_size=20, tolerance_change=1e-6, max_iter=25, max_eval=50, line_search_fn="strong_wolfe")
 
 batch_train = None
 input_ids = None
@@ -102,6 +113,15 @@ def closure():
 #TODO: yield? need to batch, for now this should be alright?
   return loss
 
+#dataloader_train, _, model, optimizer = accelerator.prepare(
+#    dataloader_train, _, model, optimizer
+null = None
+no = None
+#null, no, model, optimizer = accelerator.prepare(
+#    null, no, model, optimizer
+#null, no, no, optimizer = accelerator.prepare(
+#    null, no, no, optimizer
+#)
 num_epochs = 15000000
 for _ in range(0,num_epochs):
   print("iterating epoch..\n\n")
@@ -123,17 +143,17 @@ for _ in range(0,num_epochs):
   input_ids, attention_mask = (tokenized_input.input_ids, tokenized_input.attention_mask)
 
   optimizer.step(closure)
-  optimizer.state["n_iter"]=2
+#  optimizer.state["n_iter"]=2
 
   # Print model response
-  prompt = "The Factor programming language is "
-  input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
-  with torch.no_grad():
-    generated_ids = model.generate(input_ids, max_length=50, num_return_sequences=1)
-    generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    print(f"Model response: {generated_text}")
+#  prompt = "The Factor programming language is "
+#  input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
+#  with torch.no_grad():
+#    generated_ids = model.module.generate(input_ids, max_length=50, num_return_sequences=1)
+#    generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+#    print(f"Model response: {generated_text}")
 
-  model.save_pretrained("El-Chapo")
+#  model.save_pretrained("El-Chapo") #TODO: implement this with the accelerate framework.
 #  try:
 #  except:
 #    pass
