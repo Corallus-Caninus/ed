@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy or (t_prev == min_step) or (t == min_step) or (t_prev == max_step) or (t == max_step): allow-untyped-defs
 from typing import Optional, Union
 
 import torch
@@ -41,7 +41,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 
 def _strong_wolfe(
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.001, tolerance_change=1e-9, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-6, c2=0.90, tolerance_change=1e-9, max_ls=25
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
     d_norm = d.abs().max()
@@ -72,7 +72,8 @@ def _strong_wolfe(
             print("-----FAST WOLFE-----")
             break
 
-        if gtd_new >= 0:
+#        if gtd_new >= 0:
+        if gtd_new >= 0 :
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
             bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -80,8 +81,19 @@ def _strong_wolfe(
             break
 
         # interpolate
-        min_step = t + 0.01 * (t - t_prev)
-        max_step = t * 10
+#TODO: ensure t_prev and t arent == min or max step or we get a non diff.
+        min_step = tolerance_change * 10
+#        min_step = t + 0.01 * (t - t_prev)
+        max_step = 1 # this should be the "learning rate" for lbfgs and the learning rate for the initial should be the inverse or something like epsilon (not the user supplied lr) EDIT: actually it should be the median for min and max like in interpolation bailout.
+#        max_step = t * 10
+
+        # bounding condition
+        if   (t_prev - t == 0) or (t - t_prev == 0)  or (t_prev == min_step) or (t == min_step) or (t_prev == max_step) or (t == max_step):
+            bracket = [t_prev, t]
+            bracket_f = [f_prev, f_new]
+            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+            bracket_gtd = [gtd_prev, gtd_new]
+            break
         tmp = t
         t = _cubic_interpolate(
             t_prev, f_prev, gtd_prev, t, f_new, gtd_new, bounds=(min_step, max_step)
@@ -151,6 +163,8 @@ def _strong_wolfe(
         ls_func_evals += 1
         gtd_new = g_new.dot(d)
         ls_iter += 1
+
+#TODO: wolfe pack (take best armijo and wolfe condition, this will effectively minimizing wolfe and maximizing armijo).
 
         if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
@@ -277,6 +291,7 @@ class LBFGS(Optimizer):
             views.append(view)
         return torch.cat(views, 0)
 
+    #TODO: this is where we need to perform gradient normalization. we cannot assume the gradient is associated with the parameters like in torch.nn.clip_grad_norm
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:
@@ -364,6 +379,7 @@ class LBFGS(Optimizer):
             ############################################################
             # compute gradient descent direction
             ############################################################
+            #TODO: dont reset, only initialize with this.
             if state["n_iter"] == 1:
                 print("RESET")
                 d = flat_grad.neg()
@@ -376,7 +392,7 @@ class LBFGS(Optimizer):
                 y = flat_grad.sub(prev_flat_grad)
                 s = d.mul(t)
                 ys = y.dot(s)  # y*s
-                if ys > 1e-10:
+                if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
                     # updating memory
                     if len(old_dirs) == history_size:
                         # shift history by one (limited-memory)
@@ -423,10 +439,11 @@ class LBFGS(Optimizer):
             # compute step length
             ############################################################
             # reset initial guess for step size
-            if state["n_iter"] == 1:
-                t = min(1.0, 1.0 / flat_grad.abs().sum()) * lr
-            else:
-                t = lr
+#            if state["n_iter"] == 1:
+#TODO: lr should be the numerator and min
+            t = min(1.0, 1.0 / flat_grad.abs().sum()) #* lr
+#            else:
+#                t = lr
 
             # directional derivative
             gtd = flat_grad.dot(d)  # g * d
@@ -445,6 +462,7 @@ class LBFGS(Optimizer):
                     x_init = self._clone_param()
 
                     def obj_func(x, t, d):
+			#TODO: implement gradient clipping here, ensure that the linesearch can model the gradient clipping so we dont clip the wolfe.
                         return self._directional_evaluate(closure, x, t, d)
 
                     loss, flat_grad, t, ls_func_evals = _strong_wolfe(
