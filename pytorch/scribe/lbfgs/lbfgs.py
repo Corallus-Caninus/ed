@@ -1,4 +1,4 @@
-# mypy or (t_prev == min_step) or (t == min_step) or (t_prev == max_step) or (t == max_step): allow-untyped-defs
+# mypy or (t_prev == min_step) or (t == min_step) or (t_prev == max_step) or (t == max_step): allow-untyped-defsor like a cosine schudel of learning rate based on sub-optimal convergence? ideally we just set c2 correctly but this would be much more robust and easier to tune.
 from typing import Optional, Union
 
 import torch
@@ -41,7 +41,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 
 def _strong_wolfe(
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-6, c2=0.90, tolerance_change=1e-9, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-9, max_ls=25
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
     d_norm = d.abs().max()
@@ -72,7 +72,6 @@ def _strong_wolfe(
             print("-----FAST WOLFE-----")
             break
 
-#        if gtd_new >= 0:
         if gtd_new >= 0 :
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
@@ -80,20 +79,24 @@ def _strong_wolfe(
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
-        # interpolate
-#TODO: ensure t_prev and t arent == min or max step or we get a non diff.
-        min_step = tolerance_change * 10
-#        min_step = t + 0.01 * (t - t_prev)
-        max_step = 1 # this should be the "learning rate" for lbfgs and the learning rate for the initial should be the inverse or something like epsilon (not the user supplied lr) EDIT: actually it should be the median for min and max like in interpolation bailout.
-#        max_step = t * 10
+#TODO: this is @DEPRECATED but kept in case we want to try bounding again.
+#TODO: figure out if gradient is vanishing or exploding or both for nan (likely an oscillation). then force the gradient to be bounded, even if catastrophic, to prevent vanishing. This should at least be more informative AND less destructive than data decay, but has worse optima than data decay (a global optimization strategy))
+#        min_step = tolerance_change 
+#        max_step = 1 # this should be the "learning rate" for lbfgs and the learning rate for the initial should be the inverse or something like epsilon (not the user supplied lr) EDIT: actually it should be the median for min and max like in interpolation bailout.
+#
+#        # bounding condition
+#  			#TODO: this needs to consider wolfe pack since currently it just bails out in zoom phase if t_prev == t on bracket is small
+#        if   (t_prev - t == 0) or (t - t_prev == 0)  or (t_prev == min_step) or (t == min_step) or (t_prev == max_step) or (t == max_step):
+#            bracket = [t_prev, t]
+#            bracket_f = [f_prev, f_new]
+#            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+#            bracket_gtd = [gtd_prev, gtd_new]
+#            break
 
-        # bounding condition
-        if   (t_prev - t == 0) or (t - t_prev == 0)  or (t_prev == min_step) or (t == min_step) or (t_prev == max_step) or (t == max_step):
-            bracket = [t_prev, t]
-            bracket_f = [f_prev, f_new]
-            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
-            bracket_gtd = [gtd_prev, gtd_new]
-            break
+        min_step = t + 0.01 * (t - t_prev)
+        max_step = t * 10
+
+        # interpolate
         tmp = t
         t = _cubic_interpolate(
             t_prev, f_prev, gtd_prev, t, f_new, gtd_new, bounds=(min_step, max_step)
@@ -118,12 +121,18 @@ def _strong_wolfe(
     # zoom phase: we now have a point satisfying the criteria, or
     # a bracket around it. We refine the bracket until we find the
     # exact point satisfying the criteria
+    # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
+    t_best = t
+    f_best = f
+    g_best = g
+
     insuf_progress = False
     # find high and low points in bracket
     low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
     while not done and ls_iter < max_ls:
         # line-search bracket is so small
-        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:  # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:   # type: ignore[possibly-undefined]
+        	#TODO: return the wolfe pack here
             break
 
         # compute new trial value
@@ -164,7 +173,15 @@ def _strong_wolfe(
         gtd_new = g_new.dot(d)
         ls_iter += 1
 
-#TODO: wolfe pack (take best armijo and wolfe condition, this will effectively minimizing wolfe and maximizing armijo).
+				#TODO: DO THIS NEXT!! NOTE: since we can bail out of bracket we also need wolfe pack there or rework here.
+				#TODO: wolfe pack (take best armijo and wolfe condition, this will be effectively minimizing wolfe and maximizing armijo).
+#        best_c1 = 0
+#        best_c2 = 0
+#        cur_c1 = (f + t*gtd) - f_new
+#        cur_c2 = gtd_new - gtd
+#        if cur_c2 < best_c2 && cur_c1 < best_c1:
+#          best_c1 = cur_c1
+#          best_c2 = cur_c2
 
         if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
@@ -291,7 +308,6 @@ class LBFGS(Optimizer):
             views.append(view)
         return torch.cat(views, 0)
 
-    #TODO: this is where we need to perform gradient normalization. we cannot assume the gradient is associated with the parameters like in torch.nn.clip_grad_norm
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:
@@ -319,201 +335,214 @@ class LBFGS(Optimizer):
 
     @torch.no_grad()
     def step(self, closure):
-        """Perform a single optimization step.
+      """Perform a single optimization step.
 
-        Args:
-            closure (Callable): A closure that reevaluates the model
-                and returns the loss.
-        """
-        assert len(self.param_groups) == 1
+      Args:
+          closure (Callable): A closure that reevaluates the model
+              and returns the loss.
+      """
+      assert len(self.param_groups) == 1
 
-        # Make sure the closure is always called with grad enabled
-        closure = torch.enable_grad()(closure)
+      # Make sure the closure is always called with grad enabled
+      closure = torch.enable_grad()(closure)
 
-        group = self.param_groups[0]
-        lr = group["lr"]
-        max_iter = group["max_iter"]
-        max_eval = group["max_eval"]
-        tolerance_grad = group["tolerance_grad"]
-        tolerance_change = group["tolerance_change"]
-        line_search_fn = group["line_search_fn"]
-        history_size = group["history_size"]
+      group = self.param_groups[0]
+      lr = group["lr"]
+      max_iter = group["max_iter"]
+      max_eval = group["max_eval"]
+      tolerance_grad = group["tolerance_grad"]
+      tolerance_change = group["tolerance_change"]
+      line_search_fn = group["line_search_fn"]
+      history_size = group["history_size"]
 
-        # NOTE: LBFGS has only global state, but we register it as state for
-        # the first param, because this helps with casting in load_state_dict
-        state = self.state[self._params[0]]
-        state.setdefault("func_evals", 0)
-        state.setdefault("n_iter", 0)
+      # NOTE: LBFGS has only global state, but we register it as state for
+      # the first param, because this helps with casting in load_state_dict
+      state = self.state[self._params[0]]
+      state.setdefault("func_evals", 0)
+      state.setdefault("n_iter", 0)
 
-        # evaluate initial f(x) and df/dx
-        orig_loss = closure()
-        loss = float(orig_loss)
-        current_evals = 1
-        state["func_evals"] += 1
+      # evaluate initial f(x) and df/dx
+      orig_loss = closure()
+      loss = float(orig_loss)
+      current_evals = 1
+      state["func_evals"] += 1
 
-        flat_grad = self._gather_flat_grad()
-        opt_cond = flat_grad.abs().max() <= tolerance_grad
+      flat_grad = self._gather_flat_grad()
+      opt_cond = flat_grad.abs().max() <= tolerance_grad
 
-        # optimal condition
-        if opt_cond:
-            return orig_loss
+      # optimal condition
+#TODO: TRACTION ALGORITHM: better than data decay is to normalize the gradient here, essentially boosting the gradient in an informed manner. This is destructive but is localized to the parameters that contribute the most to error.
+#      if opt_cond or loss != loss:
+      if opt_cond:
+          print("GRAD CONVERGED") #TODO: if we throw out the hessian, will the gradient norm be able to fix this? No, the normalization scalar coeficient is clamped @ 1 so we only scale the norm down.
+						#TODO: can we flip the c2 condition to force curvature to escape like momentum?or like a cosine schedule of learning rate based on sub-optimal convergence? ideally we just set c2 correctly but this would be much more robust and easier to tune.
+#TODO: instead of resetting, or alongside resetting, flip the linesearch to search for > C2 condition as a momentum factor.
+          print("RESET")
+          d = flat_grad.neg()
+          old_dirs = []
+          old_stps = []
+          ro = []
+          H_diag = 1
+          return orig_loss
 
-        # tensors cached in state (for tracing)
-        d = state.get("d")
-        t = state.get("t")
-        old_dirs = state.get("old_dirs")
-        old_stps = state.get("old_stps")
-        ro = state.get("ro")
-        H_diag = state.get("H_diag")
-        prev_flat_grad = state.get("prev_flat_grad")
-        prev_loss = state.get("prev_loss")
+      # tensors cached in state (for tracing)
+      d = state.get("d")
+      t = state.get("t")
+      old_dirs = state.get("old_dirs")
+      old_stps = state.get("old_stps")
+      ro = state.get("ro")
+      H_diag = state.get("H_diag")
+      prev_flat_grad = state.get("prev_flat_grad")
+      prev_loss = state.get("prev_loss")
 
-        n_iter = 0
-        # optimize for a max of max_iter iterations
-        while n_iter < max_iter:
-            # keep track of nb of iterations
-            n_iter += 1
-            state["n_iter"] += 1
-            print("[CRAM]")
+      n_iter = 0
+      # optimize for a max of max_iter iterations
+      while n_iter < max_iter:
+          # keep track of nb of iterations
+          n_iter += 1
+          state["n_iter"] += 1
+          print("[CRAM]")
 
-            ############################################################
-            # compute gradient descent direction
-            ############################################################
-            #TODO: dont reset, only initialize with this.
-            if state["n_iter"] == 1:
-                print("RESET")
-                d = flat_grad.neg()
-                old_dirs = []
-                old_stps = []
-                ro = []
-                H_diag = 1
-            else:
-                # do lbfgs update (update memory)
-                y = flat_grad.sub(prev_flat_grad)
-                s = d.mul(t)
-                ys = y.dot(s)  # y*s
-                if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
-                    # updating memory
-                    if len(old_dirs) == history_size:
-                        # shift history by one (limited-memory)
-                        old_dirs.pop(0)
-                        old_stps.pop(0)
-                        ro.pop(0)
-    
-                    # store new direction/step
-                    old_dirs.append(y)
-                    old_stps.append(s)
-                    ro.append(1.0 / ys)
-    
-                    # update scale of initial Hessian approximation
-                    H_diag = ys / y.dot(y)  # (y*y)
+          ############################################################
+          # compute gradient descent direction
+          ############################################################
+          #TODO: dont reset, only initialize with this.
+          if state["n_iter"] == 1:
+              print("RESET")
+              d = flat_grad.neg()
+              old_dirs = []
+              old_stps = []
+              ro = []
+              H_diag = 1
+          else:
+              # do lbfgs update (update memory)
+              y = flat_grad.sub(prev_flat_grad)
+              s = d.mul(t)
+              ys = y.dot(s)  # y*s
+              if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
+                  # updating memory
+                  if len(old_dirs) == history_size:
+                      # shift history by one (limited-memory)
+                      old_dirs.pop(0)
+                      old_stps.pop(0)
+                      ro.pop(0)
+  
+                  # store new direction/step
+                  old_dirs.append(y)
+                  old_stps.append(s)
+                  ro.append(1.0 / ys)
+  
+                  # update scale of initial Hessian approximation
+                  H_diag = ys / y.dot(y)  # (y*y)
 
-                # compute the approximate (L-BFGS) inverse Hessian
-                # multiplied by the gradient
-                num_old = len(old_dirs)
+              # compute the approximate (L-BFGS) inverse Hessian
+              # multiplied by the gradient
+              num_old = len(old_dirs)
 
-                if "al" not in state:
-                    state["al"] = [None] * history_size
-                al = state["al"]
+              if "al" not in state:
+                  state["al"] = [None] * history_size
+              al = state["al"]
 
-                # iteration in L-BFGS loop collapsed to use just one buffer
-                q = flat_grad.neg()
-                for i in range(num_old - 1, -1, -1):
-                    al[i] = old_stps[i].dot(q) * ro[i]
-                    q.add_(old_dirs[i], alpha=-al[i])
+              # iteration in L-BFGS loop collapsed to use just one buffer
+              q = flat_grad.neg()
+              for i in range(num_old - 1, -1, -1):
+                  al[i] = old_stps[i].dot(q) * ro[i]
+                  q.add_(old_dirs[i], alpha=-al[i])
 
-                # multiply by initial Hessian
-                # r/d is the final direction
-                d = r = torch.mul(q, H_diag)
-                for i in range(num_old):
-                    be_i = old_dirs[i].dot(r) * ro[i]
-                    r.add_(old_stps[i], alpha=al[i] - be_i)
+              # multiply by initial Hessian
+              # r/d is the final direction
+              d = r = torch.mul(q, H_diag)
+              for i in range(num_old):
+                  be_i = old_dirs[i].dot(r) * ro[i]
+                  r.add_(old_stps[i], alpha=al[i] - be_i)
 
-            if prev_flat_grad is None:
-                prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)
-            else:
-                prev_flat_grad.copy_(flat_grad)
-            prev_loss = loss
+          if prev_flat_grad is None:
+              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)
+          else:
+              prev_flat_grad.copy_(flat_grad)
+          prev_loss = loss
 
-            ############################################################
-            # compute step length
-            ############################################################
-            # reset initial guess for step size
+          ############################################################
+          # compute step length
+          ############################################################
+          # reset initial guess for step size
 #            if state["n_iter"] == 1:
-#TODO: lr should be the numerator and min
-            t = min(1.0, 1.0 / flat_grad.abs().sum()) #* lr
+#TODO:  numerator is a momentum like term that balances the search start point based on if the gradient is vanishing
+#TODO:   can this be the inverse of min? essentially if 1e-10 is tolerance set this to 1e10
+          t = min(1e6, 1.0 / flat_grad.abs().sum()) #* lr
 #            else:
 #                t = lr
 
-            # directional derivative
-            gtd = flat_grad.dot(d)  # g * d
+          # directional derivative
+          gtd = flat_grad.dot(d)  # g * d
 
-            # directional derivative is below tolerance
-            if gtd > -tolerance_change:
-                break
+          # directional derivative is below tolerance
+          if gtd > -tolerance_change:
+              break
 
-            # optional line search: user function
-            ls_func_evals = 0
-            if line_search_fn is not None:
-                # perform line search, using user function
-                if line_search_fn != "strong_wolfe":
-                    raise RuntimeError("only 'strong_wolfe' is supported")
-                else:
-                    x_init = self._clone_param()
+          # optional line search: user function
+          ls_func_evals = 0
+          if line_search_fn is not None:
+              # perform line search, using user function
+              if line_search_fn != "strong_wolfe":
+                  raise RuntimeError("only 'strong_wolfe' is supported")
+              else:
+                  x_init = self._clone_param()
 
-                    def obj_func(x, t, d):
+                  def obj_func(x, t, d):
 			#TODO: implement gradient clipping here, ensure that the linesearch can model the gradient clipping so we dont clip the wolfe.
-                        return self._directional_evaluate(closure, x, t, d)
+                      return self._directional_evaluate(closure, x, t, d)
 
-                    loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                        obj_func, x_init, t, d, loss, flat_grad, gtd
-                    )
-                self._add_grad(t, d)
-                opt_cond = flat_grad.abs().max() <= tolerance_grad
-            else:
-                # no line search, simply move with fixed-step
-                self._add_grad(t, d)
-                if n_iter != max_iter:
-                    # re-evaluate function only if not in last iteration
-                    # the reason we do this: in a stochastic setting,
-                    # no use to re-evaluate that function here
-                    with torch.enable_grad():
-                        loss = float(closure())
-                    flat_grad = self._gather_flat_grad()
-                    opt_cond = flat_grad.abs().max() <= tolerance_grad
-                    ls_func_evals = 1
+                  loss, flat_grad, t, ls_func_evals = _strong_wolfe(
+                      obj_func, x_init, t, d, loss, flat_grad, gtd
+                  )
+              self._add_grad(t, d)
+              print("got stepsize: " + str(t))
+              opt_cond = flat_grad.abs().max() <= tolerance_grad
+          else:
+              # no line search, simply move with fixed-step
+              self._add_grad(t, d)
+              if n_iter != max_iter:
+                  # re-evaluate function only if not in last iteration
+                  # the reason we do this: in a stochastic setting,
+                  # no use to re-evaluate that function here
+                  with torch.enable_grad():
+                      loss = float(closure())
+                  flat_grad = self._gather_flat_grad()
+                  opt_cond = flat_grad.abs().max() <= tolerance_grad
+                  ls_func_evals = 1
 
-            # update func eval
-            current_evals += ls_func_evals
-            state["func_evals"] += ls_func_evals
+          # update func eval
+          current_evals += ls_func_evals
+          state["func_evals"] += ls_func_evals
 
-            ############################################################
-            # check conditions
-            ############################################################
-            if n_iter == max_iter:
-                break
+          ############################################################
+          # check conditions
+          ############################################################
+          if n_iter == max_iter:
+              break
 
-            if current_evals >= max_eval:
-                break
+          if current_evals >= max_eval:
+              break
 
-            # optimal condition
-            if opt_cond:
-                break
+          # optimal condition
+          if opt_cond:
+              break
 
-            # lack of progress
-            if d.mul(t).abs().max() <= tolerance_change:
-                break
+          # lack of progress
+          if d.mul(t).abs().max() <= tolerance_change:
+              break
 
-            if abs(loss - prev_loss) < tolerance_change:
-                break
+          if abs(loss - prev_loss) < tolerance_change:
+              break
 
-        state["d"] = d
-        state["t"] = t
-        state["old_dirs"] = old_dirs
-        state["old_stps"] = old_stps
-        state["ro"] = ro
-        state["H_diag"] = H_diag
-        state["prev_flat_grad"] = prev_flat_grad
-        state["prev_loss"] = prev_loss
+      state["d"] = d
+      state["t"] = t
+      state["old_dirs"] = old_dirs
+      state["old_stps"] = old_stps
+      state["ro"] = ro
+      state["H_diag"] = H_diag
+      state["prev_flat_grad"] = prev_flat_grad
+      state["prev_loss"] = prev_loss
 
-        return orig_loss
+      return orig_loss
