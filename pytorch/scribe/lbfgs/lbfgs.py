@@ -52,19 +52,21 @@ def _strong_wolfe(
     gtd_new = g_new.dot(d)
 
     # bracket an interval containing a point satisfying the Wolfe criteria
+#    t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
     t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
     done = False
     ls_iter = 0
     while ls_iter < max_ls:
         # check conditions
-        if f_new > (f + c1 * t * gtd) or (ls_iter > 1 and f_new >= f_prev):
+        if  (f_new > (f + c1 * t * gtd) or (ls_iter > 1 and f_new >= f_prev)) :
+#        if  ( (ls_iter > 1 and f_new >= f_prev)) :
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
             bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
-        if abs(gtd_new) <= -c2 * gtd:
+        if abs(gtd_new) <= -c2 * gtd  :
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -72,7 +74,7 @@ def _strong_wolfe(
             print("-----FAST WOLFE-----")
             break
 
-        if gtd_new >= 0 :
+        if gtd_new >= 0  :
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
             bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -125,15 +127,24 @@ def _strong_wolfe(
     t_best = t
     f_best = f
     g_best = g
+    best_c1 = 0
+    best_c2 = 0
+    ls_iter=0
+#TODO: a better solution to force wolf search: include wolfe-pack in the bracket search algorithm then we wont need this. or just zoom and down bracket (given the momentum learning rate boosting t
+#    if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
+#      bracket[0] = 0.
 
     insuf_progress = False
     # find high and low points in bracket
     low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
-    while not done and ls_iter < max_ls:
+#    while not done and ls_iter < max_ls:
+    while not done :
         # line-search bracket is so small
-        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:   # type: ignore[possibly-undefined]
-        	#TODO: return the wolfe pack here
-            break
+        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls:   # type: ignore[possibly-undefined]
+            print("----WOLFE PACK----")
+            return f_best, g_best, t_best, ls_func_evals
+            	#TODO: return the wolfe pack here
+#            break
 
         # compute new trial value
         t = _cubic_interpolate(
@@ -175,13 +186,17 @@ def _strong_wolfe(
 
 				#TODO: DO THIS NEXT!! NOTE: since we can bail out of bracket we also need wolfe pack there or rework here.
 				#TODO: wolfe pack (take best armijo and wolfe condition, this will be effectively minimizing wolfe and maximizing armijo).
-#        best_c1 = 0
-#        best_c2 = 0
-#        cur_c1 = (f + t*gtd) - f_new
-#        cur_c2 = gtd_new - gtd
+        cur_c1 = (f + t*gtd) - f_new
+        cur_c2 =  abs(gtd_new) - -gtd 
 #        if cur_c2 < best_c2 && cur_c1 < best_c1:
-#          best_c1 = cur_c1
-#          best_c2 = cur_c2
+#NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
+        if cur_c2 < best_c2 :
+#          print("---GOT NEW WOLFE PACK---")
+          best_c1 = cur_c1
+          best_c2 = cur_c2
+          t_best = t
+          f_best = f_new
+          g_best = g_new
 
         if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
@@ -385,6 +400,7 @@ class LBFGS(Optimizer):
           H_diag = 1
           return orig_loss
 
+#TODO: put old_dirs, steps and ro on CPU. Perform the direction calculation as efficiently as possible with this constraint so we can use main memory for history size
       # tensors cached in state (for tracing)
       d = state.get("d")
       t = state.get("t")
@@ -466,19 +482,26 @@ class LBFGS(Optimizer):
           # compute step length
           ############################################################
           # reset initial guess for step size
-#            if state["n_iter"] == 1:
+          if state["n_iter"] == 1:
 #TODO:  numerator is a momentum like term that balances the search start point based on if the gradient is vanishing
-#TODO:   can this be the inverse of min? essentially if 1e-10 is tolerance set this to 1e10
-          t = min(1e6, 1.0 / flat_grad.abs().sum()) #* lr
-#            else:
-#                t = lr
+#TODO:   extract this to a hyperparameter for tolerance_momentum
+            t = min(1., 1. / flat_grad.abs().sum()) #* lr
+  #          avg = avg / torch.tensor(flat_grad.size(1)).to("cuda")
+  #.div(torch.tensor(flat_grad.size()).to("cuda"))
+          else:
+            avg = flat_grad.abs().mean()
+            print("got avg: " + str(avg))
+            t = min(1e4, 1e-4/ avg)
+            print("got t: " + str(t))
+#              t = lr
 
           # directional derivative
           gtd = flat_grad.dot(d)  # g * d
 
           # directional derivative is below tolerance
-          if gtd > -tolerance_change:
-              break
+#NOTE: if we dont break here we are surely going to zoom on the bracket. This is preferable to just skipping until the data point aligns with the hessian but may prefer reseting the hessian instead.
+#          if gtd > -tolerance_change:
+#              break
 
           # optional line search: user function
           ls_func_evals = 0
@@ -497,7 +520,7 @@ class LBFGS(Optimizer):
                       obj_func, x_init, t, d, loss, flat_grad, gtd
                   )
               self._add_grad(t, d)
-              print("got stepsize: " + str(t))
+              print("got stepsize: " + str(t) + "  and loss: " + str(loss))
               opt_cond = flat_grad.abs().max() <= tolerance_grad
           else:
               # no line search, simply move with fixed-step
@@ -530,11 +553,12 @@ class LBFGS(Optimizer):
               break
 
           # lack of progress
-          if d.mul(t).abs().max() <= tolerance_change:
-              break
-
-          if abs(loss - prev_loss) < tolerance_change:
-              break
+#          if d.mul(t).abs().max() <= tolerance_change:
+#              break
+#
+##TODO: this contition may be not appropriate given relaxed wolfe condition.
+#          if abs(loss - prev_loss) < tolerance_change:
+#              break
 
       state["d"] = d
       state["t"] = t

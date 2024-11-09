@@ -70,7 +70,7 @@ from itertools import islice
 model.train()
 
 # Define the optimizer
-optimizer = LBFGS(model.parameters(), lr=1., history_size=2, tolerance_change=1e-9, max_iter=25, max_eval=30, line_search_fn="strong_wolfe")
+optimizer = LBFGS(model.parameters(), lr=1., history_size=2, tolerance_change=1e-9, max_iter=25, max_eval=100, line_search_fn="strong_wolfe")
 null = None
 no = None
 #null, no, model, optimizer = accelerator.prepare(
@@ -97,7 +97,7 @@ def closure():
 #  torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=8000000) 
   #NOTE: we normalize to 10 here but essentially this should set the max variance in an update and is sufficient that we dont need weight decay (is there any benefit to weight decay over this? weight decay seems to damage prior data in the network over time)
 #NOTE: 10. or 5. is set based on derivative of the activation function for expressivity, in our case tanh keep in mind this is not the max weight but the max movement of a weight.
-#  torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1e10)  
+  torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1.)  
 #  if accelerator.sync_gradients:
 #        accelerator.clip_grad_norm_(model.parameters(), 1e20)
 
@@ -114,7 +114,7 @@ def closure():
 #    print("nan clip")
 #    loss.fill_(torch.finfo(loss.dtype).max)
   
-  print(str(loss) + "-----------loss print-----------" )
+#  print(str(loss) + "-----------loss print-----------" )
   #  if loss == torch.tensor(float("nan")):
   #    print("NaN clip")
   #    loss = sys.float_info.max
