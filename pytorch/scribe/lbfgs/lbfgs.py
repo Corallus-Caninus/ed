@@ -44,7 +44,8 @@ def _strong_wolfe(
     obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-9, max_ls=25
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
-    d_norm = d.abs().max()
+    d_norm = d.to("cuda").abs().max()
+    d_norm = d_norm.to("cpu")
     g = g.clone(memory_format=torch.contiguous_format).to("cpu")
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
@@ -59,7 +60,7 @@ def _strong_wolfe(
     ls_iter = 0
     while ls_iter < max_ls:
         # check conditions
-        if  (f_new > (f + c1 * t * gtd) or (ls_iter > 1 and f_new >= f_prev)) :
+        if  (f_new > (f + c1 * t * gtd.to("cuda")) or (ls_iter > 1 and f_new >= f_prev)) :
 #        if  ( (ls_iter > 1 and f_new >= f_prev)) :
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
@@ -67,7 +68,7 @@ def _strong_wolfe(
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
-        if abs(gtd_new) <= -c2 * gtd  :
+        if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda"):
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -114,7 +115,8 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
-        gtd_new = g_new.dot(d)
+        gtd_new = g_new.to("cuda").dot(d.to("cuda"))
+        gtd_new = gtd_new.to("cpu")
         ls_iter += 1
 
     # reached max number of iterations?
@@ -194,7 +196,7 @@ def _strong_wolfe(
 				#TODO: DO THIS NEXT!! NOTE: since we can bail out of bracket we also need wolfe pack there or rework here.
 				#TODO: wolfe pack (take best armijo and wolfe condition, this will be effectively minimizing wolfe and maximizing armijo).
 #        cur_c1 = (f + t*gtd) - f_new
-        cur_c2 =  abs(gtd_new) - -gtd 
+        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda") 
 #        if cur_c2 < best_c2 && cur_c1 < best_c1:
 #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
         if cur_c2 < best_c2 :
@@ -205,7 +207,7 @@ def _strong_wolfe(
           f_best = f_new
           g_best = g_new
 
-        if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
+        if f_new > (f + c1 * t * gtd.to("cuda")) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
@@ -213,7 +215,7 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
-            if abs(gtd_new) <= -c2 * gtd:
+            if abs(gtd_new) <= -c2 * gtd.to("cuda"):
                 # Wolfe conditions satisfied
                 print("-----STRONG WOLFE-----")
                 done = True
