@@ -16,6 +16,7 @@ from datasets import load_dataset
 import datasets
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
+#from mamba_ssm import Mamba2
 
 #fsdp_plugin = FullyShardedDataParallelPlugin(
 #    state_dict_config=FullStateDictConfig(offload_to_cpu=False, rank0_only=False),
@@ -36,8 +37,10 @@ import time
 
 
 # Load the model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
-model = MambaForCausalLM.from_pretrained("state-spaces/mamba-130m-hf").to("cuda")
+tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-370m-hf", trust_remote_code=True)
+model = MambaForCausalLM.from_pretrained("state-spaces/mamba-370m-hf").to("cuda")
+#model = Mamba2.from_pretrained("state-spaces/mamba2-370m").to("cuda")
+#TODO: try tensor parallelism since we get an error on FSDP due to dimension and ops (most things only try to support transformers)
 #model = accelerator.prepare(model)
 
 #El Chapo
@@ -70,7 +73,7 @@ from itertools import islice
 model.train()
 
 # Define the optimizer
-optimizer = LBFGS(model.parameters(), lr=1., history_size=2, tolerance_change=1e-9, max_iter=25, max_eval=100, line_search_fn="strong_wolfe")
+optimizer = LBFGS(model.parameters(), lr=1., history_size=28, tolerance_change=1e-9, max_iter=10, max_eval=100, line_search_fn="strong_wolfe")
 null = None
 no = None
 #null, no, model, optimizer = accelerator.prepare(

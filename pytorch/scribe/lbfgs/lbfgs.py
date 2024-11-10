@@ -45,11 +45,12 @@ def _strong_wolfe(
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
     d_norm = d.abs().max()
-    g = g.clone(memory_format=torch.contiguous_format)
+    g = g.clone(memory_format=torch.contiguous_format).to("cpu")
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
-    gtd_new = g_new.dot(d)
+    gtd_new = g_new.to("cuda").dot(d.to("cuda"))
+    gtd_new = gtd_new.to("cpu")
 
     # bracket an interval containing a point satisfying the Wolfe criteria
 #    t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
@@ -101,8 +102,10 @@ def _strong_wolfe(
         # interpolate
         tmp = t
         t = _cubic_interpolate(
-            t_prev, f_prev, gtd_prev, t, f_new, gtd_new, bounds=(min_step, max_step)
+            t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
         )
+        gtd_prev = gtd_prev.to("cpu")
+        gtd_new = gtd_new.to("cpu")
 
         # next step
         t_prev = tmp
@@ -119,6 +122,7 @@ def _strong_wolfe(
         bracket = [0, t]
         bracket_f = [f, f_new]
         bracket_g = [g, g_new]
+        bracket_gtd = [gtd_prev, gtd_new]
 
     # zoom phase: we now have a point satisfying the criteria, or
     # a bracket around it. We refine the bracket until we find the
@@ -150,11 +154,13 @@ def _strong_wolfe(
         t = _cubic_interpolate(
             bracket[0],
             bracket_f[0],
-            bracket_gtd[0],  # type: ignore[possibly-undefined]
+            bracket_gtd[0].to("cuda"),  # type: ignore[possibly-undefined]
             bracket[1],
             bracket_f[1],
-            bracket_gtd[1],
+            bracket_gtd[1].to("cuda"),
         )
+        bracket_gtd[1].to("cpu"),
+        bracket_gtd[0].to("cpu"),  # type: ignore[possibly-undefined]
 
         # test that we are making sufficient progress:
         # in case `t` is so close to boundary, we mark that we are making
@@ -181,18 +187,19 @@ def _strong_wolfe(
         # Evaluate new point
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
-        gtd_new = g_new.dot(d)
+        gtd_new = g_new.to("cuda").dot(d.to("cuda"))
+        gtd_new = gtd_new.to("cpu")
         ls_iter += 1
 
 				#TODO: DO THIS NEXT!! NOTE: since we can bail out of bracket we also need wolfe pack there or rework here.
 				#TODO: wolfe pack (take best armijo and wolfe condition, this will be effectively minimizing wolfe and maximizing armijo).
-        cur_c1 = (f + t*gtd) - f_new
+#        cur_c1 = (f + t*gtd) - f_new
         cur_c2 =  abs(gtd_new) - -gtd 
 #        if cur_c2 < best_c2 && cur_c1 < best_c1:
 #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
         if cur_c2 < best_c2 :
 #          print("---GOT NEW WOLFE PACK---")
-          best_c1 = cur_c1
+#          best_c1 = cur_c1
           best_c2 = cur_c2
           t_best = t
           f_best = f_new
@@ -220,7 +227,8 @@ def _strong_wolfe(
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
+            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  
+# type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
 
     # return stuff
@@ -321,7 +329,7 @@ class LBFGS(Optimizer):
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
-        return torch.cat(views, 0)
+        return torch.cat(views, 0).to("cpu")
 
     def _add_grad(self, step_size, update):
         offset = 0
@@ -330,19 +338,19 @@ class LBFGS(Optimizer):
                 p = torch.view_as_real(p)
             numel = p.numel()
             # view as to avoid deprecated pointwise semantics
-            p.add_(update[offset : offset + numel].view_as(p), alpha=step_size)
+            p.add_(update.to("cuda")[offset : offset + numel].view_as(p), alpha=step_size)
             offset += numel
         assert offset == self._numel()
 
     def _clone_param(self):
-        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+        return [p.clone(memory_format=torch.contiguous_format).to("cpu") for p in self._params]
 
     def _set_param(self, params_data):
         for p, pdata in zip(self._params, params_data):
             p.copy_(pdata)
 
     def _directional_evaluate(self, closure, x, t, d):
-        self._add_grad(t, d)
+        self._add_grad(t.to("cuda"), d.to("cuda"))
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
         self._set_param(x)
@@ -386,7 +394,6 @@ class LBFGS(Optimizer):
       opt_cond = flat_grad.abs().max() <= tolerance_grad
 
       # optimal condition
-#TODO: TRACTION ALGORITHM: better than data decay is to normalize the gradient here, essentially boosting the gradient in an informed manner. This is destructive but is localized to the parameters that contribute the most to error.
 #      if opt_cond or loss != loss:
       if opt_cond:
           print("GRAD CONVERGED") #TODO: if we throw out the hessian, will the gradient norm be able to fix this? No, the normalization scalar coeficient is clamped @ 1 so we only scale the norm down.
@@ -431,10 +438,10 @@ class LBFGS(Optimizer):
               ro = []
               H_diag = 1
           else:
-              # do lbfgs update (update memory)
-              y = flat_grad.sub(prev_flat_grad)
-              s = d.mul(t)
-              ys = y.dot(s)  # y*s
+              # do lbfgs update (update memory).to("cpu")
+              y = flat_grad.sub(prev_flat_grad).to("cpu")
+              s = d.to("cuda").mul(t).to("cpu")
+              ys = y.dot(s).to("cpu")  # y*s
               if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
                   # updating memory
                   if len(old_dirs) == history_size:
@@ -460,22 +467,22 @@ class LBFGS(Optimizer):
               al = state["al"]
 
               # iteration in L-BFGS loop collapsed to use just one buffer
-              q = flat_grad.neg()
+              q = flat_grad.to("cuda").neg()
               for i in range(num_old - 1, -1, -1):
-                  al[i] = old_stps[i].dot(q) * ro[i]
-                  q.add_(old_dirs[i], alpha=-al[i])
+                  al[i] = (old_stps[i].to("cuda").dot(q.to("cuda")) * ro[i].to("cuda")).to("cpu")
+                  q.add_(old_dirs[i].to("cuda"), alpha=-al[i].to("cuda"))
 
               # multiply by initial Hessian
               # r/d is the final direction
               d = r = torch.mul(q, H_diag)
               for i in range(num_old):
-                  be_i = old_dirs[i].dot(r) * ro[i]
-                  r.add_(old_stps[i], alpha=al[i] - be_i)
+                  be_i = old_dirs[i].to("cuda").dot(r) * ro[i]
+                  r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
 
           if prev_flat_grad is None:
-              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)
+              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
           else:
-              prev_flat_grad.copy_(flat_grad)
+              prev_flat_grad.copy_(flat_grad).to("cpu")
           prev_loss = loss
 
           ############################################################
@@ -496,7 +503,11 @@ class LBFGS(Optimizer):
 #              t = lr
 
           # directional derivative
-          gtd = flat_grad.dot(d)  # g * d
+          gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
+          flat_grad = flat_grad.to("cpu")
+          gtd=gtd.to("cpu")
+          d = d.to("cpu") #TODO: optimize the loading order and code review the transfers. Extract to parameter for L-BFGS
+          t = t.to("cpu") #TODO: optimize the loading order and code review the transfers. Extract to parameter for L-BFGS
 
           # directional derivative is below tolerance
 #NOTE: if we dont break here we are surely going to zoom on the bracket. This is preferable to just skipping until the data point aligns with the hessian but may prefer reseting the hessian instead.
@@ -522,6 +533,7 @@ class LBFGS(Optimizer):
               self._add_grad(t, d)
               print("got stepsize: " + str(t) + "  and loss: " + str(loss))
               opt_cond = flat_grad.abs().max() <= tolerance_grad
+              opt_cond = opt_cond or loss < 1e-5
           else:
               # no line search, simply move with fixed-step
               self._add_grad(t, d)
@@ -545,8 +557,8 @@ class LBFGS(Optimizer):
           if n_iter == max_iter:
               break
 
-          if current_evals >= max_eval:
-              break
+#          if current_evals >= max_eval:
+#              break
 
           # optimal condition
           if opt_cond:
