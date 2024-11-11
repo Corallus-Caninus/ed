@@ -444,9 +444,6 @@ class LBFGS(Optimizer):
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
               s = (d.to("cuda").mul(t.to("cuda")))
               ys = y.dot(s)#y*s
-#              y = y.to("cpu")
-#              s = s.to("cpu")
-#              ys = ys.to("cpu")
               if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
                   # updating memory
                   if len(old_dirs) == history_size:
@@ -462,6 +459,9 @@ class LBFGS(Optimizer):
   
                   # update scale of initial Hessian approximation
                   H_diag = ys / y.dot(y)  # (y*y)
+              y = y.to("cpu")
+              s = s.to("cpu")
+              ys = ys.to("cpu")
 
               # compute the approximate (L-BFGS) inverse Hessian
               # multiplied by the gradient
@@ -480,11 +480,11 @@ class LBFGS(Optimizer):
 
               # multiply by initial Hessian
               # r/d is the final direction
-              d = r = torch.mul(q.to("cuda"), H_diag.to("cuda"))
+              d = r = torch.mul(q, H_diag)
+              H_diag = H_diag.to("cpu")
               for i in range(num_old):
                   be_i = old_dirs[i].to("cuda").dot(r) * ro[i].to("cuda")
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
-              H_diag = H_diag.to("cpu")
 
           if prev_flat_grad is None:
               prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
