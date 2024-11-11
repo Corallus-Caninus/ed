@@ -37,8 +37,8 @@ import time
 
 
 # Load the model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-370m-hf", trust_remote_code=True)
-model = MambaForCausalLM.from_pretrained("state-spaces/mamba-370m-hf").to("cuda")
+tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
+model = MambaForCausalLM.from_pretrained("state-spaces/mamba-130m-hf").to("cuda")
 #model = Mamba2.from_pretrained("state-spaces/mamba2-370m").to("cuda")
 #TODO: try tensor parallelism since we get an error on FSDP due to dimension and ops (most things only try to support transformers)
 #model = accelerator.prepare(model)
@@ -62,7 +62,7 @@ dataset = dataset.filter(lambda item: item['text'][0]!=0)
 #TODO: use dataset functions to avoid loading the dataset into memory 
 #TODO: label these
 #TODO: this is only useful for cross-validation
-dataloader_train = DataLoader(dataset, batch_size=1, shuffle=False)
+dataloader_train = DataLoader(dataset, batch_size=2, shuffle=False)
 #dataloader_train = [x for x in dataloader_train if len(x['text'][0])!=0]
 #TODO: clump together n number of entries to ensure length is sufficiently long considering the worse case of minimum_line_length*n
 from itertools import islice
@@ -73,7 +73,7 @@ from itertools import islice
 model.train()
 
 # Define the optimizer
-optimizer = LBFGS(model.parameters(), lr=1., history_size=28, tolerance_change=1e-9, max_iter=10, max_eval=100, line_search_fn="strong_wolfe")
+optimizer = LBFGS(model.parameters(), lr=1., history_size=24, tolerance_change=1e-9, max_iter=10, max_eval=100, line_search_fn="strong_wolfe")
 null = None
 no = None
 #null, no, model, optimizer = accelerator.prepare(
@@ -132,10 +132,11 @@ while True:
   # Perform optimization step
   try:
 #    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']
-    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']
+#TODO: fix this....
+    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text']
     #TODO: need to concatenate the arrays here. Keep them in batch size of 5 but concatenate entrywise.
     from itertools import islice
-    batch_train = [" ".join(batch_train[i:i+5]) for i in range(0, len(batch_train), 5)]
+    batch_train = [" ".join(batch_train[i:i+10]) for i in range(0, len(batch_train), 10)]
 #    batch_train = str((" ".join(list(islice(iterator, 5))) for iterator in [batch_train] if list(islice(iterator, 5))))
   except StopIteration:
 #    break
