@@ -5,7 +5,7 @@ import sys
 #TODO: get this to expose trainning and inference as a basic API to ED then swap it out for llama.cpp once mamba and mamba cuda/Rocm kernels are written
 
 #from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel
-from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel #AutoModelForCausalLM
+from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel #AutoModelForCausalLM
 import torch
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Dataset, DataLoader
@@ -16,7 +16,9 @@ from datasets import load_dataset
 import datasets
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
-#from mamba_ssm import Mamba2
+from mamba_ssm import Mamba2
+import mamba_ssm
+from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
 
 #fsdp_plugin = FullyShardedDataParallelPlugin(
 #    state_dict_config=FullStateDictConfig(offload_to_cpu=False, rank0_only=False),
@@ -38,8 +40,16 @@ import time
 
 # Load the model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
-model = MambaForCausalLM.from_pretrained("state-spaces/mamba-130m-hf").to("cuda")
+model_id = "AntonV/mamba2-130m-hf"
+model_id = "state-spaces/mamba2-130m"
+#tokenizer = AutoTokenizer.from_pretrained(model_id, from_slow=True, legacy=False)
+#model = MambaForCausalLM.from_pretrained("state-spaces/mamba2-130m").to("cuda")
+model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda")
+#conf = MambaConfig.from_pretrained(model_id)
+#model = Mamba2(conf)
+#model = AutoModel.from_pretrained(model_id)
 #model = Mamba2.from_pretrained("state-spaces/mamba2-370m").to("cuda")
+#model = MambaLMHeadModel.from_pretrained(model_id, "cuda")
 #TODO: try tensor parallelism since we get an error on FSDP due to dimension and ops (most things only try to support transformers)
 #model = accelerator.prepare(model)
 
@@ -91,6 +101,7 @@ def closure():
   optimizer.zero_grad() #TODO: do we still need to do this?
   # Training loop
   outputs = model(input_ids, attention_mask=attention_mask ,labels=input_ids)
+#  outputs = model.forward(input_ids, position_ids=attention_mask ,labels=input_ids)
   loss = outputs.loss
 #  accelerator.backward(loss) #TODO: accelerate.backward() instead, we should then be able to remove the .to("cuda") lines as well
   loss.backward()
@@ -99,10 +110,10 @@ def closure():
   #NOTE: overflow mechanism similar to accumulating half precision to full precision but we simulate less than half precision in f32
 #  torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=8000000) 
   #NOTE: we normalize to 10 here but essentially this should set the max variance in an update and is sufficient that we dont need weight decay (is there any benefit to weight decay over this? weight decay seems to damage prior data in the network over time)
-#NOTE: 10. or 5. is set based on derivative of the activation function for expressivity, in our case tanh keep in mind this is not the max weight but the max movement of a weight.
+#NOTE: 10. or 2. is set based on derivative of the activation function for expressivity, in our case tanh keep in mind this is not the max weight but the max movement of a weight.
   torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1.)  
 #  if accelerator.sync_gradients:
-#        accelerator.clip_grad_norm_(model.parameters(), 1e20)
+#        accelerator.clip_grad_norm_(model.parameters(), 1e2)
 
   end_time = time.time()
   elapsed_time = end_time - start_time
@@ -135,12 +146,12 @@ while True:
 #TODO: fix this....
 #    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text']
     batch_train = next(data_iter_train)['text']
-    for _ in range(50-1):
+    for _ in range(35-1):
       batch_train += next(data_iter_train)['text']
-    #TODO: need to concatenate the arrays here. Keep them in batch size of 5 but concatenate entrywise.
+    #TODO: need to concatenate the arrays here. Keep them in batch size of 35 but concatenate entrywise.
     from itertools import islice
-    batch_train = [" ".join(batch_train[i:i+50]) for i in range(0, len(batch_train), 50)]
-#    batch_train = str((" ".join(list(islice(iterator, 5))) for iterator in [batch_train] if list(islice(iterator, 5))))
+    batch_train = [" ".join(batch_train[i:i+35]) for i in range(0, len(batch_train), 35)]
+#    batch_train = str((" ".join(list(islice(iterator, 40))) for iterator in [batch_train] if list(islice(iterator, 40))))
   except StopIteration:
 #    break
 #    data_iter_train = iter(dataloader_train)
@@ -162,7 +173,7 @@ while True:
   prompt = "The Factor programming language is "
   input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
   with torch.no_grad():
-    generated_ids = model.generate(input_ids, max_length=50, num_return_sequences=1)
+    generated_ids = model.generate(input_ids, max_length=20, num_return_sequences=1)
     generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     print(f"Model response: {generated_text}")
 #
