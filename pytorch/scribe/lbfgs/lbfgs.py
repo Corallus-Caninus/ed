@@ -441,9 +441,12 @@ class LBFGS(Optimizer):
               H_diag = 1
           else:
               # do lbfgs update (update memory).to("cpu")
-              y = flat_grad.sub(prev_flat_grad).to("cpu")
-              s = d.to("cuda").mul(t).to("cpu")
-              ys = y.dot(s).to("cpu")  # y*s
+              y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
+              s = (d.to("cuda").mul(t.to("cuda")))
+              ys = y.dot(s)#y*s
+#              y = y.to("cpu")
+#              s = s.to("cpu")
+#              ys = ys.to("cpu")
               if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
                   # updating memory
                   if len(old_dirs) == history_size:
@@ -453,9 +456,9 @@ class LBFGS(Optimizer):
                       ro.pop(0)
   
                   # store new direction/step
-                  old_dirs.append(y)
-                  old_stps.append(s)
-                  ro.append(1.0 / ys)
+                  old_dirs.append(y.to("cpu"))
+                  old_stps.append(s.to("cpu"))
+                  ro.append((1.0 / ys).to("cpu"))
   
                   # update scale of initial Hessian approximation
                   H_diag = ys / y.dot(y)  # (y*y)
@@ -471,15 +474,17 @@ class LBFGS(Optimizer):
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.to("cuda").neg()
               for i in range(num_old - 1, -1, -1):
-                  al[i] = (old_stps[i].to("cuda").dot(q.to("cuda")) * ro[i].to("cuda")).to("cpu")
-                  q.add_(old_dirs[i].to("cuda"), alpha=-al[i].to("cuda"))
+                  al[i] = (old_stps[i].to("cuda").dot(q.to("cuda")) * ro[i].to("cuda"))
+                  q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
+                  al[i] = al[i].to("cpu")
 
               # multiply by initial Hessian
               # r/d is the final direction
-              d = r = torch.mul(q, H_diag)
+              d = r = torch.mul(q.to("cuda"), H_diag.to("cuda"))
               for i in range(num_old):
-                  be_i = old_dirs[i].to("cuda").dot(r) * ro[i]
+                  be_i = old_dirs[i].to("cuda").dot(r) * ro[i].to("cuda")
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
+              H_diag = H_diag.to("cpu")
 
           if prev_flat_grad is None:
               prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
@@ -494,11 +499,11 @@ class LBFGS(Optimizer):
           if state["n_iter"] == 1:
 #TODO:  numerator is a momentum like term that balances the search start point based on if the gradient is vanishing
 #TODO:   extract this to a hyperparameter for tolerance_momentum
-            t = min(1., 1. / flat_grad.abs().sum()) #* lr
+            t = min(1., 1. / flat_grad.to("cuda").abs().sum()) #* lr
   #          avg = avg / torch.tensor(flat_grad.size(1)).to("cuda")
   #.div(torch.tensor(flat_grad.size()).to("cuda"))
           else:
-            avg = flat_grad.abs().mean()
+            avg = flat_grad.to("cuda").abs().mean()
             print("got avg: " + str(avg))
             t = min(1e4, 1e-4/ avg)
             print("got t: " + str(t))
@@ -508,8 +513,8 @@ class LBFGS(Optimizer):
           gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
           flat_grad = flat_grad.to("cpu")
           gtd=gtd.to("cpu")
-          d = d.to("cpu") #TODO: optimize the loading order and code review the transfers. Extract to parameter for L-BFGS
-          t = t.to("cpu") #TODO: optimize the loading order and code review the transfers. Extract to parameter for L-BFGS
+          d = d.to("cpu") 
+          t = t.to("cpu") 
 
           # directional derivative is below tolerance
 #NOTE: if we dont break here we are surely going to zoom on the bracket. This is preferable to just skipping until the data point aligns with the hessian but may prefer reseting the hessian instead.
