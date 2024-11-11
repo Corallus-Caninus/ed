@@ -481,7 +481,8 @@ class LBFGS(Optimizer):
               # multiply by initial Hessian
               # r/d is the final direction
               d = r = torch.mul(q, H_diag)
-              H_diag = H_diag.to("cpu")
+              if H_diag != 1:
+                H_diag = H_diag.to("cpu")
               for i in range(num_old):
                   be_i = old_dirs[i].to("cuda").dot(r) * ro[i].to("cuda")
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
