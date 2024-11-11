@@ -62,7 +62,7 @@ dataset = dataset.filter(lambda item: item['text'][0]!=0)
 #TODO: use dataset functions to avoid loading the dataset into memory 
 #TODO: label these
 #TODO: this is only useful for cross-validation
-dataloader_train = DataLoader(dataset, batch_size=2, shuffle=False)
+dataloader_train = DataLoader(dataset, batch_size=1, shuffle=False)
 #dataloader_train = [x for x in dataloader_train if len(x['text'][0])!=0]
 #TODO: clump together n number of entries to ensure length is sufficiently long considering the worse case of minimum_line_length*n
 from itertools import islice
@@ -133,10 +133,13 @@ while True:
   try:
 #    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']
 #TODO: fix this....
-    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text']
+#    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text']
+    batch_train = next(data_iter_train)['text']
+    for _ in range(50-1):
+      batch_train += next(data_iter_train)['text']
     #TODO: need to concatenate the arrays here. Keep them in batch size of 5 but concatenate entrywise.
     from itertools import islice
-    batch_train = [" ".join(batch_train[i:i+10]) for i in range(0, len(batch_train), 10)]
+    batch_train = [" ".join(batch_train[i:i+50]) for i in range(0, len(batch_train), 50)]
 #    batch_train = str((" ".join(list(islice(iterator, 5))) for iterator in [batch_train] if list(islice(iterator, 5))))
   except StopIteration:
 #    break
@@ -144,7 +147,7 @@ while True:
     print("------------EPOCH COMPLETE----------")
 
 
-  tokenized_input = tokenizer(batch_train,truncation=True,  padding=True,max_length=150, return_overflowing_tokens=True, return_length=True,return_tensors='pt').to("cuda")
+  tokenized_input = tokenizer(batch_train,truncation=True,  padding=False, return_overflowing_tokens=True, return_length=True,return_tensors='pt').to("cuda")
 #  tokenized_input = tokenizer(batch_train, padding=True,truncation=True,return_tensors="pt")
   print(batch_train)
   input_ids, attention_mask = (tokenized_input.input_ids, tokenized_input.attention_mask)
