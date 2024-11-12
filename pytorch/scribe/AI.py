@@ -1,10 +1,11 @@
-#import causal_conv1d
+#odel.parameters(), cl
+#ip_value=
+#8000000)  
+#
+# #NOTE: we normalize to 10 here but essentially this should set the max variance in an update and is sufficient that we dont need weight decay (is there
+#
+# any benefit to weight decay over this? weight decay seems to damage prior data in
 import os
-import sys
-
-#TODO: get this to expose trainning and inference as a basic API to ED then swap it out for llama.cpp once mamba and mamba cuda/Rocm kernels are written
-
-#from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel
 from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel #AutoModelForCausalLM
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -14,11 +15,13 @@ from lbfgs import LBFGS
 #torch.set_num_threads(12)
 from datasets import load_dataset
 import datasets
+from datasets import Dataset
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
-from mamba_ssm import Mamba2
-import mamba_ssm
-from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
+import pickle
+#from mamba_ssm import Mamba2
+#import mamba_ssm
+#from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
 
 #fsdp_plugin = FullyShardedDataParallelPlugin(
 #    state_dict_config=FullStateDictConfig(offload_to_cpu=False, rank0_only=False),
@@ -45,6 +48,7 @@ model_id = "state-spaces/mamba2-130m"
 #tokenizer = AutoTokenizer.from_pretrained(model_id, from_slow=True, legacy=False)
 #model = MambaForCausalLM.from_pretrained("state-spaces/mamba2-130m").to("cuda")
 model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda")
+#model = accelerator.prepare(model)
 #conf = MambaConfig.from_pretrained(model_id)
 #model = Mamba2(conf)
 #model = AutoModel.from_pretrained(model_id)
@@ -66,13 +70,52 @@ if os.path.exists(filename):
   unwrapped_model.load_state_dict(torch.load(filename))
 
 #dataset = load_dataset(path="datasets", split="train", sample_by="paragraph")
-dataset = load_dataset(path="datasets", split="train")
-print(dataset)
-dataset = dataset.filter(lambda item: item['text'][0]!=0)
+#dataset = load_dataset(path="datasets", split="train")
+datalist = []
+#if os.path.exists("datalist.pkl"):
+if os.path.exists("chunked.ds"):
+    dataset = datasets.load_from_disk("chunked.ds")
+#  with open('my_list.pkl', 'rb') as file:
+#      loaded_list = pickle.load(file)
+else:
+    dataset = load_dataset(path="datasets", split="train")
+    print(dataset)
+    i = 0
+    batch_train = ""
+    from itertools import islice
+    def encode(examples):
+        global batch_train
+        global i
+        if i >=30:
+    #    for _ in range(10-1):
+    #      batch_train += next(examples)['text']
+#          res = [" ".join(batch_train[0:i]) for i in range(0, len(batch_train), 10)]
+          res = batch_train
+#          for stg in batch_train:
+#            res += stg
+#          print("got: " + str(batch_train))
+          batch_train = ""
+          i = 0
+          return {"text": res}
+#          res = tokenizer(res,truncation=True, max_length=500,padding=False, return_overflowing_tokens=True, return_length=True,return_tensors='pt')
+#          print({"text": res})
+#          return {'text': {"input_ids": res.input_ids, "attention_mask": res.attention_mask}}
+#          datalist.append(res)
+        else:
+          i += 1
+          batch_train += examples['text']
+          return {"text": None}
+    #    batch_train = str((" ".join(list(islice(iterator, 40))) for iterator in [batch_train] if list(islice(iterator, 40))))
+#    dataset = dataset.filter(lambda item: item['text'][0]!=0)
+    dataset = dataset.map(encode)
+    dataset = dataset.filter(lambda item: item['text'] != None )
+    dataset.save_to_disk("chunked.ds")
+#    with open('datalist.pkl', 'wb') as file:
+#      pickle.dump(datalist, file)
 #TODO: use dataset functions to avoid loading the dataset into memory 
 #TODO: label these
 #TODO: this is only useful for cross-validation
-dataloader_train = DataLoader(dataset, batch_size=1, shuffle=False)
+dataloader_train = DataLoader(dataset, batch_size=2, shuffle=True)
 #dataloader_train = [x for x in dataloader_train if len(x['text'][0])!=0]
 #TODO: clump together n number of entries to ensure length is sufficiently long considering the worse case of minimum_line_length*n
 from itertools import islice
@@ -88,7 +131,9 @@ null = None
 no = None
 #null, no, model, optimizer = accelerator.prepare(
 #    null, no, model, optimizer
-optimizer,  dataloader_train = accelerator.prepare(optimizer,  dataloader_train)
+dataloader_train, optimizer = accelerator.prepare( dataloader_train, optimizer)
+#data_iter_train = iter(dataloader_train)
+#data_iter_train = iter(dataset['text'])
 data_iter_train = iter(dataloader_train)
 
 batch_train = None
@@ -141,29 +186,33 @@ while True:
   print("iterating epoch..\n\n")
   
   # Perform optimization step
-  try:
+#  try:
 #    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']
-#TODO: fix this....
-#    batch_train = next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text']  + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text'] + next(data_iter_train)['text']
-    batch_train = next(data_iter_train)['text']
-    for _ in range(35-1):
-      batch_train += next(data_iter_train)['text']
-    #TODO: need to concatenate the arrays here. Keep them in batch size of 35 but concatenate entrywise.
-    from itertools import islice
-    batch_train = [" ".join(batch_train[i:i+35]) for i in range(0, len(batch_train), 35)]
+#TODO: fix this.... Currently we parallelize at the iterator so each model gets every other next of the iter..
+#    batch_train = next(data_iter_train)['text']
+#    for _ in range(5-1):
+#      batch_train += next(data_iter_train)['text']
+#    #TODO: need to concatenate the arrays here. Keep them in batch size of 5 but concatenate entrywise.
+#    from itertools import islice
+#    batch_train = [" ".join(batch_train[i:i+5]) for i in range(0, len(batch_train), 5)]
 #    batch_train = str((" ".join(list(islice(iterator, 40))) for iterator in [batch_train] if list(islice(iterator, 40))))
-  except StopIteration:
+#  except StopIteration:
 #    break
 #    data_iter_train = iter(dataloader_train)
-    print("------------EPOCH COMPLETE----------")
+#    print("------------EPOCH COMPLETE----------")
 
 
-  tokenized_input = tokenizer(batch_train,truncation=True,  padding=False, return_overflowing_tokens=True, return_length=True,return_tensors='pt').to("cuda")
-#  tokenized_input = tokenizer(batch_train, padding=True,truncation=True,return_tensors="pt")
+#  tokenized_input = tokenizer(batch_train,truncation=True, max_length=500,padding=False, return_overflowing_tokens=True, return_length=True,return_tensors='pt').to("cuda")
+#  for i in data_iter_train:
+#    print(i)
+  batch_train = next(data_iter_train)['text']
   print(batch_train)
-  input_ids, attention_mask = (tokenized_input.input_ids, tokenized_input.attention_mask)
-  print("input_ids shape:", input_ids.shape)
-  print("attention_mask shape:", attention_mask.shape)
+#  print(batch_train)
+  tokens = tokenizer(batch_train,truncation=True, max_length=200,padding=True, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+  print(tokens)
+#  tokenized_input = tokenizer(batch_train, padding=True,truncation=True,return_tensors="pt")
+  input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
+#  input_ids, attention_mask = (tokenized_input.input_ids, tokenized_input.attention_mask)
 
   print("-----------------------step---------------------")
   optimizer.step(closure)

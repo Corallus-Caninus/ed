@@ -9,7 +9,7 @@ pkgs.mkShell {
     pkgs.linuxPackages.nvidia_x11_legacy470
 #    pkgs.glibc
 #    pkgs.glib
-    pkgs.gcc11
+    pkgs.gcc12
     pkgs.gcc-unwrapped
     pkgs.ninja
 #    pkgs.python3Packages.pytorchWithCuda

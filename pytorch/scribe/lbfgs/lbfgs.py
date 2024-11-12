@@ -352,7 +352,7 @@ class LBFGS(Optimizer):
             p.copy_(pdata)
 
     def _directional_evaluate(self, closure, x, t, d):
-        self._add_grad(t.to("cuda"), d.to("cuda"))
+        self._add_grad(t, d.to("cuda"))
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
         self._set_param(x)
@@ -515,7 +515,7 @@ class LBFGS(Optimizer):
           flat_grad = flat_grad.to("cpu")
           gtd=gtd.to("cpu")
           d = d.to("cpu") 
-          t = t.to("cpu") 
+#          t = t.to("cpu") 
 
           # directional derivative is below tolerance
 #NOTE: if we dont break here we are surely going to zoom on the bracket. This is preferable to just skipping until the data point aligns with the hessian but may prefer reseting the hessian instead.
