@@ -5,6 +5,8 @@ from torch import Tensor
 #from .optimizer import Optimizer, ParamsT
 from torch.optim.optimizer import Optimizer, ParamsT
 
+#NOTE: we use 1e+/-16 as the max resolution to avoid NaN in accumulation operations this needs to be solved more robustly. 
+# we may not need to accumulate due to the momentum nature (the q and d have to vanish which could compensate the step size explosion in the direction calculation) of the direction calculation but need to ensure this doesnt happen before assuming
 
 __all__ = ["LBFGS"]
 
@@ -40,10 +42,9 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 
 def _strong_wolfe(
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-9, max_ls=20
+    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
-#TODO: gtd d_norm etc should probably stay in VRAM since this is the maximum allocated VRAM anyways whether we swap or not
 #    d_norm = d.to("cuda").abs().max()
 #    d_norm = d_norm.to("cpu")
     g = g.clone(memory_format=torch.contiguous_format).to("cpu")
@@ -52,12 +53,8 @@ def _strong_wolfe(
     ls_func_evals = 1
     gtd_new = g_new.to("cuda").dot(d.to("cuda"))
     gtd_new = gtd_new.to("cpu")
+    t_orig = t
 
-#    t_orig = t
-#TODO: TEST
-#    t = 2*t
-#    t_prev = t/2
-#TODO: TEST
 
     # bracket an interval containing a point satisfying the Wolfe criteria
     t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
@@ -89,10 +86,10 @@ def _strong_wolfe(
             break
 
 
-#        min_step = t + 0.01 * (t - t_prev)
+        min_step = t + 0.01 * (t - t_prev)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
-        min_step = lower_bracket/10
+#        min_step = lower_bracket/10
         max_step = upper_bracket* 10
 #        min_step = t_prev/10
 #        max_step = t * 10
@@ -179,7 +176,7 @@ def _strong_wolfe(
         # line-search bracket is so small
 #TODO: extract stall_wolfe hyperparameter
 #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 4:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
             print("----WOLFE PACK----")
             return f_best, g_best, t_best, ls_func_evals
             	#TODO: return the wolfe pack here
@@ -205,7 +202,7 @@ def _strong_wolfe(
         # we will move `t` to a position which is `0.1 * len(bracket)`
         # away from the nearest boundary point.
         #  TODO: I worry about this...
-        eps = 0.1 * (max(bracket) - min(bracket))
+        eps = 0.33 * (max(bracket) - min(bracket))
 #        eps = tolerance_change * (max(bracket) - min(bracket))
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
@@ -213,10 +210,16 @@ def _strong_wolfe(
                 # evaluate at 0.1 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
-                    t = t - 0.6*(t - displacement)
+                    t = t - 0.33*(t - displacement)
+                    print("punt", end = " ")
+#                    t = t - abs(t_orig/t)*(t - displacement)
+                    #print("punt by " + str(t_orig/t))
                 else:
                     displacement = min(bracket) + eps
-                    t = t + 0.6*(displacement - t)
+                    t = t + 0.33*(displacement - t)
+                    print("punt", end = " ")
+#                    t = t + abs(t_orig/t)*(displacement - t)
+                    #print("punt by " + str(t_orig/t))
             else:
                 insuf_progress = True
         else:
@@ -235,7 +238,7 @@ def _strong_wolfe(
         cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda") 
 #        if cur_c2 < best_c2 && cur_c1 < best_c1:
 #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
-        if cur_c2 < best_c2  and f_new < f:
+        if cur_c2 <= best_c2 :
 #          print("---GOT NEW WOLFE PACK---")
 #          best_c1 = cur_c1
           stall_wolfe = 0
@@ -245,7 +248,7 @@ def _strong_wolfe(
           g_best = g_new
         else:
           stall_wolfe += 1
-        if stall_wolfe == 4:
+        if stall_wolfe >= 3:
           print("---STALL WOLFE---")
 
         if f_new > (f + c1 * t * gtd.to("cuda")) or f_new >= bracket_f[low_pos]:
@@ -321,8 +324,8 @@ class LBFGS(Optimizer):
         lr: Union[float, Tensor] = 1,
         max_iter: int = 20,
         max_eval: Optional[int] = None,
-        tolerance_grad: float = 1e-7,
-        tolerance_change: float = 1e-9,
+        tolerance_grad: float = 1e-16,
+        tolerance_change: float = 1e-16,
         history_size: int = 100,
         line_search_fn: Optional[str] = None,
     ):
@@ -483,7 +486,7 @@ class LBFGS(Optimizer):
           else:
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
-              s = (d.to("cuda").mul(t.to("cuda")))
+              s = (d.to("cuda").mul(t))
               ys = y.dot(s)#y*s
               if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
                   # updating memory
@@ -533,6 +536,16 @@ class LBFGS(Optimizer):
           else:
               prev_flat_grad.copy_(flat_grad).to("cpu")
           prev_loss = loss
+#          d=torch.norm(d, 1.)
+          # normalize the Hessian's direction
+          total_norm = torch.linalg.vector_norm(
+#                 torch.stack([norm.to(first_device) for norm in norms]), norm_type
+                 d,1.
+             )
+#          mean, std, var = torch.mean(d), torch.std(d), torch.var(d) 
+#           total_norm = torch.linalg.vector_norm(
+#          d = (d-mean)/std
+          d = d/total_norm
 
           ############################################################
           # compute step length
@@ -540,22 +553,30 @@ class LBFGS(Optimizer):
           # reset initial guess for step size
 #TODO:  numerator is a momentum like term that balances the search start point based on if the gradient is vanishing
 #TODO:   extract this to a hyperparameter for tolerance_momentum
-          if state["n_iter"] == 1:
-            t = min(1., 1. / flat_grad.to("cuda").abs().sum()) #* lr
+#          if state["n_iter"] == 1:
+#            t = min(1., 1. / flat_grad.to("cuda").abs().sum()) #* lr
 #  #          avg = avg / torch.tensor(flat_grad.size(1)).to("cuda")
 #  #.div(torch.tensor(flat_grad.size()).to("cuda"))
-          else:
-            avg = flat_grad.to("cuda").abs().mean()
-#          if avg < 1e-7: #TODO: gradient vanishing hyperparameter, this should be parametereized with the t calculation
-            print("got avg: " + str(avg)) 
-            t = min(5e5, 5e-5/ avg)
-            print("got t: " + str(t))
+#          else:
+#            avg = flat_grad.to("cuda").abs().mean()
+#            #TODO: we should also consider if the direction is vanishing, whichk apparantly can happen such that this t doesnt move more than epsilon and we never zoom phase(?)
+#            print("got avg: " + str(avg)) 
+#            t = min(5e5, 5e-5/ avg)
+#            print("got t: " + str(t))
 #          else:
 #            t = min(1., 1. / flat_grad.to("cuda").abs().sum()) #* lr
 #              t = lr
 
           # directional derivative
+  	#TODO: instead of the vanishing gradient, we check if the directional derivative is vanishing which is conditionally dependent for the vanishing gradient anyways (posterior) and also ensures the Hessian doesnt vanish
           gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
+#          if state["n_iter"] != 1:
+          avg = gtd.abs().mean()
+          print("got avg: " + str(avg)) 
+          t = min(1e16, 1/avg)
+#            t = min(5e5, 5e-5/ avg)
+          print("got t: " + str(t))
+
           flat_grad = flat_grad.to("cpu")
           gtd=gtd.to("cpu")
           d = d.to("cpu") 
@@ -614,6 +635,7 @@ class LBFGS(Optimizer):
 
           # optimal condition
           if opt_cond:
+              print("GRAD CONVERGE")
               break
 
           # lack of progress
