@@ -375,7 +375,11 @@ class LBFGS(Optimizer):
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
-        return torch.cat(views, 0).to("cpu")
+        grad_raw = torch.cat(views, 0)
+        norm = torch.linalg.vector_norm(grad_raw, 2)
+        grads = grad_raw/norm
+#        return torch.cat(views, 0).to("cpu")
+        return grads.to("cpu")
 
     def _add_grad(self, step_size, update):
         offset = 0
@@ -537,7 +541,7 @@ class LBFGS(Optimizer):
               prev_flat_grad.copy_(flat_grad).to("cpu")
           prev_loss = loss
 #          d=torch.norm(d, 1.)
-          # normalize the Hessian's direction
+          # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys
           total_norm = torch.linalg.vector_norm(
 #                 torch.stack([norm.to(first_device) for norm in norms]), norm_type
                  d,1.
