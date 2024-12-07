@@ -320,6 +320,7 @@ class LBFGS(Optimizer):
 
         self._params = self.param_groups[0]["params"]
         self._numel_cache = None
+        self.t = 1
 
     def _numel(self):
         if self._numel_cache is None:
@@ -434,7 +435,6 @@ class LBFGS(Optimizer):
       H_diag = state.get("H_diag")
       prev_flat_grad = state.get("prev_flat_grad")
       prev_loss = state.get("prev_loss")
-      t_prev = 1
 
       n_iter = 0
       # optimize for a max of max_iter iterations
@@ -546,7 +546,7 @@ class LBFGS(Optimizer):
 #          avg = gtd.abs().mean()
 #          print("got avg: " + str(avg)) 
 ##          t = min(1e16, 1/avg)
-          t = t_prev #TODO: this should be set based on an average of step sizes or something. We can track what the learning rate should be to increase the speed of bracket search without missing points at lower step sizes.
+          t = self.t #TODO: this should be set based on an average of step sizes or something. We can track what the learning rate should be to increase the speed of bracket search without missing points at lower step sizes.
 ##            t = min(5e5, 5e-5/ avg)
 #          print("got t: " + str(t))
 
@@ -579,7 +579,7 @@ class LBFGS(Optimizer):
               if not success: #TODO: we chase misprinted lines
                 t = 1 #Unit vector until we restore curvature
                 loss, flat_grad = obj_func(x_init, t, d)
-              t_prev = t
+              self.t  = t
               self._add_grad(t, d)
               print("got stepsize: " + str(t) + "  and loss: " + str(loss))
               opt_cond = flat_grad.abs().max() <= tolerance_grad
