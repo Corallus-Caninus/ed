@@ -2,7 +2,6 @@ from typing import Optional, Union
 import torch
 from torch import Tensor
 
-#from .optimizer import Optimizer, ParamsT
 from torch.optim.optimizer import Optimizer, ParamsT
 
 #NOTE: we use 1e+/-16 as the max resolution to avoid NaN in accumulation operations this needs to be solved more robustly. 
@@ -36,13 +35,13 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
             min_pos = x1 - (x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2))
         return min(max(min_pos, xmin_bound), xmax_bound)
     else:
-        print("INTERPOLATION FAIL")
         return (xmin_bound + xmax_bound) / 2.0
 
 
 def _strong_wolfe(
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
+    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.01, tolerance_change=1e-16, max_ls=25
+#    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
 #    d_norm = d.to("cuda").abs().max()
@@ -54,7 +53,7 @@ def _strong_wolfe(
     gtd_new = g_new.to("cuda").dot(d.to("cuda"))
     gtd_new = gtd_new.to("cpu")
     t_orig = t
-
+    success = False
 
     # bracket an interval containing a point satisfying the Wolfe criteria
     t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
@@ -62,20 +61,20 @@ def _strong_wolfe(
     ls_iter = 0
     while ls_iter < max_ls:
         # check conditions
-        if  (f_new > (f + c1 * t * gtd.to("cuda")) or (ls_iter > 1 and f_new >= f_prev)) :
-#        if  ( (ls_iter > 1 and f_new >= f_prev)) :
+        if  (f_new > (f + c1 * t * gtd.to("cuda"))): #or (ls_iter > 1 and f_new >= f_prev)) :
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
             bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
-        if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda"):
+        if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda") and f_new < f: #TODO: loss check should be redundant here
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
             done = True
-            print("-----FAST WOLFE-----")
+            success = True
+            print("FAST WOLFE")
             break
 
         if gtd_new >= 0 :
@@ -86,42 +85,10 @@ def _strong_wolfe(
             break
 
 
-        min_step = t + 0.01 * (t - t_prev)
+        min_step = t + 0.00001 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
-#        min_step = lower_bracket/10
-        max_step = upper_bracket* 10
-#        min_step = t_prev/10
-#        max_step = t * 10
-        print(min_step)
-        print(max_step)
-#        min_step = t + 1/t_orig * (t - t_prev)
-#        max_step = t * t_orig
-#        if t > t_prev and ls_iter > 0:
-#          min_step = t  
-#          max_step = t * t_orig
-#        elif t < t_prev:
-#          min_step = t /t_orig
-#          max_step = t
-#        else:
-#          min_step = t_prev
-#          max_step = t
-
-#        if t > 0:
-#          min_step = t + (t/t_orig) * (t - t_prev)
-#        else:
-#          min_step = 0
-#TODO: TEST
-#        if t > t_prev:
-#          min_step = t + (1/t_orig) * (t - t_prev)
-#          max_step = t * 10
-#        else:
-#          min_step =  t/t_orig
-#          max_step = t + (1/t_orig)*(t-t_prev)
-
-#        min_step = max(0, t-t_orig)
-#        max_step = t + t_orig
-#TODO: TEST
+        max_step = upper_bracket * 10
   
         # interpolate
         tmp = t
@@ -144,27 +111,30 @@ def _strong_wolfe(
         ls_iter += 1
 
     # reached max number of iterations?
-#    if ls_iter == max_ls:
-##        bracket = [0, t]
-##        bracket_f = [f, f_new]
-##        bracket_g = [g, g_new]
-#        bracket = [t_prev, t]
-#        bracket_f = [f_prev, f_new]
-#        bracket_g = [g_prev, g_new]
-#        bracket_gtd = [gtd_prev, gtd_new]
+    if ls_iter == max_ls:
+#TODO: this is actually better, big zoom if we are out of iterations.
+#        bracket = [0, t]
+#        bracket_f = [f, f_new]
+#        bracket_g = [g, g_new]
+        bracket = [t_prev, t]
+        bracket_f = [f_prev, f_new]
+        bracket_g = [g_prev, g_new]
+        bracket_gtd = [gtd_prev, gtd_new]
 
     # zoom phase: we now have a point satisfying the criteria, or
     # a bracket around it. We refine the bracket until we find the
     # exact point satisfying the criteria
     # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
-    t_best = t
+
+    # If linesearch fails, we return the unit vector until we restore sufficient curvature
+    t_best = t 
     f_best = f
     g_best = g
     best_c1 = 0
     best_c2 = 0
     ls_iter=0
     stall_wolfe=0
-#TODO: a better solution to force wolf search: include wolfe-pack in the bracket search algorithm then we wont need this. or just zoom and down bracket (given the momentum learning rate boosting t
+
 #    if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
 #      bracket[0] = 0.
 
@@ -177,8 +147,8 @@ def _strong_wolfe(
 #TODO: extract stall_wolfe hyperparameter
 #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
         if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
-            print("----WOLFE PACK----")
-            return f_best, g_best, t_best, ls_func_evals
+            print("WOLFE PACK")
+            return success, f_best, g_best, t_best, ls_func_evals
             	#TODO: return the wolfe pack here
 #            break
 
@@ -201,25 +171,21 @@ def _strong_wolfe(
         #   + `t` is at one of the boundary,
         # we will move `t` to a position which is `0.1 * len(bracket)`
         # away from the nearest boundary point.
-        #  TODO: I worry about this...
+        #  TODO: This needs to be set based on how large our brackets are. We miss the point with these literal parameters when we arent zooming a large domain.
         eps = 0.33 * (max(bracket) - min(bracket))
 #        eps = tolerance_change * (max(bracket) - min(bracket))
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
             if insuf_progress or t >= max(bracket) or t <= min(bracket):
-                # evaluate at 0.1 away from boundary
+                # evaluate at 0.33 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
                     t = t - 0.33*(t - displacement)
                     print("punt", end = " ")
-#                    t = t - abs(t_orig/t)*(t - displacement)
-                    #print("punt by " + str(t_orig/t))
                 else:
                     displacement = min(bracket) + eps
                     t = t + 0.33*(displacement - t)
                     print("punt", end = " ")
-#                    t = t + abs(t_orig/t)*(displacement - t)
-                    #print("punt by " + str(t_orig/t))
             else:
                 insuf_progress = True
         else:
@@ -238,9 +204,10 @@ def _strong_wolfe(
         cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda") 
 #        if cur_c2 < best_c2 && cur_c1 < best_c1:
 #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
-        if cur_c2 <= best_c2 :
+        if cur_c2 <= best_c2 and f_new <= f:
 #          print("---GOT NEW WOLFE PACK---")
 #          best_c1 = cur_c1
+          success = True
           stall_wolfe = 0
           best_c2 = cur_c2
           t_best = t
@@ -249,7 +216,7 @@ def _strong_wolfe(
         else:
           stall_wolfe += 1
         if stall_wolfe >= 3:
-          print("---STALL WOLFE---")
+          print("STALL WOLFE")
 
         if f_new > (f + c1 * t * gtd.to("cuda")) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
@@ -261,7 +228,7 @@ def _strong_wolfe(
         else:
             if abs(gtd_new) <= -c2 * gtd.to("cuda"):
                 # Wolfe conditions satisfied
-                print("-----STRONG WOLFE-----")
+                print("STRONG WOLFE")
                 done = True
             elif gtd_new * (bracket[high_pos] - bracket[low_pos]) >= 0:
                 # old high becomes new low
@@ -281,7 +248,7 @@ def _strong_wolfe(
     t = bracket[low_pos]  # type: ignore[possibly-undefined]
     f_new = bracket_f[low_pos]
     g_new = bracket_g[low_pos]  # type: ignore[possibly-undefined]
-    return f_new, g_new, t, ls_func_evals
+    return success, f_new, g_new, t, ls_func_evals
 
 
 class LBFGS(Optimizer):
@@ -467,6 +434,7 @@ class LBFGS(Optimizer):
       H_diag = state.get("H_diag")
       prev_flat_grad = state.get("prev_flat_grad")
       prev_loss = state.get("prev_loss")
+      t_prev = 1
 
       n_iter = 0
       # optimize for a max of max_iter iterations
@@ -572,14 +540,15 @@ class LBFGS(Optimizer):
 #              t = lr
 
           # directional derivative
-  	#TODO: instead of the vanishing gradient, we check if the directional derivative is vanishing which is conditionally dependent for the vanishing gradient anyways (posterior) and also ensures the Hessian doesnt vanish
+  	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
           gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
 #          if state["n_iter"] != 1:
-          avg = gtd.abs().mean()
-          print("got avg: " + str(avg)) 
-          t = min(1e16, 1/avg)
-#            t = min(5e5, 5e-5/ avg)
-          print("got t: " + str(t))
+#          avg = gtd.abs().mean()
+#          print("got avg: " + str(avg)) 
+##          t = min(1e16, 1/avg)
+          t = t_prev #TODO: this should be set based on an average of step sizes or something. We can track what the learning rate should be to increase the speed of bracket search without missing points at lower step sizes.
+##            t = min(5e5, 5e-5/ avg)
+#          print("got t: " + str(t))
 
           flat_grad = flat_grad.to("cpu")
           gtd=gtd.to("cpu")
@@ -604,13 +573,17 @@ class LBFGS(Optimizer):
 			#TODO: implement gradient clipping here
                       return self._directional_evaluate(closure, x, t, d)
 
-                  loss, flat_grad, t, ls_func_evals = _strong_wolfe(
+                  success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
                       obj_func, x_init, t, d, loss, flat_grad, gtd
                   )
+              if not success: #TODO: we chase misprinted lines
+                t = 1 #Unit vector until we restore curvature
+                loss, flat_grad = obj_func(x_init, t, d)
+              t_prev = t
               self._add_grad(t, d)
               print("got stepsize: " + str(t) + "  and loss: " + str(loss))
               opt_cond = flat_grad.abs().max() <= tolerance_grad
-              opt_cond = opt_cond or loss < 1e-5
+              opt_cond = opt_cond or loss <= 0
           else:
               # no line search, simply move with fixed-step
               self._add_grad(t, d)
@@ -638,6 +611,8 @@ class LBFGS(Optimizer):
 #              break
 
           # optimal condition
+#TODO: we may not need this, just let it hit epsilon grad or zero grad for number of iteration times?
+#TODO: also, dont exit on loss < 1e-5 as above, let that point break (loss <= 0) condition
           if opt_cond:
               print("GRAD CONVERGE")
               break

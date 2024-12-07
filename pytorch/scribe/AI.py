@@ -12,6 +12,9 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDic
 
 accelerator = Accelerator()
 filename = "AI_Checkpoint.ai"
+#TODO:  save/load the model and lbfgs history every n number of data iterations.
+#TODO: add LoRa and/or QLoRa so all the kids will try this and not gripe about the scaling
+#TODO: project Basilisk: parallelize the model layer-wise with the gradients. Also parallelize the flat-grads and gtd etc in L-BFGS-N. Simplest parallelization, assuming we are using commodity last-gen accelerators for edge learning, this will allow the most performant scale-out of models (e.g.: 3 k80's or 3 MI25's)
 
 import time
 tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
@@ -53,7 +56,7 @@ dataloader_train = DataLoader(dataset, batch_size=2, shuffle=True)
 
 model.train()
 
-optimizer = LBFGS(model.parameters(), lr=1., history_size=25, tolerance_change=1e-16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe")
+optimizer = LBFGS(model.parameters(), lr=1., history_size=22, tolerance_change=1e-16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe")
 dataloader_train, optimizer = accelerator.prepare( dataloader_train, optimizer)
 data_iter_train = iter(dataloader_train)
 
@@ -68,6 +71,7 @@ def closure():
   outputs = model(input_ids, attention_mask=attention_mask ,labels=input_ids)
   loss = outputs.loss
   loss.backward()
+  print("-", end="")
 #  torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1., norm_type=2) #TODO: try just l2 norming them here instead of with clipping
   end_time = time.time()
   elapsed_time = end_time - start_time
