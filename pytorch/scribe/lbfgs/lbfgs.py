@@ -40,7 +40,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 
 def _strong_wolfe(
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.01, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.5, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
@@ -85,7 +85,7 @@ def _strong_wolfe(
             break
 
 
-        min_step = t + 0.00001 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
+        min_step = t + 0.01 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
         max_step = upper_bracket * 10
