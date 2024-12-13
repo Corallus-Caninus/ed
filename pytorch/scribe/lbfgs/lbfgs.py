@@ -40,7 +40,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 
 def _strong_wolfe(
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.5, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=1e-2, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
@@ -50,8 +50,9 @@ def _strong_wolfe(
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
-    gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-    gtd_new = gtd_new.to("cpu")
+    gtd_new = g_new.dot(d.to("cuda"))
+    g_new = g_new.to("cpu")
+#    gtd_new = gtd_new.to("cpu")
     t_orig = t
     success = False
 
@@ -85,10 +86,11 @@ def _strong_wolfe(
             break
 
 
-        min_step = t + 0.01 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
+        min_step = t + 0.1 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
-        max_step = upper_bracket * 10
+        max_step = upper_bracket * 100
+#TODO: insufficient progress for bracket
   
         # interpolate
         tmp = t
@@ -96,8 +98,8 @@ def _strong_wolfe(
             t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
         )
 
-        gtd_prev = gtd_prev.to("cpu")
-        gtd_new = gtd_new.to("cpu")
+#        gtd_prev = gtd_prev.to("cpu")
+#        gtd_new = gtd_new.to("cpu")
 
         # next step
         t_prev = tmp
@@ -107,7 +109,8 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-        gtd_new = gtd_new.to("cpu")
+        g_new = g_new.to("cpu")
+#        gtd_new = gtd_new.to("cpu")
         ls_iter += 1
 
     # reached max number of iterations?
@@ -161,8 +164,8 @@ def _strong_wolfe(
             bracket_f[1],
             bracket_gtd[1].to("cuda"),
         )
-        bracket_gtd[1].to("cpu"),
-        bracket_gtd[0].to("cpu"),  # type: ignore[possibly-undefined]
+#        bracket_gtd[1].to("cpu"),
+#        bracket_gtd[0].to("cpu"),  # type: ignore[possibly-undefined]
 
         # test that we are making sufficient progress:
         # in case `t` is so close to boundary, we mark that we are making
@@ -195,7 +198,8 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-        gtd_new = gtd_new.to("cpu")
+        g_new = g_new.to("cpu")
+#        gtd_new = gtd_new.to("cpu")
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 				#TODO: DO THIS NEXT!! NOTE: since we can bail out of bracket we also need wolfe pack there or rework here.
@@ -212,7 +216,7 @@ def _strong_wolfe(
           best_c2 = cur_c2
           t_best = t
           f_best = f_new
-          g_best = g_new
+          g_best = g_new.to("cpu")
         else:
           stall_wolfe += 1
         if stall_wolfe >= 3:
@@ -347,7 +351,7 @@ class LBFGS(Optimizer):
         norm = torch.linalg.vector_norm(grad_raw, 2)
         grads = grad_raw/norm
 #        return torch.cat(views, 0).to("cpu")
-        return grads.to("cpu")
+        return grads #.to("cpu")
 
     def _add_grad(self, step_size, update):
         offset = 0
@@ -362,6 +366,7 @@ class LBFGS(Optimizer):
 
     def _clone_param(self):
         return [p.clone(memory_format=torch.contiguous_format).to("cpu") for p in self._params]
+#        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
     def _set_param(self, params_data):
         for p, pdata in zip(self._params, params_data):
@@ -550,9 +555,12 @@ class LBFGS(Optimizer):
 ##            t = min(5e5, 5e-5/ avg)
 #          print("got t: " + str(t))
 
-          flat_grad = flat_grad.to("cpu")
-          gtd=gtd.to("cpu")
-          d = d.to("cpu") 
+#          flat_grad = flat_grad.to("cpu")
+#          gtd=gtd.to("cpu")
+          flat_grad = flat_grad
+          gtd=gtd
+#          d = d.to("cpu") 
+          d = d 
 #          t = t.to("cpu") 
 
           # directional derivative is below tolerance
@@ -579,10 +587,11 @@ class LBFGS(Optimizer):
               if not success: #TODO: we chase misprinted lines
                 t = 1 #Unit vector until we restore curvature
                 loss, flat_grad = obj_func(x_init, t, d)
+              flat_grad = flat_grad.to("cuda")
               self.t  = t
               self._add_grad(t, d)
               print("got stepsize: " + str(t) + "  and loss: " + str(loss))
-              opt_cond = flat_grad.abs().max() <= tolerance_grad
+              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
               opt_cond = opt_cond or loss <= 0
           else:
               # no line search, simply move with fixed-step
