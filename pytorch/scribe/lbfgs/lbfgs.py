@@ -467,8 +467,8 @@ class LBFGS(Optimizer):
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
               s = (d.to("cuda").mul(t))
 #TODO: can we scale ys by the convergence as an observation of the approximation accuracy? this only works if we dont have the Armijo condition checking for step size loss reduction efficiency. this is because shallow minima may require large step sizes which doesnt effect accuracy but armijo will prevent wolfe reduction since the loss doesnt reduce sufficiently for the step size needed to reach the relatively high loss minima)
-		#TODO: ys = flat_grad.dot(d)  * ys ?
               ys = y.dot(s)#y*s
+		#TODO: ys = flat_grad.dot(d)  * ys ?
               if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
                   # updating memory
                   if len(old_dirs) == history_size:
