@@ -222,6 +222,7 @@ def _strong_wolfe(
         if stall_wolfe >= 3:
           print("STALL WOLFE")
 
+#TODO why isnt gtd -abs(gtd) here?  actually, just false if gtd >= 0 this condition  we already know that just because we break on gtd and armijo in bracket we can still be within gtd and armijo error teritorry in zoom so we need to sanitize this. we may just need to check this in relaxed wolfe since strong wolfe is what checks this for sanitizing strong wolfe here. f <= condition may fix the gtd error already since passing a point of inflection would seemingly always increase loss?
         if f_new > (f + c1 * t * gtd.to("cuda")) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
@@ -335,6 +336,7 @@ class LBFGS(Optimizer):
 
         return self._numel_cache
 
+    # gather flat grads with L2 Normalization
     def _gather_flat_grad(self):
         views = []
         for p in self._params:
@@ -414,7 +416,7 @@ class LBFGS(Optimizer):
       state["func_evals"] += 1
 
       flat_grad = self._gather_flat_grad()
-      opt_cond = flat_grad.abs().max() <= tolerance_grad
+      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
 
       # optimal condition
 #      if opt_cond or loss != loss:
@@ -464,6 +466,8 @@ class LBFGS(Optimizer):
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
               s = (d.to("cuda").mul(t))
+#TODO: can we scale ys by the convergence as an observation of the approximation accuracy? this only works if we dont have the Armijo condition checking for step size loss reduction efficiency. this is because shallow minima may require large step sizes which doesnt effect accuracy but armijo will prevent wolfe reduction since the loss doesnt reduce sufficiently for the step size needed to reach the relatively high loss minima)
+		#TODO: ys = flat_grad.dot(d)  * ys ?
               ys = y.dot(s)#y*s
               if ys > 1e-10: #TODO: why isnt this tolerance hyperparam?
                   # updating memory
@@ -476,13 +480,13 @@ class LBFGS(Optimizer):
                   # store new direction/step
                   old_dirs.append(y.to("cpu"))
                   old_stps.append(s.to("cpu"))
-                  ro.append((1.0 / ys).to("cpu"))
+                  ro.append((1.0 / ys).to("cpu")) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
   
                   # update scale of initial Hessian approximation
                   H_diag = ys / y.dot(y)  # (y*y)
-              y = y.to("cpu")
-              s = s.to("cpu")
-              ys = ys.to("cpu")
+              y = y.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
+              s = s.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
+              ys = ys.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
 
               # compute the approximate (L-BFGS) inverse Hessian
               # multiplied by the gradient
@@ -502,8 +506,8 @@ class LBFGS(Optimizer):
               # multiply by initial Hessian
               # r/d is the final direction
               d = r = torch.mul(q, H_diag)
-              if H_diag != 1:
-                H_diag = H_diag.to("cpu")
+#              if H_diag != 1: #TODO: this should be freed we are wasting time by moving it to ram
+#                H_diag = H_diag.to("cpu")
               for i in range(num_old):
                   be_i = old_dirs[i].to("cuda").dot(r) * ro[i].to("cuda")
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
