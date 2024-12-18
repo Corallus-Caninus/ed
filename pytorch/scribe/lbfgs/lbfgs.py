@@ -469,7 +469,7 @@ class LBFGS(Optimizer):
 #TODO: can we scale ys by the convergence as an observation of the approximation accuracy? this only works if we dont have the Armijo condition checking for step size loss reduction efficiency. this is because shallow minima may require large step sizes which doesnt effect accuracy but armijo will prevent wolfe reduction since the loss doesnt reduce sufficiently for the step size needed to reach the relatively high loss minima)
               ys = y.dot(s)#y*s
 		#TODO: ys = flat_grad.dot(d)  * ys ?
-              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype
+              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
                   # updating memory
                   if len(old_dirs) == history_size:
                       # shift history by one (limited-memory)
