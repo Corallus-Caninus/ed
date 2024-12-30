@@ -41,7 +41,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=1e-2, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-2, c2=1e-2, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
@@ -151,7 +151,7 @@ def _strong_wolfe(
         # line-search bracket is so small
 #TODO: extract stall_wolfe hyperparameter
 #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 4:   # type: ignore[possibly-undefined]
             print("WOLFE PACK")
             return success, f_best, g_best, t_best, ls_func_evals
             	#TODO: return the wolfe pack here
@@ -204,27 +204,7 @@ def _strong_wolfe(
 #        gtd_new = gtd_new.to("cpu")
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
-				#TODO: DO THIS NEXT!! NOTE: since we can bail out of bracket we also need wolfe pack there or rework here.
-				#TODO: wolfe pack (take best armijo and wolfe condition, this will be effectively minimizing wolfe and maximizing armijo).
-#        cur_c1 = (f + t*gtd) - f_new
-        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
-#        if cur_c2 < best_c2 && cur_c1 < best_c1:
-#NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
-        if cur_c2 <= best_c2 and f_new <= f:
-#          print("---GOT NEW WOLFE PACK---")
-#          best_c1 = cur_c1
-          success = True
-          stall_wolfe = 0
-          best_c2 = cur_c2
-          t_best = t
-          f_best = f_new
-          g_best = g_new.to("cpu")
-        else:
-          stall_wolfe += 1
-        if stall_wolfe >= 3:
-          print("STALL WOLFE")
 
-#TODO why isnt gtd -abs(gtd) here?  actually, just false if gtd >= 0 this condition  we already know that just because we break on gtd and armijo in bracket we can still be within gtd and armijo error teritorry in zoom so we need to sanitize this. we may just need to check this in relaxed wolfe since strong wolfe is what checks this for sanitizing strong wolfe here. f <= condition may fix the gtd error already since passing a point of inflection would seemingly always increase loss?
         if f_new > (f + c1 * t * gtd.to("cuda")) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
@@ -233,9 +213,10 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
-            if abs(gtd_new) <= -c2 * gtd.to("cuda"):
+            if abs(gtd_new) <= -c2 * gtd.to("cuda") and f_new < f_best: #NOTE: Ward condition
                 # Wolfe conditions satisfied
                 print("STRONG WOLFE")
+                success = True
                 done = True
             elif gtd_new * (bracket[high_pos] - bracket[low_pos]) >= 0:
                 # old high becomes new low
@@ -244,12 +225,32 @@ def _strong_wolfe(
                 bracket_g[high_pos] = bracket_g[low_pos]  # type: ignore[possibly-undefined]
                 bracket_gtd[high_pos] = bracket_gtd[low_pos]
 
+            #RELAXED WOLFE CONDITION
+    #        cur_c1 = (f + t*gtd) - f_new
+            cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
+    #        if cur_c2 < best_c2 && cur_c1 < best_c1:
+    #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
+            if cur_c2 <= best_c2 and f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+    #          print("---GOT NEW WOLFE PACK---")
+    #          best_c1 = cur_c1
+              success = True
+              stall_wolfe = 0
+              best_c2 = cur_c2
+              t_best = t
+              f_best = f_new
+              g_best = g_new.to("cpu")
+
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
             bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
+#        else:
+        stall_wolfe += 1
+        if stall_wolfe >= 4:
+          print("STALL WOLFE")
+
 
     # return stuff
     t = bracket[low_pos]  # type: ignore[possibly-undefined]
