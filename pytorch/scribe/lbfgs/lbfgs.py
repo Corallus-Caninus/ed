@@ -39,6 +39,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 
 
 def _strong_wolfe(
+#TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
     obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=1e-2, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
@@ -86,11 +87,12 @@ def _strong_wolfe(
             break
 
 
-        min_step = t + 0.1 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
+#TODO: increase 100 and consider tuning 0.1 further
+        min_step = t + 0.618 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
         max_step = upper_bracket * 100
-#TODO: insufficient progress for bracket
+#TODO: insufficient progress for bracket maybe?
   
         # interpolate
         tmp = t
@@ -175,19 +177,19 @@ def _strong_wolfe(
         # we will move `t` to a position which is `0.1 * len(bracket)`
         # away from the nearest boundary point.
         #  TODO: This needs to be set based on how large our brackets are. We miss the point with these literal parameters when we arent zooming a large domain.
-        eps = 0.33 * (max(bracket) - min(bracket))
+        eps = 1/3 * (max(bracket) - min(bracket))
 #        eps = tolerance_change * (max(bracket) - min(bracket))
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
             if insuf_progress or t >= max(bracket) or t <= min(bracket):
-                # evaluate at 0.33 away from boundary
+                # evaluate at 1/3 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
-                    t = t - 0.33*(t - displacement)
+                    t = t - 0.618*(t - displacement)
                     print("punt", end = " ")
                 else:
                     displacement = min(bracket) + eps
-                    t = t + 0.33*(displacement - t)
+                    t = t + 0.618*(displacement - t)
                     print("punt", end = " ")
             else:
                 insuf_progress = True
@@ -205,7 +207,7 @@ def _strong_wolfe(
 				#TODO: DO THIS NEXT!! NOTE: since we can bail out of bracket we also need wolfe pack there or rework here.
 				#TODO: wolfe pack (take best armijo and wolfe condition, this will be effectively minimizing wolfe and maximizing armijo).
 #        cur_c1 = (f + t*gtd) - f_new
-        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda") 
+        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
 #        if cur_c2 < best_c2 && cur_c1 < best_c1:
 #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
         if cur_c2 <= best_c2 and f_new <= f:
@@ -340,6 +342,7 @@ class LBFGS(Optimizer):
     def _gather_flat_grad(self):
         views = []
         for p in self._params:
+            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
@@ -350,10 +353,12 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         grad_raw = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(grad_raw, 2)
-        grads = grad_raw/norm
+#        norm = torch.linalg.vector_norm(grad_raw, 2)
+#        grads = grad_raw/norm
 #        return torch.cat(views, 0).to("cpu")
-        return grads #.to("cpu")
+#        return grads #.to("cpu")
+#TODO: clip out NaN based on dtype max value
+        return grad_raw #.to("cpu")
 
     def _add_grad(self, step_size, update):
         offset = 0
@@ -416,11 +421,12 @@ class LBFGS(Optimizer):
       state["func_evals"] += 1
 
       flat_grad = self._gather_flat_grad()
-      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
+#TODO: remove this if we remove gradient normalization.
+#      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
+      opt_cond = flat_grad.abs().max() <= 0 #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
 
       # optimal condition
-#      if opt_cond or loss != loss:
-      if opt_cond:
+      if opt_cond or loss != loss:# NOTE: this is a NaN check via equivalence
           print("GRAD CONVERGED") #TODO: if we throw out the hessian, will the gradient norm be able to fix this? No, the normalization scalar coeficient is clamped @ 1 so we only scale the norm down.
 						#TODO: can we flip the c2 condition to force curvature to escape like momentum?or like a cosine schedule of learning rate based on sub-optimal convergence? ideally we just set c2 correctly but this would be much more robust and easier to tune.
 #TODO: instead of resetting, or alongside resetting, flip the linesearch to search for > C2 condition as a momentum factor.
@@ -466,24 +472,28 @@ class LBFGS(Optimizer):
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
               s = (d.to("cuda").mul(t))
-#TODO: can we scale ys by the convergence as an observation of the approximation accuracy? this only works if we dont have the Armijo condition checking for step size loss reduction efficiency. this is because shallow minima may require large step sizes which doesnt effect accuracy but armijo will prevent wolfe reduction since the loss doesnt reduce sufficiently for the step size needed to reach the relatively high loss minima)
               ys = y.dot(s)#y*s
-		#TODO: ys = flat_grad.dot(d)  * ys ?
-              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
-                  # updating memory
-                  if len(old_dirs) == history_size:
-                      # shift history by one (limited-memory)
-                      old_dirs.pop(0)
-                      old_stps.pop(0)
-                      ro.pop(0)
+#TODO: SCALE HESSIAN^-1 COMPONENTS BY ERROR TO REFINE APPROXIMATION MORE EFFICIENTLY
+#TODO: with normalization, armijo should be able to solve s.t. c1 <= 1 since loss reduction is 1:1 if the direction approx is 100% accurate since direction is normalized. We also can expect flat_grad.dot(d) to be 0 if approx is 100% accurate since we set number of iterations based on c2 condition convergence minima. e.g.: c2 = 0.9 we do 10 iterations for 100% reduction.
+		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
+#              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
+              if ys > 0.0: 
+                # updating memory
+                if len(old_dirs) == history_size:
+                    # shift history by one (limited-memory)
+                    old_dirs.pop(0)
+                    old_stps.pop(0)
+                    ro.pop(0)
+   
+                # store new direction/step
+                old_dirs.append(y.to("cpu"))
+                old_stps.append(s.to("cpu"))
+                ro.append((1.0 / ys).to("cpu")) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
   
-                  # store new direction/step
-                  old_dirs.append(y.to("cpu"))
-                  old_stps.append(s.to("cpu"))
-                  ro.append((1.0 / ys).to("cpu")) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
-  
-                  # update scale of initial Hessian approximation
-                  H_diag = ys / y.dot(y)  # (y*y)
+              # update scale of initial Hessian approximation
+#TODO: was this also shifted? check the original implementation
+              H_diag = ys / y.dot(y)  # (y*y)
+
               y = y.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
               s = s.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
               ys = ys.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
