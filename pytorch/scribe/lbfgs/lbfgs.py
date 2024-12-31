@@ -41,7 +41,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-2, c2=1e-2, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-1, c2=1e-1, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
@@ -61,6 +61,15 @@ def _strong_wolfe(
     t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
     done = False
     ls_iter = 0
+
+    t_best = t 
+    f_best = f
+    g_best = g
+    best_c1 = 0
+    best_c2 = 0
+    ls_iter=0
+    stall_wolfe=0
+
     while ls_iter < max_ls:
         # check conditions
         if  (f_new > (f + c1 * t * gtd.to("cuda"))): #or (ls_iter > 1 and f_new >= f_prev)) :
@@ -70,7 +79,7 @@ def _strong_wolfe(
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
-        if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda") and f_new < f: #TODO: loss check should be redundant here
+        if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda") and f_new <= f_best: #NOTE: Ward condition 
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -114,6 +123,15 @@ def _strong_wolfe(
         g_new = g_new.to("cpu")
 #        gtd_new = gtd_new.to("cpu")
         ls_iter += 1
+        #RELAXED WOLFE CONDITION
+        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
+        if cur_c2 <= best_c2 and f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+          success = True
+          stall_wolfe = 0
+          best_c2 = cur_c2
+          t_best = t
+          f_best = f_new
+          g_best = g_new.to("cpu")
 
     # reached max number of iterations?
     if ls_iter == max_ls:
@@ -132,13 +150,6 @@ def _strong_wolfe(
     # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
 
     # If linesearch fails, we return the unit vector until we restore sufficient curvature
-    t_best = t 
-    f_best = f
-    g_best = g
-    best_c1 = 0
-    best_c2 = 0
-    ls_iter=0
-    stall_wolfe=0
 
 #    if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
 #      bracket[0] = 0.
