@@ -41,16 +41,15 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-1, c2=1e-1, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=0.5, c2=0.8, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
-#    d_norm = d.to("cuda").abs().max()
-#    d_norm = d_norm.to("cpu")
     g = g.clone(memory_format=torch.contiguous_format).to("cpu")
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
+#TODO: why don't we scale d by t here, especially since we are normalizing?
     gtd_new = g_new.dot(d.to("cuda"))
     g_new = g_new.to("cpu")
 #    gtd_new = gtd_new.to("cpu")
@@ -109,9 +108,6 @@ def _strong_wolfe(
             t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
         )
 
-#        gtd_prev = gtd_prev.to("cpu")
-#        gtd_new = gtd_new.to("cpu")
-
         # next step
         t_prev = tmp
         f_prev = f_new
@@ -121,7 +117,6 @@ def _strong_wolfe(
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
         g_new = g_new.to("cpu")
-#        gtd_new = gtd_new.to("cpu")
         ls_iter += 1
         #RELAXED WOLFE CONDITION
         cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
@@ -148,11 +143,6 @@ def _strong_wolfe(
     # a bracket around it. We refine the bracket until we find the
     # exact point satisfying the criteria
     # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
-
-    # If linesearch fails, we return the unit vector until we restore sufficient curvature
-
-#    if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
-#      bracket[0] = 0.
 
     insuf_progress = False
     # find high and low points in bracket
@@ -188,7 +178,7 @@ def _strong_wolfe(
         # we will move `t` to a position which is `0.1 * len(bracket)`
         # away from the nearest boundary point.
         #  TODO: This needs to be set based on how large our brackets are. We miss the point with these literal parameters when we arent zooming a large domain.
-        eps = 1/3 * (max(bracket) - min(bracket))
+        eps = 0.1 * (max(bracket) - min(bracket))
 #        eps = tolerance_change * (max(bracket) - min(bracket))
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
@@ -212,7 +202,6 @@ def _strong_wolfe(
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
         g_new = g_new.to("cpu")
-#        gtd_new = gtd_new.to("cpu")
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
@@ -257,7 +246,6 @@ def _strong_wolfe(
             bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
-#        else:
         stall_wolfe += 1
         if stall_wolfe >= 4:
           print("STALL WOLFE")
@@ -542,12 +530,8 @@ class LBFGS(Optimizer):
 #          d=torch.norm(d, 1.)
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys
           total_norm = torch.linalg.vector_norm(
-#                 torch.stack([norm.to(first_device) for norm in norms]), norm_type
                  d,1.
              )
-#          mean, std, var = torch.mean(d), torch.std(d), torch.var(d) 
-#           total_norm = torch.linalg.vector_norm(
-#          d = (d-mean)/std
           d = d/total_norm
 
           ############################################################

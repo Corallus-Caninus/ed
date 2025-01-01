@@ -56,7 +56,7 @@ dataloader_train = DataLoader(dataset, batch_size=2, shuffle=True)
 
 model.train()
 
-optimizer = LBFGS(model.parameters(), lr=1., history_size=25, tolerance_change=1e-16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe")
+optimizer = LBFGS(model.parameters(), lr=1., history_size=25, tolerance_change=1e-16, max_iter=5, max_eval=100, line_search_fn="strong_wolfe")
 dataloader_train, optimizer = accelerator.prepare( dataloader_train, optimizer)
 data_iter_train = iter(dataloader_train)
 
@@ -92,7 +92,7 @@ while True:
   prompt = "The Factor programming language is "
   input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
   with torch.no_grad():
-    generated_ids = model.generate(input_ids, max_length=20, num_return_sequences=1)
+    generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
     generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     print(f"Model response: {generated_text}")
 
