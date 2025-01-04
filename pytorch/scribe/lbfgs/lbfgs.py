@@ -41,7 +41,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=0.5, c2=0.8, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=0, c2=0.5, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
@@ -78,6 +78,7 @@ def _strong_wolfe(
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
+#TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
         if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda") and f_new <= f_best: #NOTE: Ward condition 
             bracket = [t]
             bracket_f = [f_new]
@@ -96,11 +97,11 @@ def _strong_wolfe(
 
 
 #TODO: increase 100 and consider tuning 0.1 further
-        min_step = t + 0.618 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
+        min_step = t + 1e-5 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
         max_step = upper_bracket * 100
-#TODO: insufficient progress for bracket maybe?
+#TODO: insufficient progress for bracket maybe? set min_step = t and if t doesnt change then break or nudge here, we miss the point on bracketing too
   
         # interpolate
         tmp = t
@@ -152,7 +153,7 @@ def _strong_wolfe(
         # line-search bracket is so small
 #TODO: extract stall_wolfe hyperparameter
 #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 4:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change :#or  stall_wolfe >= 4:   # type: ignore[possibly-undefined]
             print("WOLFE PACK")
             return success, f_best, g_best, t_best, ls_func_evals
             	#TODO: return the wolfe pack here
@@ -360,6 +361,28 @@ class LBFGS(Optimizer):
 #TODO: clip out NaN based on dtype max value
         return grad_raw #.to("cpu")
 
+    # gather flat grads with L2 Normalization
+    def _gather_norm_flat_grad(self):
+        views = []
+        for p in self._params:
+            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+            if p.grad is None:
+                view = p.new(p.numel()).zero_()
+            elif p.grad.is_sparse:
+                view = p.grad.to_dense().view(-1)
+            else:
+                view = p.grad.view(-1)
+            if torch.is_complex(view):
+                view = torch.view_as_real(view).view(-1)
+            views.append(view)
+        grad_raw = torch.cat(views, 0)
+        norm = torch.linalg.vector_norm(grad_raw, 2)
+        grads = grad_raw/norm
+#        return torch.cat(views, 0).to("cpu")
+        return grads #.to("cpu")
+#TODO: clip out NaN based on dtype max value
+#        return grad_raw #.to("cpu")
+
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:
@@ -420,7 +443,7 @@ class LBFGS(Optimizer):
       current_evals = 1
       state["func_evals"] += 1
 
-      flat_grad = self._gather_flat_grad()
+      flat_grad = self._gather_norm_flat_grad()
 #TODO: remove this if we remove gradient normalization.
 #      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
       opt_cond = flat_grad.abs().max() <= 0 #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
@@ -504,7 +527,7 @@ class LBFGS(Optimizer):
 
               if "al" not in state:
                   state["al"] = [None] * history_size
-              al = state["al"]
+                  al = state["al"]
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.to("cuda").neg()
@@ -513,7 +536,7 @@ class LBFGS(Optimizer):
                   q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
                   al[i] = al[i].to("cpu")
 
-              # multiply by initial Hessian
+          # multiply by initial Hessian
               # r/d is the final direction
               d = r = torch.mul(q, H_diag)
 #              if H_diag != 1: #TODO: this should be freed we are wasting time by moving it to ram
@@ -556,6 +579,7 @@ class LBFGS(Optimizer):
 
           # directional derivative
   	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
+          flat_grad = self._gather_flat_grad()
           gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
 #          if state["n_iter"] != 1:
 #          avg = gtd.abs().mean()
@@ -595,14 +619,14 @@ class LBFGS(Optimizer):
                       obj_func, x_init, t, d, loss, flat_grad, gtd
                   )
               if not success: #TODO: we chase misprinted lines
-                t = 1 #Unit vector until we restore curvature
+                t = 1e-4 #Unit vector until we restore curvature
                 loss, flat_grad = obj_func(x_init, t, d)
               flat_grad = flat_grad.to("cuda")
               self.t  = t
               self._add_grad(t, d)
               print("got stepsize: " + str(t) + "  and loss: " + str(loss))
               opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
-              opt_cond = opt_cond or loss <= 0
+              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
           else:
               # no line search, simply move with fixed-step
               self._add_grad(t, d)
