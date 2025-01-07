@@ -1,6 +1,7 @@
 from typing import Optional, Union
 import torch
 from torch import Tensor
+import gc
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
@@ -41,7 +42,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=0, c2=0.5, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.25, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
@@ -71,7 +72,7 @@ def _strong_wolfe(
 
     while ls_iter < max_ls:
         # check conditions
-        if  (f_new > (f + c1 * t * gtd.to("cuda"))): #or (ls_iter > 1 and f_new >= f_prev)) :
+        if  (f_new > (f + c1 * t * gtd.to("cuda"))) or f_new > f_best: #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
             bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -79,7 +80,7 @@ def _strong_wolfe(
             break
 
 #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda") and f_new <= f_best: #NOTE: Ward condition 
+        if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda"): # and f_new <= f_best :
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -120,11 +121,12 @@ def _strong_wolfe(
         g_new = g_new.to("cpu")
         ls_iter += 1
         #RELAXED WOLFE CONDITION
-        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
-        if cur_c2 <= best_c2 and f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+#        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
+#        if cur_c2 <= best_c2 and f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+        if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
           success = True
           stall_wolfe = 0
-          best_c2 = cur_c2
+#          best_c2 = cur_c2
           t_best = t
           f_best = f_new
           g_best = g_new.to("cpu")
@@ -153,7 +155,7 @@ def _strong_wolfe(
         # line-search bracket is so small
 #TODO: extract stall_wolfe hyperparameter
 #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change :#or  stall_wolfe >= 4:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 4:   # type: ignore[possibly-undefined]
             print("WOLFE PACK")
             return success, f_best, g_best, t_best, ls_func_evals
             	#TODO: return the wolfe pack here
@@ -206,7 +208,7 @@ def _strong_wolfe(
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
-        if f_new > (f + c1 * t * gtd.to("cuda")) or f_new >= bracket_f[low_pos]:
+        if f_new > (f + c1 * t * gtd.to("cuda")) or f_new >= bracket_f[low_pos] or f_new > f_best: #NOTE: Ward condition
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
@@ -214,7 +216,7 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
-            if abs(gtd_new) <= -c2 * gtd.to("cuda") and f_new < f_best: #NOTE: Ward condition
+            if abs(gtd_new) <= -c2 * gtd.to("cuda") and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
                 # Wolfe conditions satisfied
                 print("STRONG WOLFE")
                 success = True
@@ -228,15 +230,16 @@ def _strong_wolfe(
 
             #RELAXED WOLFE CONDITION
     #        cur_c1 = (f + t*gtd) - f_new
-            cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
+#            cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
     #        if cur_c2 < best_c2 && cur_c1 < best_c1:
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
-            if cur_c2 <= best_c2 and f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+#            if cur_c2 <= best_c2 and f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
     #          print("---GOT NEW WOLFE PACK---")
     #          best_c1 = cur_c1
               success = True
               stall_wolfe = 0
-              best_c2 = cur_c2
+#              best_c2 = cur_c2
               t_best = t
               f_best = f_new
               g_best = g_new.to("cpu")
@@ -354,15 +357,15 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         grad_raw = torch.cat(views, 0)
-#        norm = torch.linalg.vector_norm(grad_raw, 2)
-#        grads = grad_raw/norm
+        norm = torch.linalg.vector_norm(grad_raw, 1)
+        grads = grad_raw/norm
 #        return torch.cat(views, 0).to("cpu")
-#        return grads #.to("cpu")
+        return grads #.to("cpu")
 #TODO: clip out NaN based on dtype max value
-        return grad_raw #.to("cpu")
+#        return grad_raw #.to("cpu")
 
     # gather flat grads with L2 Normalization
-    def _gather_norm_flat_grad(self):
+    def _gather_norm_flat_grad(self, norm):
         views = []
         for p in self._params:
             torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
@@ -376,8 +379,13 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         grad_raw = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(grad_raw, 2)
+        norm = torch.linalg.vector_norm(grad_raw, norm)
         grads = grad_raw/norm
+        #TODO: ensure grads.min() and max() are greater than the dropout value, we may need to scale things by the variance here.
+        mask = torch.logical_and(grads> -5e-7, grads< 5e-7)
+        grads[mask] = 0
+#        grads[grads < 9e-8] = 0 #TODO: TEST then formalize/parameterize this feature
+#TODO: drop out based on tolerance (create another norm function for gather_sparse_grad)
 #        return torch.cat(views, 0).to("cpu")
         return grads #.to("cpu")
 #TODO: clip out NaN based on dtype max value
@@ -405,7 +413,8 @@ class LBFGS(Optimizer):
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d.to("cuda"))
         loss = float(closure())
-        flat_grad = self._gather_flat_grad()
+        flat_grad = self._gather_norm_flat_grad(1)
+#        flat_grad = self._gather_flat_grad()
         self._set_param(x)
         return loss, flat_grad
 
@@ -443,7 +452,8 @@ class LBFGS(Optimizer):
       current_evals = 1
       state["func_evals"] += 1
 
-      flat_grad = self._gather_norm_flat_grad()
+      flat_grad = self._gather_norm_flat_grad(1)
+#      flat_grad = self._gather_flat_grad()
 #TODO: remove this if we remove gradient normalization.
 #      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
       opt_cond = flat_grad.abs().max() <= 0 #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
@@ -490,7 +500,15 @@ class LBFGS(Optimizer):
               old_dirs = []
               old_stps = []
               ro = []
+              if "old_dirs" in state:
+                state["old_dirs"].clear()
+                state["old_stps"].clear()
+                state["ro"].clear()
+              old_dirs.clear()
+              old_stps.clear()
+              ro.clear()
               H_diag = 1
+              t = 1
           else:
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
@@ -545,7 +563,7 @@ class LBFGS(Optimizer):
                   be_i = old_dirs[i].to("cuda").dot(r) * ro[i].to("cuda")
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
 
-          if prev_flat_grad is None:
+          if prev_flat_grad is None or state["n_iter"] == 1:
               prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
           else:
               prev_flat_grad.copy_(flat_grad).to("cpu")
@@ -556,6 +574,9 @@ class LBFGS(Optimizer):
                  d,1.
              )
           d = d/total_norm
+          mask = torch.logical_and(d > -5e-7, d < 5e-7)
+          print("total filtered elements: " + str( mask.sum()  ))
+          d[mask] = 0
 
           ############################################################
           # compute step length
@@ -579,7 +600,7 @@ class LBFGS(Optimizer):
 
           # directional derivative
   	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
-          flat_grad = self._gather_flat_grad()
+          flat_grad = self._gather_norm_flat_grad(1)
           gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
 #          if state["n_iter"] != 1:
 #          avg = gtd.abs().mean()
@@ -619,8 +640,16 @@ class LBFGS(Optimizer):
                       obj_func, x_init, t, d, loss, flat_grad, gtd
                   )
               if not success: #TODO: we chase misprinted lines
-                t = 1e-4 #Unit vector until we restore curvature
+                t = 1 #Unit vector until we restore curvature
                 loss, flat_grad = obj_func(x_init, t, d)
+                old_dirs.clear()
+                old_stps.clear()
+                ro.clear()
+                if "old_dirs" in state:
+                  state["old_dirs"].clear()
+                  state["old_stps"].clear()
+                  state["ro"].clear()
+                  state["n_iter"] = 0 #TODO: TEST, we dropping the Hessian again
               flat_grad = flat_grad.to("cuda")
               self.t  = t
               self._add_grad(t, d)
@@ -676,5 +705,6 @@ class LBFGS(Optimizer):
       state["H_diag"] = H_diag
       state["prev_flat_grad"] = prev_flat_grad
       state["prev_loss"] = prev_loss
+      state["n_iter"] = 0 #TODO: MoE equivalent centinuous sparse model using l1 with novel direction per iteration, if we reuse the hessian and there is sparsity the curvature will bias to a lopsided model but is appropriate for l2
 
       return orig_loss
