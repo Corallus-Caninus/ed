@@ -504,11 +504,13 @@ class LBFGS(Optimizer):
                 state["old_dirs"].clear()
                 state["old_stps"].clear()
                 state["ro"].clear()
+              prev_flat_grad  = None
               old_dirs.clear()
               old_stps.clear()
               ro.clear()
               H_diag = 1
               t = 1
+              gc.collect()
           else:
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
@@ -563,12 +565,11 @@ class LBFGS(Optimizer):
                   be_i = old_dirs[i].to("cuda").dot(r) * ro[i].to("cuda")
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
 
-          if prev_flat_grad is None or state["n_iter"] == 1:
+          if prev_flat_grad is None : #or state["n_iter"] == 1:
               prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
           else:
               prev_flat_grad.copy_(flat_grad).to("cpu")
           prev_loss = loss
-#          d=torch.norm(d, 1.)
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys
           total_norm = torch.linalg.vector_norm(
                  d,1.
@@ -641,6 +642,7 @@ class LBFGS(Optimizer):
                   )
               if not success: #TODO: we chase misprinted lines
                 t = 1 #Unit vector until we restore curvature
+                flat_grad = None
                 loss, flat_grad = obj_func(x_init, t, d)
                 old_dirs.clear()
                 old_stps.clear()
@@ -649,7 +651,7 @@ class LBFGS(Optimizer):
                   state["old_dirs"].clear()
                   state["old_stps"].clear()
                   state["ro"].clear()
-                  state["n_iter"] = 0 #TODO: TEST, we dropping the Hessian again
+#                  state["n_iter"] = 0 #TODO: TEST, we dropping the Hessian again
               flat_grad = flat_grad.to("cuda")
               self.t  = t
               self._add_grad(t, d)
