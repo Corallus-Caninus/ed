@@ -378,17 +378,17 @@ class LBFGS(Optimizer):
                 view = p.grad.view(-1)
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
-            norm = torch.linalg.vector_norm(view, norm)
-            grads = view/norm
-            #TODO: ensure grads.min() and max() are greater than the dropout value, we may need to scale things by the variance here.
-            mask = torch.logical_and(grads> -1e-6, grads< 1e-6)
-            grads[mask] = 0
-            total += mask.sum()
             views.append(view)
+        grad = torch.cat(views, 0)
+        norm = torch.linalg.vector_norm(grad, norm)
+        grads = grad/norm
+        #TODO: ensure grads.min() and max() are greater than the dropout value, we may need to scale things by the variance here.
+        mask = torch.logical_and(grads> -1e-6, grads< 1e-6)
+        grads[mask] = 0
+        total += mask.sum()
         print("GRAD: total filtered elements: " + str( total  ))
-        grad_res = torch.cat(views, 0)
 #NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 gradient if it occurs.
-        return grad_res #.to("cpu")
+        return grad #.to("cpu")
     #TODO: clip out NaN based on dtype max value
     #        return grad_raw #.to("cpu")
 
@@ -580,7 +580,7 @@ class LBFGS(Optimizer):
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d =d/total_norm
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
-          mask = torch.logical_and(d > -1e-6, d < 1e-6)
+          mask = torch.logical_and(d > -1e-6, d < 1e-6) #TODO: extract to sub_variance hyperparameter
           print("total filtered elements: " + str( mask.sum()  ))
           d[mask] = 0
 
