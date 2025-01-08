@@ -367,6 +367,7 @@ class LBFGS(Optimizer):
     # gather flat grads with L2 Normalization
     def _gather_norm_flat_grad(self, norm):
         views = []
+        total = 0
         for p in self._params:
             torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
             if p.grad is None:
@@ -377,19 +378,19 @@ class LBFGS(Optimizer):
                 view = p.grad.view(-1)
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
+            norm = torch.linalg.vector_norm(view, norm)
+            grads = view/norm
+            #TODO: ensure grads.min() and max() are greater than the dropout value, we may need to scale things by the variance here.
+            mask = torch.logical_and(grads> -5e-7, grads< 5e-7)
+            grads[mask] = 0
+            total += mask.sum()
             views.append(view)
-        grad_raw = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(grad_raw, norm)
-        grads = grad_raw/norm
-        #TODO: ensure grads.min() and max() are greater than the dropout value, we may need to scale things by the variance here.
-        mask = torch.logical_and(grads> -5e-7, grads< 5e-7)
-        grads[mask] = 0
-#        grads[grads < 9e-8] = 0 #TODO: TEST then formalize/parameterize this feature
-#TODO: drop out based on tolerance (create another norm function for gather_sparse_grad)
-#        return torch.cat(views, 0).to("cpu")
-        return grads #.to("cpu")
-#TODO: clip out NaN based on dtype max value
-#        return grad_raw #.to("cpu")
+        print("GRAD: total filtered elements: " + str( total  ))
+        grad_res = torch.cat(views, 0)
+#NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 gradient if it occurs.
+        return grad_res #.to("cpu")
+    #TODO: clip out NaN based on dtype max value
+    #        return grad_raw #.to("cpu")
 
     def _add_grad(self, step_size, update):
         offset = 0
@@ -486,6 +487,7 @@ class LBFGS(Optimizer):
       # optimize for a max of max_iter iterations
       while n_iter < max_iter:
           # keep track of nb of iterations
+          gc.collect()
           n_iter += 1
           state["n_iter"] += 1
           print("[CRAM]")
@@ -570,11 +572,14 @@ class LBFGS(Optimizer):
           else:
               prev_flat_grad.copy_(flat_grad).to("cpu")
           prev_loss = loss
-          # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys
+          # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
+#TODO: should we be iterating each tensor for norm like in flat_grad?
           total_norm = torch.linalg.vector_norm(
                  d,1.
              )
-          d = d/total_norm
+    #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
+          d =d/total_norm
+#            print("direction init sparsity: " + str(d[d == 0.0].sum()))
           mask = torch.logical_and(d > -5e-7, d < 5e-7)
           print("total filtered elements: " + str( mask.sum()  ))
           d[mask] = 0
@@ -642,22 +647,24 @@ class LBFGS(Optimizer):
                   )
               if not success: #TODO: we chase misprinted lines
                 t = 1 #Unit vector until we restore curvature
-                flat_grad = None
+#                flat_grad = None
+                print("Linesearch failure, resetting..")
                 loss, flat_grad = obj_func(x_init, t, d)
-                old_dirs.clear()
-                old_stps.clear()
-                ro.clear()
                 if "old_dirs" in state:
                   state["old_dirs"].clear()
                   state["old_stps"].clear()
                   state["ro"].clear()
-#                  state["n_iter"] = 0 #TODO: TEST, we dropping the Hessian again
-              flat_grad = flat_grad.to("cuda")
+                old_dirs.clear()
+                old_stps.clear()
+                ro.clear()
+#                state["n_iter"] = 0 
+#              flat_grad = flat_grad.to("cuda")
               self.t  = t
               self._add_grad(t, d)
               print("got stepsize: " + str(t) + "  and loss: " + str(loss))
-              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
-              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
+#              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
+#              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
+              opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
           else:
               # no line search, simply move with fixed-step
               self._add_grad(t, d)
