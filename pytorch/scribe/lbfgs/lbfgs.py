@@ -381,7 +381,7 @@ class LBFGS(Optimizer):
             norm = torch.linalg.vector_norm(view, norm)
             grads = view/norm
             #TODO: ensure grads.min() and max() are greater than the dropout value, we may need to scale things by the variance here.
-            mask = torch.logical_and(grads> -5e-7, grads< 5e-7)
+            mask = torch.logical_and(grads> -1e-6, grads< 1e-6)
             grads[mask] = 0
             total += mask.sum()
             views.append(view)
@@ -580,7 +580,7 @@ class LBFGS(Optimizer):
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d =d/total_norm
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
-          mask = torch.logical_and(d > -5e-7, d < 5e-7)
+          mask = torch.logical_and(d > -1e-6, d < 1e-6)
           print("total filtered elements: " + str( mask.sum()  ))
           d[mask] = 0
 
