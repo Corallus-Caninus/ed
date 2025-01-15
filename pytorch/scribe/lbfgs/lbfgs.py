@@ -42,7 +42,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.33, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=0, c2=0.25, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
@@ -97,8 +97,9 @@ def _strong_wolfe(
             break
 
 
+#TODO: since we reuse the last step size, we should bracket in the direction of the first interpolation direction, and change the corresponding zoom break condition if bracketing down instead of up
 #TODO: increase 100 and consider tuning 0.1 further
-        min_step = t + 1e-5 * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
+        min_step = t + 1. * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
         max_step = upper_bracket * 100
@@ -155,7 +156,7 @@ def _strong_wolfe(
         # line-search bracket is so small
 #TODO: extract stall_wolfe hyperparameter
 #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 4:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
             print("WOLFE PACK")
             return success, f_best, g_best, t_best, ls_func_evals
             	#TODO: return the wolfe pack here
@@ -181,7 +182,7 @@ def _strong_wolfe(
         # we will move `t` to a position which is `0.1 * len(bracket)`
         # away from the nearest boundary point.
         #  TODO: This needs to be set based on how large our brackets are. We miss the point with these literal parameters when we arent zooming a large domain.
-        eps = 0.1 * (max(bracket) - min(bracket))
+        eps = (1/3) * (max(bracket) - min(bracket))
 #        eps = tolerance_change * (max(bracket) - min(bracket))
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
@@ -189,11 +190,11 @@ def _strong_wolfe(
                 # evaluate at 1/3 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
-                    t = t - 0.618*(t - displacement)
+                    t = t - (1/3)*(t - displacement)
                     print("punt", end = " ")
                 else:
                     displacement = min(bracket) + eps
-                    t = t + 0.618*(displacement - t)
+                    t = t + (1/3)*(displacement - t)
                     print("punt", end = " ")
             else:
                 insuf_progress = True
@@ -251,7 +252,7 @@ def _strong_wolfe(
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
         stall_wolfe += 1
-        if stall_wolfe >= 4:
+        if stall_wolfe >= 3:
           print("STALL WOLFE")
 
 
@@ -365,7 +366,7 @@ class LBFGS(Optimizer):
 #        return grad_raw #.to("cpu")
 
     # gather flat grads with L2 Normalization
-    def _gather_norm_flat_grad(self, norm):
+    def _gather_norm_flat_grad(self, norm, isClop: True):
         views = []
         total = 0
         for p in self._params:
@@ -382,16 +383,11 @@ class LBFGS(Optimizer):
         views = torch.cat(views, 0)
         norm = torch.linalg.vector_norm(views, norm)
         views = views/norm
-        #TODO: ensure viewss.min() and max() are greater than the dropout value, we may need to scale things by the variance here.
-#TODO: if still oom make mask a predicate and pass in to views instead of explicitly allocating a mask (I'm assuming thats what happens here)
-#        mask = torch.logical_and(views> -1e-6, views< 1e-6)
-#        views[mask] = 0
-        views[torch.logical_and(views > -1e-6,views < 1e-6)] = 0
-#        total += mask.sum()
-#        mask.to("cpu")
-#        print("GRAD: total filtered elements: " + str( total  ))
-#        del views
-#        print("first and last tensors:" + str(views[-10:]) + " " + str(views[:10]))
+#TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
+#TODO: what if we normaling by the max value and let clopping handle what the l1 would do anyways? we would only need to tune the clopping hyperparameter and would get essentially what we want with l1
+        #Clop
+        if isClop:
+          views[torch.logical_and(views > -5e-7,views < 5e-7)] = 0
 #NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 viewsient if it occurs.
         return views #.to("cpu")
     #TODO: clip out NaN based on dtype max value
@@ -419,7 +415,7 @@ class LBFGS(Optimizer):
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d.to("cuda"))
         loss = float(closure())
-        flat_grad = self._gather_norm_flat_grad(1)
+        flat_grad = self._gather_norm_flat_grad(1, True)
 #        flat_grad = self._gather_flat_grad()
         self._set_param(x)
         return loss, flat_grad
@@ -448,7 +444,7 @@ class LBFGS(Optimizer):
 
       # NOTE: LBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
-#      state = self.state[self._params[0]]
+      state = self.state[self._params[0]]
 #      state.setdefault("func_evals", 0)
 #      state.setdefault("n_iter", 0)
 #
@@ -459,7 +455,8 @@ class LBFGS(Optimizer):
 #      state["func_evals"] += 1
       al = []
 
-      flat_grad = self._gather_norm_flat_grad(1)
+#      flat_grad = self._gather_norm_flat_grad(1, True)
+      flat_grad = self._gather_norm_flat_grad(2, False)
 #      flat_grad = self._gather_flat_grad()
 #TODO: remove this if we remove gradient normalization.
 #      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
@@ -482,19 +479,25 @@ class LBFGS(Optimizer):
       # tensors cached in state (for tracing)
 #      d = state.get("d")
 #      t = state.get("t")
-      old_dirs= []
-      old_stps= []
-      ro= []
+#      old_dirs= []
+#      old_stps= []
+#      ro= []
+#TODO: initialize al here not itl
 #TODO: configure: keep_hessian, grad_norm, fragment_sub_variance, direction_norm -- hyperparameters for L-BFGS-NS (reset hessian per datapoint/linesearch failure, sub_variance for fragmentation dropout, grad/direction (L1/L2)
 #TODO: also expose C1 and C2, we would expose max_linesearch but instead expose stall_wolfe since its a more informed and as reliable heuristic metric
-#        old_dirs = state.get("old_dirs")
-#        old_stps = state.get("old_stps")
-#        ro = state.get("ro")
+      if "old_dirs" in state:
+        old_dirs = state.get("old_dirs")
+        old_stps = state.get("old_stps")
+        ro = state.get("ro")
 #TODO: TEST
 #      H_diag = state.get("H_diag")
 #      prev_loss = state.get("prev_loss")
 #TODO: this may leak when we reset and assign prev_flat_grad to None
-#      prev_flat_grad = state.get("prev_flat_grad")
+        prev_flat_grad = state.get("prev_flat_grad")
+      else:
+        old_dirs= []
+        old_stps= []
+        ro= []
 
       n_iter = 0
       # optimize for a max of max_iter iterations
@@ -511,11 +514,12 @@ class LBFGS(Optimizer):
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
           if n_iter == 1:
               print("RESET")
-              d = flat_grad.neg()
+              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
+              d = flat_grad_sparse.neg()
               prev_flat_grad  = None
-              old_dirs = []
-              old_stps = []
-              ro = []
+#              old_dirs = []
+#              old_stps = []
+#              ro = []
 #              if "old_dirs" in state:
 #                state["old_dirs"].clear()
 #                state["old_stps"].clear()
@@ -524,6 +528,7 @@ class LBFGS(Optimizer):
               t = 1
               gc.collect()
           else:
+              flat_grad = self._gather_norm_flat_grad(2, False)
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
               s = (d.to("cuda").mul(t))
@@ -591,7 +596,8 @@ class LBFGS(Optimizer):
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d =d/total_norm
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
-          mask = torch.logical_and(d > -1e-6, d < 1e-6) #TODO: extract to sub_variance hyperparameter
+#            Clop
+          mask = torch.logical_and(d > -5e-7, d < 5e-7) #TODO: extract to sub_variance hyperparameter
           print("total filtered elements: " + str( mask.sum()  ))
           d[mask] = 0
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
@@ -618,7 +624,7 @@ class LBFGS(Optimizer):
 
           # directional derivative
   	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
-          flat_grad = self._gather_norm_flat_grad(1)
+          flat_grad = self._gather_norm_flat_grad(1, True)
           gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
 #          if state["n_iter"] != 1:
 #          avg = gtd.abs().mean()
@@ -662,14 +668,16 @@ class LBFGS(Optimizer):
 #                flat_grad = None
                 print("Linesearch failure, resetting..")
                 loss, flat_grad = obj_func(x_init, t, d)
+#TODO: I dont like having to do this but we want l2 for the direction selection.
+#TODO: dont reset the Hessian if we are using prev step size since one iteration may be insufficient to bracket down
 #                if "old_dirs" in state:
 #                  state["old_dirs"].clear()
 #                  state["old_stps"].clear()
 #                  state["ro"].clear()
 #TODO: dont clear these? may leak here
-                old_dirs = []
-                old_stps = []
-                ro = []
+#                old_dirs = []
+#                old_stps = []
+#                ro = []
 #                state["n_iter"] = 0 
 #              flat_grad = flat_grad.to("cuda")
               self.t  = t
@@ -721,11 +729,11 @@ class LBFGS(Optimizer):
 
 #      state["d"] = d
 #      state["t"] = t
-#      state["old_dirs"] = old_dirs
-#      state["old_stps"] = old_stps
-#      state["ro"] = ro
-#      state["H_diag"] = H_diag
-#      state["prev_flat_grad"] = prev_flat_grad
+      state["old_dirs"] = old_dirs
+      state["old_stps"] = old_stps
+      state["ro"] = ro
+##      state["H_diag"] = H_diag
+      state["prev_flat_grad"] = prev_flat_grad
 #      state["prev_loss"] = prev_loss
 #      state["n_iter"] = 0 #TODO: MoE equivalent centinuous sparse model using l1 with novel direction per iteration, if we reuse the hessian and there is sparsity the curvature will bias to a lopsided model but is appropriate for l2
 
