@@ -42,7 +42,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=0, c2=0.9, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-2, c2=0.9, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
 #TODO: this irks the mathematician in me.
@@ -391,6 +391,7 @@ class LBFGS(Optimizer):
         #Clop
         if isClop:
           views[torch.logical_and(views > -5e-7,views < 5e-7)] = 0
+          views.to_sparse()
 #NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 viewsient if it occurs.
         return views #.to("cpu")
     #TODO: clip out NaN based on dtype max value
@@ -550,8 +551,8 @@ class LBFGS(Optimizer):
    
                 # store new direction/step
                 old_dirs.append(y.to("cpu"))
-                old_stps.append(s.to("cpu"))
-                ro.append((1.0 / ys).to("cpu")) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                old_stps.append(s.to("cpu").to_sparse())
+                ro.append((1.0 / ys).to("cpu").to_sparse()) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
   
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
@@ -573,8 +574,8 @@ class LBFGS(Optimizer):
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.to("cuda").neg()
               for i in range(num_old - 1, -1, -1):
-                  al[i] = (old_stps[i].to("cuda").dot(q.to("cuda")) * ro[i].to("cuda"))
-                  q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
+                  al[i] = (old_stps[i].to("cuda").to_dense().dot(q.to("cuda")) * ro[i].to("cuda"))
+                  q.add_(old_dirs[i].to("cuda").to_dense(), alpha=-al[i])
                   al[i] = al[i].to("cpu")
 
           # multiply by initial Hessian
@@ -583,8 +584,8 @@ class LBFGS(Optimizer):
 #              if H_diag != 1: #TODO: this should be freed we are wasting time by moving it to ram
 #                H_diag = H_diag.to("cpu")
               for i in range(num_old):
-                  be_i = old_dirs[i].to("cuda").dot(r) * ro[i].to("cuda")
-                  r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
+                  be_i = old_dirs[i].to("cuda").to_dense().dot(r) * ro[i].to("cuda")
+                  r.add_(old_stps[i].to("cuda").to_dense(), alpha=al[i].to("cuda") - be_i)
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
               prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
