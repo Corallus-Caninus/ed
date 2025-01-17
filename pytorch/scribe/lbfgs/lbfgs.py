@@ -42,9 +42,12 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=0, c2=0.25, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=0, c2=0.9, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
+#TODO: this irks the mathematician in me.
+    if c2 == 0:
+      c2 = 0.25
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
     g = g.clone(memory_format=torch.contiguous_format).to("cpu")
     # evaluate objective and gradient using initial step
@@ -366,7 +369,7 @@ class LBFGS(Optimizer):
 #        return grad_raw #.to("cpu")
 
     # gather flat grads with L2 Normalization
-    def _gather_norm_flat_grad(self, norm, isClop: True):
+    def _gather_norm_flat_grad(self, norm, isClop = True):
         views = []
         total = 0
         for p in self._params:
@@ -600,6 +603,7 @@ class LBFGS(Optimizer):
           mask = torch.logical_and(d > -5e-7, d < 5e-7) #TODO: extract to sub_variance hyperparameter
           print("total filtered elements: " + str( mask.sum()  ))
           d[mask] = 0
+          d.to_sparse()
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
           ############################################################
@@ -661,7 +665,7 @@ class LBFGS(Optimizer):
                       return self._directional_evaluate(closure, x, t, d)
 
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                      obj_func, x_init, t, d, loss, flat_grad, gtd
+                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
                   )
               if not success: #TODO: we chase misprinted lines
                 t = 1 #Unit vector until we restore curvature
