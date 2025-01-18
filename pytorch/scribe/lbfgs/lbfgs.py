@@ -49,13 +49,13 @@ def _strong_wolfe(
     if c2 == 0:
       c2 = 0.25
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
-    g = g.clone(memory_format=torch.contiguous_format).to("cpu")
+    g = g.clone(memory_format=torch.contiguous_format)#.to("cpu")
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
     gtd_new = g_new.dot(d.to("cuda"))
-    g_new = g_new.to("cpu")
+#    g_new = g_new#.to("cpu")
 #    gtd_new = gtd_new.to("cpu")
     t_orig = t
     success = False
@@ -122,7 +122,7 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-        g_new = g_new.to("cpu")
+#        g_new = g_new.to("cpu")
         ls_iter += 1
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
@@ -133,7 +133,7 @@ def _strong_wolfe(
 #          best_c2 = cur_c2
           t_best = t
           f_best = f_new
-          g_best = g_new.to("cpu")
+#          g_best = g_new.to("cpu")
 
     # reached max number of iterations?
     if ls_iter == max_ls:
@@ -208,7 +208,7 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-        g_new = g_new.to("cpu")
+#        g_new = g_new.to("cpu")
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
@@ -246,7 +246,7 @@ def _strong_wolfe(
 #              best_c2 = cur_c2
               t_best = t
               f_best = f_new
-              g_best = g_new.to("cpu")
+#              g_best = g_new.to("cpu")
 
             # new point becomes new low
             bracket[low_pos] = t
@@ -354,7 +354,7 @@ class LBFGS(Optimizer):
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
-                view = p.grad.to_dense().view(-1)
+              view = p.grad.view(-1)
             else:
                 view = p.grad.view(-1)
             if torch.is_complex(view):
@@ -377,7 +377,7 @@ class LBFGS(Optimizer):
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
-                view = p.grad.to_dense().view(-1)
+                view = p.grad.view(-1)
             else:
                 view = p.grad.view(-1)
             if torch.is_complex(view):
@@ -551,9 +551,9 @@ class LBFGS(Optimizer):
                     ro.pop(0)
    
                 # store new direction/step
-                old_dirs.append(y.to("cpu").to_sparse())
-                old_stps.append(s.to("cpu").to_sparse())
-                ro.append((1.0 / ys).to("cpu").to_sparse()) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                old_dirs.append(y.to_sparse().to("cpu"))
+                old_stps.append(s.to_sparse().to("cpu"))
+                ro.append((1.0 / ys).to("cpu")) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
   
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
@@ -575,23 +575,25 @@ class LBFGS(Optimizer):
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.to("cuda").neg()
               for i in range(num_old - 1, -1, -1):
-                  al[i] = (old_stps[i].to("cuda").to_dense().dot(q.to("cuda")) * ro[i].to("cuda"))
-                  q.add_(old_dirs[i].to("cuda").to_dense(), alpha=-al[i])
-                  al[i] = al[i].to("cpu")
+                  al[i] = (old_stps[i].to("cuda").to_dense().dot((q.to("cuda")) * ro[i].to("cuda")))
+                  q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
+                  al[i] = al[i].to("cpu") 
 
           # multiply by initial Hessian
               # r/d is the final direction
               d = r = torch.mul(q, H_diag)
+#              q.to("cpu")
+              del q
 #              if H_diag != 1: #TODO: this should be freed we are wasting time by moving it to ram
 #                H_diag = H_diag.to("cpu")
               for i in range(num_old):
                   be_i = old_dirs[i].to("cuda").to_dense().dot(r) * ro[i].to("cuda")
-                  r.add_(old_stps[i].to("cuda").to_dense(), alpha=al[i].to("cuda") - be_i)
+                  r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
               prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
           else:
-              prev_flat_grad.copy_(flat_grad).to("cpu")
+              prev_flat_grad.copy_(flat_grad)#.to("cpu")
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
@@ -606,6 +608,7 @@ class LBFGS(Optimizer):
           print("total filtered elements: " + str( mask.sum()  ))
           d[mask] = 0
           d.to_sparse()
+          del mask
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
           ############################################################
@@ -642,10 +645,10 @@ class LBFGS(Optimizer):
 
 #          flat_grad = flat_grad.to("cpu")
 #          gtd=gtd.to("cpu")
-          flat_grad = flat_grad.to("cpu")
-          gtd=gtd
+#          flat_grad = flat_grad.to("cpu")
+#          gtd=gtd
 #          d = d.to("cpu") 
-          d = d 
+#          d = d 
 #          t = t.to("cpu") 
 
           # directional derivative is below tolerance
