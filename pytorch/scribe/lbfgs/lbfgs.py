@@ -42,7 +42,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-2, c2=0.9, tolerance_change=1e-16, max_ls=25
+    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=0.9, tolerance_change=1e-16, max_ls=25
 #    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
 ):
 #TODO: this irks the mathematician in me.
@@ -459,8 +459,8 @@ class LBFGS(Optimizer):
 #      state["func_evals"] += 1
       al = []
 
-#      flat_grad = self._gather_norm_flat_grad(1, True)
-      flat_grad = self._gather_norm_flat_grad(2, False)
+      flat_grad = self._gather_norm_flat_grad(1, True)
+#      flat_grad = self._gather_norm_flat_grad(2, False)
 #      flat_grad = self._gather_flat_grad()
 #TODO: remove this if we remove gradient normalization.
 #      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
@@ -532,7 +532,8 @@ class LBFGS(Optimizer):
               t = 1
               gc.collect()
           else:
-              flat_grad = self._gather_norm_flat_grad(2, False)
+              flat_grad = self._gather_norm_flat_grad(1, True)
+#              flat_grad = self._gather_norm_flat_grad(2, False)
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
               s = (d.to("cuda").mul(t))
@@ -550,7 +551,7 @@ class LBFGS(Optimizer):
                     ro.pop(0)
    
                 # store new direction/step
-                old_dirs.append(y.to("cpu"))
+                old_dirs.append(y.to("cpu").to_sparse())
                 old_stps.append(s.to("cpu").to_sparse())
                 ro.append((1.0 / ys).to("cpu").to_sparse()) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
   
@@ -738,7 +739,7 @@ class LBFGS(Optimizer):
       state["old_stps"] = old_stps
       state["ro"] = ro
 ##      state["H_diag"] = H_diag
-      state["prev_flat_grad"] = prev_flat_grad
+#      state["prev_flat_grad"] = prev_flat_grad
 #      state["prev_loss"] = prev_loss
 #      state["n_iter"] = 0 #TODO: MoE equivalent centinuous sparse model using l1 with novel direction per iteration, if we reuse the hessian and there is sparsity the curvature will bias to a lopsided model but is appropriate for l2
 
