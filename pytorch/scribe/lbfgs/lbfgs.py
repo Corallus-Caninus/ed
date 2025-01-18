@@ -49,7 +49,7 @@ def _strong_wolfe(
     if c2 == 0:
       c2 = 0.25
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
-    g = g.clone(memory_format=torch.contiguous_format)#.to("cpu")
+#    g = g.clone(memory_format=torch.contiguous_format)#.to("cpu")
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
@@ -74,11 +74,14 @@ def _strong_wolfe(
     stall_wolfe=0
 
     while ls_iter < max_ls:
+#TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
+#TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation
         # check conditions
         if  (f_new > (f + c1 * t * gtd.to("cuda"))) or f_new > f_best: #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
-            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+#            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+            bracket_g = [g_prev, g_new]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
@@ -95,7 +98,8 @@ def _strong_wolfe(
         if gtd_new >= 0 :
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
-            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+#            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+            bracket_g = [g_prev, g_new]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
@@ -117,12 +121,13 @@ def _strong_wolfe(
         # next step
         t_prev = tmp
         f_prev = f_new
-        g_prev = g_new.clone(memory_format=torch.contiguous_format)
+#        g_prev = g_new.clone(memory_format=torch.contiguous_format)
+        g_prev = g_new
         gtd_prev = gtd_new
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-#        g_new = g_new.to("cpu")
+        g_new = g_new.to("cpu")
         ls_iter += 1
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
@@ -133,7 +138,7 @@ def _strong_wolfe(
 #          best_c2 = cur_c2
           t_best = t
           f_best = f_new
-#          g_best = g_new.to("cpu")
+          g_best = g_new
 
     # reached max number of iterations?
     if ls_iter == max_ls:
@@ -174,8 +179,8 @@ def _strong_wolfe(
             bracket_f[1],
             bracket_gtd[1].to("cuda"),
         )
-#        bracket_gtd[1].to("cpu"),
-#        bracket_gtd[0].to("cpu"),  # type: ignore[possibly-undefined]
+        bracket_gtd[1].to("cpu"),
+        bracket_gtd[0].to("cpu"),  # type: ignore[possibly-undefined]
 
         # test that we are making sufficient progress:
         # in case `t` is so close to boundary, we mark that we are making
@@ -208,7 +213,7 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-#        g_new = g_new.to("cpu")
+        g_new = g_new.to("cpu")
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
@@ -216,7 +221,8 @@ def _strong_wolfe(
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
-            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
+#            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
+            bracket_g[high_pos] = g_new  # type: ignore[possibly-undefined]
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
@@ -246,12 +252,13 @@ def _strong_wolfe(
 #              best_c2 = cur_c2
               t_best = t
               f_best = f_new
-#              g_best = g_new.to("cpu")
+              g_best = g_new
 
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  
+#            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  
+            bracket_g[low_pos] = g_new
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
         stall_wolfe += 1
@@ -584,6 +591,7 @@ class LBFGS(Optimizer):
               d = r = torch.mul(q, H_diag)
 #              q.to("cpu")
               del q
+              del H_diag
 #              if H_diag != 1: #TODO: this should be freed we are wasting time by moving it to ram
 #                H_diag = H_diag.to("cpu")
               for i in range(num_old):
@@ -591,9 +599,11 @@ class LBFGS(Optimizer):
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
-              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
+#              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
+              prev_flat_grad = flat_grad.to("cpu")
           else:
-              prev_flat_grad.copy_(flat_grad)#.to("cpu")
+#              prev_flat_grad.copy_(flat_grad).to("cpu")
+              prev_flat_grad = flat_grad.to("cpu")
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
