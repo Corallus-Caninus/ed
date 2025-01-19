@@ -75,7 +75,7 @@ def _strong_wolfe(
 
     while ls_iter < max_ls:
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
-#TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation
+#TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
         if  (f_new > (f + c1 * t * gtd.to("cuda"))) or f_new > f_best: #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
@@ -396,6 +396,7 @@ class LBFGS(Optimizer):
 #TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
 #TODO: what if we normaling by the max value and let clopping handle what the l1 would do anyways? we would only need to tune the clopping hyperparameter and would get essentially what we want with l1
         #Clop
+#TODO: may be worth taking the top K here to have deterministic memory, do this after clopping to create a floor for allocation since we want to allow very sparse outlier gradients
         if isClop:
           views[torch.logical_and(views > -5e-7,views < 5e-7)] = 0
           views.to_sparse()
@@ -415,6 +416,7 @@ class LBFGS(Optimizer):
             offset += numel
         assert offset == self._numel()
 
+#TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
     def _clone_param(self):
         return [p.clone(memory_format=torch.contiguous_format).to("cpu") for p in self._params]
 #        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
@@ -525,8 +527,8 @@ class LBFGS(Optimizer):
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
           if n_iter == 1:
               print("RESET")
-              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
-              d = flat_grad_sparse.neg()
+#              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
+              d = flat_grad.neg()
               prev_flat_grad  = None
 #              old_dirs = []
 #              old_stps = []
@@ -539,7 +541,7 @@ class LBFGS(Optimizer):
               t = 1
               gc.collect()
           else:
-              flat_grad = self._gather_norm_flat_grad(1, True)
+#              flat_grad = self._gather_norm_flat_grad(1, True)
 #              flat_grad = self._gather_norm_flat_grad(2, False)
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
@@ -643,7 +645,7 @@ class LBFGS(Optimizer):
 
           # directional derivative
   	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
-          flat_grad = self._gather_norm_flat_grad(1, True)
+#          flat_grad = self._gather_norm_flat_grad(1, True) TODO: is this right?
           gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
 #          if state["n_iter"] != 1:
 #          avg = gtd.abs().mean()
