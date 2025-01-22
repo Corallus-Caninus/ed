@@ -42,8 +42,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=0.9, tolerance_change=1e-16, max_ls=25
-#    obj_func, x, t, d, f, g, gtd, c1=1e-8, c2=1e-3, tolerance_change=1e-32, max_ls=20
+    obj_func, x, t, d, f, g, gtd, c1=1e-5, c2=0.9, tolerance_change=1e-16, max_ls=25, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1., capture_max_step=100
 ):
 #TODO: this irks the mathematician in me.
     if c2 == 0:
@@ -106,10 +105,10 @@ def _strong_wolfe(
 
 #TODO: since we reuse the last step size, we should bracket in the direction of the first interpolation direction, and change the corresponding zoom break condition if bracketing down instead of up
 #TODO: increase 100 and consider tuning 0.1 further
-        min_step = t + 1. * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
+        min_step = t + capture_min_step * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
-        max_step = upper_bracket * 100
+        max_step = upper_bracket * capture_max_step
 #TODO: insufficient progress for bracket maybe? set min_step = t and if t doesnt change then break or nudge here, we miss the point on bracketing too
   
         # interpolate
@@ -160,6 +159,7 @@ def _strong_wolfe(
     # find high and low points in bracket
     low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
 #    while not done and ls_iter < max_ls:
+    #NOTE: we wait for bracket to collapse, we dont use max linesearch here, if it takes too long turn the bracket hyperparameters up.
     while not done :
         # line-search bracket is so small
 #TODO: extract stall_wolfe hyperparameter
@@ -190,7 +190,7 @@ def _strong_wolfe(
         # we will move `t` to a position which is `0.1 * len(bracket)`
         # away from the nearest boundary point.
         #  TODO: This needs to be set based on how large our brackets are. We miss the point with these literal parameters when we arent zooming a large domain.
-        eps = (1/3) * (max(bracket) - min(bracket))
+        eps = bracket_shift * (max(bracket) - min(bracket))
 #        eps = tolerance_change * (max(bracket) - min(bracket))
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
@@ -198,11 +198,11 @@ def _strong_wolfe(
                 # evaluate at 1/3 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
-                    t = t - (1/3)*(t - displacement)
+                    t = t - bracket_shove*(t - displacement)
                     print("punt", end = " ")
                 else:
                     displacement = min(bracket) + eps
-                    t = t + (1/3)*(displacement - t)
+                    t = t + bracket_shove*(displacement - t)
                     print("punt", end = " ")
             else:
                 insuf_progress = True
@@ -316,7 +316,13 @@ class LBFGS(Optimizer):
         tolerance_grad: float = 1e-16,
         tolerance_change: float = 1e-16,
         history_size: int = 100,
+        c1: float = 1e-3,
+        c2: float = 0.25,
         line_search_fn: Optional[str] = None,
+        bracket_shift: float =(1/3),
+        bracket_shove: float =(1/3),
+        capture_min_step: float =1.,
+        capture_max_step: float =100
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -331,7 +337,13 @@ class LBFGS(Optimizer):
             tolerance_grad=tolerance_grad,
             tolerance_change=tolerance_change,
             history_size=history_size,
+            c1=c1,
+            c2=c2,
             line_search_fn=line_search_fn,
+            bracket_shift=bracket_shift,
+            bracket_shove=bracket_shove,
+            capture_min_step=capture_min_step,
+            capture_max_step=capture_max_step,
         )
         super().__init__(params, defaults)
 
@@ -391,14 +403,27 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         views = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(views, norm)
+        norm = torch.linalg.vector_norm(views, 1)
+#        norm = views.max()
         views = views/norm
 #TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
 #TODO: what if we normaling by the max value and let clopping handle what the l1 would do anyways? we would only need to tune the clopping hyperparameter and would get essentially what we want with l1
         #Clop
 #TODO: may be worth taking the top K here to have deterministic memory, do this after clopping to create a floor for allocation since we want to allow very sparse outlier gradients
         if isClop:
-          views[torch.logical_and(views > -5e-7,views < 5e-7)] = 0
+#          mask = torch.logical_and(views > -1e-4,views < 1e-4)
+#          _, indices = torch.topk(views, k=10000000)
+#          mask = torch.zeros_like(views)
+#          views[indices] = 0
+#          mask[indices] = 1
+#          views = views*mask
+#          mask = mask.view_as(views)
+#          print("GRAD:  filtered elements: " + str( mask.sum()  ))
+#          views = views[mask]
+#          print("filtered: " + str(views[views!=0]))
+          views[torch.logical_and(views > -1e-8,views < 1e-8)] = 0
+          print("filtered: " + str((views == 0).sum()))
+#          views[torch.logical_and(views > -1e-8,views < 1e-8)] = 0
           views.to_sparse()
 #NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 viewsient if it occurs.
         return views #.to("cpu")
@@ -454,6 +479,12 @@ class LBFGS(Optimizer):
       tolerance_change = group["tolerance_change"]
       line_search_fn = group["line_search_fn"]
       history_size = group["history_size"]
+      c1 = group["c1"]
+      c2 = group["c2"]
+      bracket_shift=group["bracket_shift"]
+      bracket_shove=group["bracket_shove"]
+      capture_min_step=group["capture_min_step"]
+      capture_max_step=group["capture_max_step"]
 
       # NOTE: LBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
@@ -682,8 +713,9 @@ class LBFGS(Optimizer):
                       return self._directional_evaluate(closure, x, t, d)
 
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
+                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=0.25, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
+#                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               if not success: #TODO: we chase misprinted lines
                 t = 1 #Unit vector until we restore curvature
 #                flat_grad = None
