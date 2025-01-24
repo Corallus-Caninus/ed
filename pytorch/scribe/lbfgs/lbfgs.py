@@ -2,6 +2,7 @@ from typing import Optional, Union
 import torch
 from torch import Tensor
 import gc
+import psutil
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
@@ -322,7 +323,9 @@ class LBFGS(Optimizer):
         bracket_shift: float =(1/3),
         bracket_shove: float =(1/3),
         capture_min_step: float =1.,
-        capture_max_step: float =100
+        capture_max_step: float =100,
+        gradient_clop: float = 1e-7,
+        direction_clop: float = 5e-7
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -344,6 +347,8 @@ class LBFGS(Optimizer):
             bracket_shove=bracket_shove,
             capture_min_step=capture_min_step,
             capture_max_step=capture_max_step,
+            gradient_clop=gradient_clop,
+            direction_clop=direction_clop
         )
         super().__init__(params, defaults)
 
@@ -354,6 +359,8 @@ class LBFGS(Optimizer):
 
         self._params = self.param_groups[0]["params"]
         self._numel_cache = None
+        self.gradient_clop = gradient_clop
+        self.direction_clop = direction_clop
         self.t = 1
 
     def _numel(self):
@@ -421,7 +428,7 @@ class LBFGS(Optimizer):
 #          print("GRAD:  filtered elements: " + str( mask.sum()  ))
 #          views = views[mask]
 #          print("filtered: " + str(views[views!=0]))
-          views[torch.logical_and(views > -1e-8,views < 1e-8)] = 0
+          views[torch.logical_and(views > -self.gradient_clop,views < self.gradient_clop)] = 0
           print("filtered: " + str((views == 0).sum()))
 #          views[torch.logical_and(views > -1e-8,views < 1e-8)] = 0
           views.to_sparse()
@@ -584,8 +591,9 @@ class LBFGS(Optimizer):
 #              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
               if ys > 0.0: 
                 # updating memory
-                if len(old_dirs) == history_size:
-                    # shift history by one (limited-memory)
+#                if len(old_dirs) <= history_size:
+                if psutil.virtual_memory().used  / 1000000000 >= history_size:#TODO: history size is the amount of memory available from the device
+                    # shift  history by one (limited-memory)
                     old_dirs.pop(0)
                     old_stps.pop(0)
                     ro.pop(0)
@@ -647,7 +655,7 @@ class LBFGS(Optimizer):
           d =d/total_norm
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
 #            Clop
-          mask = torch.logical_and(d > -5e-7, d < 5e-7) #TODO: extract to sub_variance hyperparameter
+          mask = torch.logical_and(d > -self.direction_clop, d < self.direction_clop) #TODO: extract to sub_variance hyperparameter
           print("total filtered elements: " + str( mask.sum()  ))
           d[mask] = 0
           d.to_sparse()
