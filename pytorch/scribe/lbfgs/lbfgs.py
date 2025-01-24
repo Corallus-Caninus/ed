@@ -617,7 +617,8 @@ class LBFGS(Optimizer):
 
 #              if "al" not in state:
 #                state["al"] = [None] * history_size
-              al = [None] * history_size
+#              al = [None] * history_size
+              al = [None] * num_old
 #              al = state["al"]
 
               # iteration in L-BFGS loop collapsed to use just one buffer
