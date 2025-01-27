@@ -77,7 +77,7 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-        if  (f_new > (f + c1 * t * gtd.to("cuda"))) or f_new > f_best: #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+        if  (f_new > (f + c1 * t * gtd.to("cuda"))) or f_new > f_best : #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -722,7 +722,7 @@ class LBFGS(Optimizer):
                       return self._directional_evaluate(closure, x, t, d)
 
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=0.25, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
+                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               if not success: #TODO: we chase misprinted lines
