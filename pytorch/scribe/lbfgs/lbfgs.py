@@ -549,25 +549,28 @@ class LBFGS(Optimizer):
         old_dirs= []
         old_stps= []
         ro= []
+        prev_flat_grad = None
 
       n_iter = 0
+      d = flat_grad.neg()
+      t = 1
       # optimize for a max of max_iter iterations
       while n_iter < max_iter:
           # keep track of nb of iterations
           gc.collect()
           n_iter += 1
-#          state["n_iter"] += 1
           print("[CRAM]")
 
           ############################################################
           # compute gradient descent direction
           ############################################################
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
-          if n_iter == 1:
+          if prev_flat_grad is None:
+#          if n_iter == 1:
               print("RESET")
 #              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
               d = flat_grad.neg()
-              prev_flat_grad  = None
+#              prev_flat_grad  = None
 #              old_dirs = []
 #              old_stps = []
 #              ro = []
@@ -794,8 +797,8 @@ class LBFGS(Optimizer):
       state["old_dirs"] = old_dirs
       state["old_stps"] = old_stps
       state["ro"] = ro
-##      state["H_diag"] = H_diag
-#      state["prev_flat_grad"] = prev_flat_grad
+#      state["H_diag"] = H_diag
+      state["prev_flat_grad"] = prev_flat_grad
 #      state["prev_loss"] = prev_loss
 #      state["n_iter"] = 0 #TODO: MoE equivalent centinuous sparse model using l1 with novel direction per iteration, if we reuse the hessian and there is sparsity the curvature will bias to a lopsided model but is appropriate for l2
 
