@@ -399,7 +399,7 @@ class LBFGS(Optimizer):
         views = []
         total = 0
         for p in self._params:
-            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+#            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
