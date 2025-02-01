@@ -74,6 +74,7 @@ def closure():
   grad_vector_size = 5
   num_tokens = input_ids.size(1)
   num_steps = 0
+  avg_loss = 0.
   with torch.no_grad():
     for i in range(0, num_tokens-grad_vector_size, chunk_size):
       end_idx = min(i + chunk_size, num_tokens - grad_vector_size)  # Make sure we don't go beyond the sequence length
@@ -90,14 +91,15 @@ def closure():
         outputs = model(input_ids=cur_input_ids,  labels = cur_input_ids,  use_cache=True)
       cache = outputs.cache_params
       num_steps += 1
+      avg_loss += outputs.loss.item()
   outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
 #  loss += outputs.loss.item()
 #  loss = loss/num_steps
 #  outputs.loss.item = loss
 #  outputs.logits = outputs.logits[:, -1:, :]
-  print(outputs.loss.item())
+  print(outputs.loss)
+  outputs.loss = (outputs.loss + avg_loss) / num_steps
   loss =  outputs.loss
-  optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   loss.backward()
   print("-", end="")
 #  torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1., norm_type=2) #TODO: try just l2 norming them here instead of with clipping
