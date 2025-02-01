@@ -112,7 +112,7 @@ num_iters = 1000
 while True:
   batch_train = next(data_iter_train)['text']
 
-  tokens = tokenizer(batch_train,truncation=True, max_length=2001,padding=True, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+  tokens = tokenizer(batch_train,truncation=True, max_length=2001,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
 
   print("-----------------------step---------------------")
