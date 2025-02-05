@@ -399,7 +399,7 @@ class LBFGS(Optimizer):
         views = []
         total = 0
         for p in self._params:
-#            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
@@ -514,7 +514,7 @@ class LBFGS(Optimizer):
       opt_cond = flat_grad.abs().max() <= 0 #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
 
       # optimal condition
-      if opt_cond or loss != loss:# NOTE: this is a NaN check via equivalence
+      if opt_cond :#or loss.isnan:# NOTE: this is a NaN check via equivalence
           print("GRAD CONVERGED") #TODO: if we throw out the hessian, will the gradient norm be able to fix this? No, the normalization scalar coeficient is clamped @ 1 so we only scale the norm down.
 						#TODO: can we flip the c2 condition to force curvature to escape like momentum?or like a cosine schedule of learning rate based on sub-optimal convergence? ideally we just set c2 correctly but this would be much more robust and easier to tune.
 #TODO: instead of resetting, or alongside resetting, flip the linesearch to search for > C2 condition as a momentum factor.
