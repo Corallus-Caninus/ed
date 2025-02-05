@@ -57,7 +57,7 @@ dataloader_train = DataLoader(dataset, batch_size=1, shuffle=True)
 
 model.train()
 
-optimizer = LBFGS(model.parameters(), lr=1., history_size=65, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=7e-7, c1=1.5, c2=1/3)
+optimizer = LBFGS(model.parameters(), lr=1., history_size=65, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=7e-7, c1=1e-2, c2=1/3)
 dataloader_train, optimizer = accelerator.prepare( dataloader_train, optimizer)
 data_iter_train = iter(dataloader_train)
 
@@ -70,11 +70,12 @@ def closure():
   loss = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   cache = None
-  chunk_size=200
-  grad_vector_size = 5
+  chunk_size=1000
+  grad_vector_size = 100 #5
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
+ # TODO: Spread the gradient throughout the input vector (every 10 iteration generate gradients with torch.set_grad_enable(True) etc) . However, getting information into the model first is somewhat preferable since we dont clobber the anchor inputs (first N inputs to a recurrent model dont have information)TODO: spread it to prevent vanishing gradient (sparse gradients across the input vector)
   with torch.no_grad():
     for i in range(0, num_tokens-grad_vector_size, chunk_size):
       end_idx = min(i + chunk_size, num_tokens - grad_vector_size)  # Make sure we don't go beyond the sequence length
@@ -86,19 +87,19 @@ def closure():
       if cache is not None:
   #      outputs = model(input_ids=cur_input_ids, attention_mask =cur_attention_mask, labels = cur_input_ids,  cache_params=cache)
   #      outputs = model(input_ids=cur_input_ids, attention_mask =cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache=True, cache_position=[cur_pos])
-        outputs = model(input_ids=cur_input_ids,  labels = cur_input_ids, cache_params = cache, use_cache=True, cache_position=[i,i])
+        outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  labels = cur_input_ids, cache_params = cache, use_cache=True, cache_position=[i])
       else:
-        outputs = model(input_ids=cur_input_ids,  labels = cur_input_ids,  use_cache=True)
+        outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  labels = cur_input_ids,  use_cache=True)
       cache = outputs.cache_params
       num_steps += 1
       avg_loss += outputs.loss.item()
-  outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
+  outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
 #  loss += outputs.loss.item()
 #  loss = loss/num_steps
 #  outputs.loss.item = loss
 #  outputs.logits = outputs.logits[:, -1:, :]
-  print(outputs.loss)
   outputs.loss = (outputs.loss + avg_loss) / num_steps
+#  print(outputs.loss)
   loss =  outputs.loss
   loss.backward()
   print("-", end="")
@@ -116,6 +117,7 @@ while True:
 
   tokens = tokenizer(batch_train,truncation=True, max_length=2001,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
+  print("got num_tokens: " + str(input_ids.size(1)))
 
   print("-----------------------step---------------------")
   optimizer.step(closure)
