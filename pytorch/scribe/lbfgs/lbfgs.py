@@ -127,7 +127,7 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-        g_new = g_new.to("cpu")
+#        g_new = g_new.to("cpu")
         ls_iter += 1
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
@@ -180,8 +180,8 @@ def _strong_wolfe(
             bracket_f[1],
             bracket_gtd[1].to("cuda"),
         )
-        bracket_gtd[1].to("cpu"),
-        bracket_gtd[0].to("cpu"),  # type: ignore[possibly-undefined]
+#        bracket_gtd[1].to("cpu"),
+#        bracket_gtd[0].to("cpu"),  # type: ignore[possibly-undefined]
 
         # test that we are making sufficient progress:
         # in case `t` is so close to boundary, we mark that we are making
@@ -214,7 +214,7 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.to("cuda").dot(d.to("cuda"))
-        g_new = g_new.to("cpu")
+#        g_new = g_new.to("cpu")
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
@@ -450,7 +450,8 @@ class LBFGS(Optimizer):
 
 #TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
     def _clone_param(self):
-        return [p.clone(memory_format=torch.contiguous_format).to("cpu") for p in self._params]
+#        return [p.clone(memory_format=torch.contiguous_format).to("cpu") for p in self._params]
+        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
     def _set_param(self, params_data):
