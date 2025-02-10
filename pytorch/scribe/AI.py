@@ -10,7 +10,7 @@ import datasets
 from datasets import Dataset
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
-from mamba_ssm import Mamba2
+#from mamba_ssm import Mamba2
 
 accelerator = Accelerator()
 filename = "AI_Checkpoint.ai"
@@ -58,7 +58,7 @@ dataloader_train = DataLoader(dataset, batch_size=1, shuffle=True)
 
 model.train()
 
-optimizer = LBFGS(model.parameters(), lr=1., history_size=65, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=7e-7, c1=1., c2=0.9)
+optimizer = LBFGS(model.parameters(), lr=1., history_size=65, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=7e-7, c1=1e-6, c2=0.9)
 dataloader_train, optimizer = accelerator.prepare( dataloader_train, optimizer)
 data_iter_train = iter(dataloader_train)
 
@@ -71,7 +71,7 @@ def closure():
   loss = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   cache = None
-  chunk_size=300 #1000
+  chunk_size=250 #1000
   grad_vector_size = 100 #5
   num_tokens = input_ids.size(1)
   num_steps = 0
@@ -91,12 +91,14 @@ def closure():
         outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
       outputs_grad = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,  cache_position=[i])
       outputs_grad.loss.backward()
+      avg_loss += outputs_grad.loss.item()
     else:
       outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
       outputs.loss.backward()
+      avg_loss += outputs.loss.item()
     cache = outputs.cache_params
     num_steps += 1
-    avg_loss += outputs.loss.item()
+#    avg_loss += outputs.loss.item()
 #  outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
 #  loss += outputs.loss.item()
 #  loss = loss/num_steps
