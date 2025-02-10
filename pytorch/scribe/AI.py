@@ -42,7 +42,7 @@ else:
     def encode(examples):
         global batch_train
         global i
-        if i >=30:
+        if i >=300:
           res = batch_train
           batch_train = ""
           i = 0
@@ -76,6 +76,10 @@ def closure():
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
+  if num_tokens == chunk_size+1:
+#TODO: instead we need to look at modulo for this
+#TODO: KISS, just pad it..
+    chunk_size += 1 #TODO: weird off by 1 error
  # TODO: Spread the gradient throughout the input vector (every 10 iteration generate gradients with torch.set_grad_enable(True) etc) . However, getting information into the model first is somewhat preferable since we dont clobber the anchor inputs (first N inputs to a recurrent model dont have information)TODO: spread it to prevent vanishing gradient (sparse gradients across the input vector)
 #  with torch.no_grad():
   for i in range(0, num_tokens, chunk_size):
@@ -122,7 +126,7 @@ num_iters = 1000
 while True:
   batch_train = next(data_iter_train)['text']
 
-  tokens = tokenizer(batch_train,truncation=True, max_length=2001,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+  tokens = tokenizer(batch_train,truncation=True, max_length=2250,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
   print("got num_tokens: " + str(input_ids.size(1)))
 
