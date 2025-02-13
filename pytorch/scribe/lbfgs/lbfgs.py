@@ -603,17 +603,17 @@ class LBFGS(Optimizer):
                     ro.pop(0)
    
                 # store new direction/step
-                old_dirs.append(y.to_sparse().to("cpu"))
-                old_stps.append(s.to_sparse().to("cpu"))
-                ro.append((1.0 / ys).to("cpu")) #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                old_dirs.append(y.to_sparse().to("cuda")) # NOTE: was cpu
+                old_stps.append(s.to_sparse().to("cuda")) # NOTE: was cpu
+                ro.append((1.0 / ys).to("cuda")) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
   
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
               H_diag = ys / y.dot(y)  # (y*y)
 
-              y = y.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
-              s = s.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
-              ys = ys.to("cpu") #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
+              y = y.to("cuda") #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
+              s = s.to("cuda") #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
+              ys = ys.to("cuda") #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
 
               # compute the approximate (L-BFGS) inverse Hessian
               # multiplied by the gradient
@@ -630,26 +630,23 @@ class LBFGS(Optimizer):
               for i in range(num_old - 1, -1, -1):
                   al[i] = (old_stps[i].to("cuda").to_dense().dot((q.to("cuda")) * ro[i].to("cuda")))
                   q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
-                  al[i] = al[i].to("cpu") 
+                  al[i] = al[i].to("cuda") #NOTE: was cpu 
 
           # multiply by initial Hessian
               # r/d is the final direction
               d = r = torch.mul(q, H_diag)
-#              q.to("cpu")
               del q
               del H_diag
-#              if H_diag != 1: #TODO: this should be freed we are wasting time by moving it to ram
-#                H_diag = H_diag.to("cpu")
               for i in range(num_old):
                   be_i = old_dirs[i].to("cuda").to_dense().dot(r) * ro[i].to("cuda")
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
-#              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cpu")
-              prev_flat_grad = flat_grad.to("cpu")
+#              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cuda") #NOTE: was cpu
+              prev_flat_grad = flat_grad.to("cuda") #NOTE: was cpu
           else:
-#              prev_flat_grad.copy_(flat_grad).to("cpu")
-              prev_flat_grad = flat_grad.to("cpu")
+#              prev_flat_grad.copy_(flat_grad).to("cuda") #NOTE: was cpu
+              prev_flat_grad = flat_grad.to("cuda") #NOTE: was cpu
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
