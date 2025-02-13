@@ -701,7 +701,7 @@ class LBFGS(Optimizer):
           d = d/total_norm
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
 #            Clop
-          direction_values = d.values()
+          direction_values = d.coalesce().values()
           mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
           direction_values[mask] = 0
           print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
