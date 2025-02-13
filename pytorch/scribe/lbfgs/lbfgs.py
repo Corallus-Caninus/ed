@@ -512,20 +512,21 @@ class LBFGS(Optimizer):
 #      flat_grad = self._gather_flat_grad()
 #TODO: remove this if we remove gradient normalization.
 #      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
-      opt_cond = flat_grad.abs().max() <= 0 #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
+#      opt_cond = flat_grad.abs().max() <= 0 #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
 
+#TODO: HARDCORE.
       # optimal condition
-      if opt_cond :#or loss.isnan:# NOTE: this is a NaN check via equivalence
-          print("GRAD CONVERGED") #TODO: if we throw out the hessian, will the gradient norm be able to fix this? No, the normalization scalar coeficient is clamped @ 1 so we only scale the norm down.
+#      if opt_cond :#or loss.isnan:# NOTE: this is a NaN check via equivalence
+#          print("GRAD CONVERGED") #TODO: if we throw out the hessian, will the gradient norm be able to fix this? No, the normalization scalar coeficient is clamped @ 1 so we only scale the norm down.
 						#TODO: can we flip the c2 condition to force curvature to escape like momentum?or like a cosine schedule of learning rate based on sub-optimal convergence? ideally we just set c2 correctly but this would be much more robust and easier to tune.
 #TODO: instead of resetting, or alongside resetting, flip the linesearch to search for > C2 condition as a momentum factor.
-          print("RESET")
-          d = flat_grad.neg()
-          old_dirs = []
-          old_stps = []
-          ro = []
-          H_diag = 1
-          return orig_loss
+#          print("RESET")
+#          d = flat_grad.neg()
+#          old_dirs = []
+#          old_stps = []
+#          ro = []
+#          H_diag = 1
+#          return orig_loss
 
 #TODO: put old_dirs, steps and ro on CPU. Perform the direction calculation as efficiently as possible with this constraint so we can use main memory for history size
       # tensors cached in state (for tracing)
