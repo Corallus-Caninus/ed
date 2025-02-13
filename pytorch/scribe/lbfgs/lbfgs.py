@@ -431,7 +431,7 @@ class LBFGS(Optimizer):
           views[torch.logical_and(views > -self.gradient_clop,views < self.gradient_clop)] = 0
           print("gradient elements: " + str((views != 0).sum()) + " total: " + str(views.numel()), end=' ')
 #          views[torch.logical_and(views > -1e-8,views < 1e-8)] = 0
-          views.to_sparse()
+          views = views.to_sparse()
 #NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 viewsient if it occurs.
         return views #.to("cpu")
     #TODO: clip out NaN based on dtype max value
