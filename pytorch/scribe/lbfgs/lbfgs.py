@@ -443,8 +443,18 @@ class LBFGS(Optimizer):
             if torch.is_complex(p):
                 p = torch.view_as_real(p)
             numel = p.numel()
-            # view as to avoid deprecated pointwise semantics
-            p.add_(update.to("cuda")[offset : offset + numel].view_as(p), alpha=step_size)
+            view = update.to("cuda")[offset : offset + numel]
+            if view.is_sparse:
+                sparse_indices = view.coalesce().indices()
+                sparse_values = view.coalesce().values()
+                p_flat = p.view(-1)
+                for i in range(sparse_values.numel()):
+                    idx = sparse_indices[0, i]
+                    val = sparse_values[i]
+                    p_flat[idx].add_(val, alpha=step_size)
+            else: #dense path for non-sparse tensors just in case
+                # view as to avoid deprecated pointwise semantics
+                p.add_(view.view_as(p), alpha=step_size)
             offset += numel
         assert offset == self._numel()
 
