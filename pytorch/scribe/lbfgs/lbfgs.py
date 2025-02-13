@@ -700,7 +700,9 @@ class LBFGS(Optimizer):
           # directional derivative
   	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
 #          flat_grad = self._gather_norm_flat_grad(1, True) TODO: is this right?
-          gtd = flat_grad.to("cuda").dot(d.to("cuda"))  # g * d
+          gtd_sparse_product = flat_grad.to("cuda") * d.to("cuda")
+          gtd = gtd_sparse_product.sum() # g * d
+          del gtd_sparse_product
 #          if state["n_iter"] != 1:
 #          avg = gtd.abs().mean()
 #          print("got avg: " + str(avg)) 
