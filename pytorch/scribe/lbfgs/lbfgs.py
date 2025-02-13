@@ -612,7 +612,7 @@ class LBFGS(Optimizer):
                 old_dirs.append(y.to_sparse().to("cuda")) # NOTE: was cpu
                 old_stps.append(s.to_sparse().to("cuda")) # NOTE: was cpu
                 ro.append((1.0 / ys).to("cuda")) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
-  
+                print(f"History size: {len(old_dirs)}")
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
               H_diag = ys / y.dot(y)  # (y*y)
