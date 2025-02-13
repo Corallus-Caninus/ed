@@ -696,7 +696,7 @@ class LBFGS(Optimizer):
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
-          total_norm = torch.abs(d.values()).sum()
+          total_norm = torch.abs(d.coalesce().values()).sum()
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d = d/total_norm
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
