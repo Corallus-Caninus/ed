@@ -672,7 +672,7 @@ class LBFGS(Optimizer):
           mask = torch.logical_and(d > -self.direction_clop, d < self.direction_clop) #TODO: extract to sub_variance hyperparameter
           print("direction elements: " + str((d != 0).sum()) + " total: " + str(d.numel()), end=' ')
           d[mask] = 0
-          d.to_sparse()
+          d = d.to_sparse()
           del mask
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
