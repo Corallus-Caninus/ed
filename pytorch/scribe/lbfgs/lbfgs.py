@@ -460,11 +460,9 @@ class LBFGS(Optimizer):
                 view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=update.device)
 
                 p_flat = p.view(-1)
-                if view_values.numel() > 0: # Check if there are any values to update
-                    for i in range(view_values.numel()):
-                        idx = view_indices[0, i].item() # Get scalar index
-                        val = view_values[i]
-                        p_flat[idx].add_(val, alpha=step_size)
+                if view_values.numel() > 0:  # Check if there are any values to update
+                    index = view_indices[0, :]  # Get the indices for index_add_
+                    p_flat.index_add_(0, index, view_values * step_size)  # Use index_add_ for vectorized update
 
 
             else: #dense path for non-sparse tensors just in case
