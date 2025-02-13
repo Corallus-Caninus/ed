@@ -665,14 +665,16 @@ class LBFGS(Optimizer):
 #TODO: should we be iterating each tensor for norm like in flat_grad?
           total_norm = torch.abs(d.values()).sum()
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
-          d =d/total_norm
+          d = d/total_norm
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
 #            Clop
-          mask = torch.logical_and(d > -self.direction_clop, d < self.direction_clop) #TODO: extract to sub_variance hyperparameter
-          print("direction elements: " + str((d != 0).sum()) + " total: " + str(d.numel()), end=' ')
-          d[mask] = 0
-          d = d.to_sparse()
+          direction_values = d.values()
+          mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
+          direction_values[mask] = 0
+          print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
+          d = torch.sparse_coo_tensor(d.indices(), direction_values, d.size())
           del mask
+          del direction_values
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
           ############################################################
