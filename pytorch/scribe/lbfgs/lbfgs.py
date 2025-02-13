@@ -429,7 +429,7 @@ class LBFGS(Optimizer):
 #          views = views[mask]
 #          print("filtered: " + str(views[views!=0]))
           views[torch.logical_and(views > -self.gradient_clop,views < self.gradient_clop)] = 0
-          print("filtered: " + str((views == 0).sum()))
+          print("filtered non-zero: " + str((views != 0).sum()) + " total: " + str(views.numel()))
 #          views[torch.logical_and(views > -1e-8,views < 1e-8)] = 0
           views.to_sparse()
 #NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 viewsient if it occurs.
@@ -662,7 +662,7 @@ class LBFGS(Optimizer):
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
 #            Clop
           mask = torch.logical_and(d > -self.direction_clop, d < self.direction_clop) #TODO: extract to sub_variance hyperparameter
-          print("total filtered elements: " + str( mask.sum()  ))
+          print("filtered non-zero direction elements: " + str((d != 0).sum()) + " total: " + str(d.numel()))
           d[mask] = 0
           d.to_sparse()
           del mask
