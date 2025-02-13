@@ -217,7 +217,9 @@ def _strong_wolfe(
         # Evaluate new point
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
-        gtd_new = g_new.to("cuda").dot(d.to("cuda"))
+        gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
+        gtd_new = gtd_new_sparse_product.sum()
+        del gtd_new_sparse_product
 #        g_new = g_new.to("cpu")
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
