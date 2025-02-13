@@ -566,6 +566,7 @@ class LBFGS(Optimizer):
           # compute gradient descent direction
           ############################################################
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
+#TODO: or if history is empty. Better if we do this by history in case we reset the approximation.
           if prev_flat_grad is None:
 #          if n_iter == 1:
               print("RESET")
