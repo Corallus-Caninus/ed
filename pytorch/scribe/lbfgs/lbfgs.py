@@ -128,7 +128,9 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
-        gtd_new = g_new.to("cuda").dot(d.to("cuda"))
+        gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
+        gtd_new = gtd_new_sparse_product.sum()
+        del gtd_new_sparse_product
 #        g_new = g_new.to("cpu")
         ls_iter += 1
         #RELAXED WOLFE CONDITION
