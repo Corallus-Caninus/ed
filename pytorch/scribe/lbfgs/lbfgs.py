@@ -642,7 +642,12 @@ class LBFGS(Optimizer):
                 ro.append((1.0 / ys).to("cuda")) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
-              H_diag = ys / y.dot(y)  # (y*y)
+              y_squared_sparse_product = y * y
+              y_squared = y_squared_sparse_product.sum()
+              del y_squared_sparse_product
+              H_diag = ys / y_squared  # (y*y)
+              del y_squared
+
 
               y = y.to("cuda") #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
               s = s.to("cuda") #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
