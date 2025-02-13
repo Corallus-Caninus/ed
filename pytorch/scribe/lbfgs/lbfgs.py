@@ -600,6 +600,7 @@ class LBFGS(Optimizer):
                   try:
                     if torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000 >= history_size:#TODO: history size is the amount of memory available from the device
                         # shift  history by one (limited-memory)
+                        print("pop..")
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
