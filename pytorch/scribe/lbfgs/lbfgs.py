@@ -602,7 +602,7 @@ class LBFGS(Optimizer):
                     print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {history_size} GB") # Debug print
                     if cuda_memory_allocated >= history_size:#TODO: history size is the amount of memory available from the device
                         # shift  history by one (limited-memory)
-                        print("pop from history..")
+                        print(f"pop from history.. History size: {len(old_dirs)}", end=' ')
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
@@ -612,7 +612,6 @@ class LBFGS(Optimizer):
                 old_dirs.append(y.to_sparse().to("cuda")) # NOTE: was cpu
                 old_stps.append(s.to_sparse().to("cuda")) # NOTE: was cpu
                 ro.append((1.0 / ys).to("cuda")) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
-                print(f"History size: {len(old_dirs)}")
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
               H_diag = ys / y.dot(y)  # (y*y)
