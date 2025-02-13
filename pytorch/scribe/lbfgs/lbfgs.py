@@ -443,16 +443,26 @@ class LBFGS(Optimizer):
             if torch.is_complex(p):
                 p = torch.view_as_real(p)
             numel = p.numel()
-            view = update.to("cuda")[offset : offset + numel]
-            if view.is_sparse:
-                sparse_indices = view.coalesce().indices()
-                sparse_values = view.coalesce().values()
+            if update.is_sparse:
+                sparse_indices = update.coalesce().indices()
+                sparse_values = update.coalesce().values()
+
+                # Extract relevant slice from sparse tensor
+                mask = torch.logical_and(sparse_indices[0, :] >= offset, sparse_indices[0, :] < offset + numel)
+                view_indices = sparse_indices[:, mask] - offset # Adjust indices to be relative to the view
+                view_values = sparse_values[mask]
+                view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=update.device)
+
                 p_flat = p.view(-1)
-                for i in range(sparse_values.numel()):
-                    idx = sparse_indices[0, i]
-                    val = sparse_values[i]
-                    p_flat[idx].add_(val, alpha=step_size)
+                if view_values.numel() > 0: # Check if there are any values to update
+                    for i in range(view_values.numel()):
+                        idx = view_indices[0, i].item() # Get scalar index
+                        val = view_values[i]
+                        p_flat[idx].add_(val, alpha=step_size)
+
+
             else: #dense path for non-sparse tensors just in case
+                view = update.to("cuda")[offset : offset + numel]
                 # view as to avoid deprecated pointwise semantics
                 p.add_(view.view_as(p), alpha=step_size)
             offset += numel
