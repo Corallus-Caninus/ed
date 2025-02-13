@@ -596,12 +596,15 @@ class LBFGS(Optimizer):
               if ys > 0.0: 
                 # updating memory
 #                if len(old_dirs) <= history_size:
-                if psutil.virtual_memory().used  / 1000000000 >= history_size:#TODO: history size is the amount of memory available from the device
-                    # shift  history by one (limited-memory)
-                    old_dirs.pop(0)
-                    old_stps.pop(0)
-                    ro.pop(0)
-   
+                if torch.cuda.is_available():
+                  try:
+                    if torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000 >= history_size:#TODO: history size is the amount of memory available from the device
+                        # shift  history by one (limited-memory)
+                        old_dirs.pop(0)
+                        old_stps.pop(0)
+                        ro.pop(0)
+                  except Exception as e:
+                    print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
                 # store new direction/step
                 old_dirs.append(y.to_sparse().to("cuda")) # NOTE: was cpu
                 old_stps.append(s.to_sparse().to("cuda")) # NOTE: was cpu
