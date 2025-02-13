@@ -54,7 +54,9 @@ def _strong_wolfe(
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
-    gtd_new = g_new.dot(d.to("cuda"))
+    gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
+    gtd_new = gtd_new_sparse_product.sum()
+    del gtd_new_sparse_product
 #    g_new = g_new#.to("cpu")
 #    gtd_new = gtd_new.to("cpu")
     t_orig = t
