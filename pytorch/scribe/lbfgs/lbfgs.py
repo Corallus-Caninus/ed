@@ -330,7 +330,7 @@ class LBFGS(Optimizer):
         max_eval: Optional[int] = None,
         tolerance_grad: float = 1e-16,
         tolerance_change: float = 1e-16,
-        history_size: int = 100,
+        history_size: int = 2,
         c1: float = 1e-3,
         c2: float = 0.25,
         line_search_fn: Optional[str] = None,
