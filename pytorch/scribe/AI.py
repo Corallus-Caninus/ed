@@ -83,7 +83,7 @@ def closure():
  # TODO: Spread the gradient throughout the input vector (every 10 iteration generate gradients with torch.set_grad_enable(True) etc) . However, getting information into the model first is somewhat preferable since we dont clobber the anchor inputs (first N inputs to a recurrent model dont have information)TODO: spread it to prevent vanishing gradient (sparse gradients across the input vector)
 #  with torch.no_grad():
   for i in range(0, num_tokens - grad_vector_size, chunk_size):
-    end_idx = min(i + chunk_size, num_tokens )#- grad_vector_size)  # Make sure we don't go beyond the sequence length
+    end_idx = min(i + chunk_size, num_tokens - grad_vector_size)  # Make sure we don't go beyond the sequence length
     cur_input_ids = input_ids[:, i:end_idx]  # Select tokens i to end_idx
     cur_attention_mask = attention_mask[:, i:end_idx]  # Select the attention mask for the chunk
     
