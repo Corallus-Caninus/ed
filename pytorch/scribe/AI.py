@@ -29,13 +29,13 @@ print("num parameters: " + str(pytorch_total_params))
 
 history_filename = "lbfgs_history.pth"
 
-if os.path.exists(filename): # Load model weights first
+if os.path.exists(filename): # Load model weights and optimizer history
     unwrapped_model = accelerator.unwrap_model(model)
     unwrapped_model.load_state_dict(torch.load(filename))
-
-optimizer = LBFGS(model.parameters(), lr=1., history_size=3.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
-if os.path.exists(history_filename): # Then load optimizer history
+    optimizer = LBFGS(model.parameters(), lr=1., history_size=3.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
     optimizer.load_history(history_filename)
+else: # Initialize optimizer if no checkpoint exists
+    optimizer = LBFGS(model.parameters(), lr=1., history_size=3.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
 
 datalist = []
 if os.path.exists("chunked.ds"):
@@ -142,8 +142,10 @@ while True:
   step_count += 1
 
   if step_count % 1 == 0:
+      unwrapped_model = accelerator.unwrap_model(model)
+      accelerator.save(unwrapped_model.state_dict(), filename)
       optimizer.save_history(history_filename)
-      print(f"LBFGS history saved to {history_filename} at step {step_count}")
+      print(f"Model and LBFGS history saved to {filename} and {history_filename} at step {step_count}")
 
   torch.cuda.empty_cache()
   prompt = "The Factor programming language is "
