@@ -648,7 +648,9 @@ class LBFGS(Optimizer):
                     print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
+                print("Size of y before sparse conversion: ", y.element_size() * y.numel())
                 old_dirs.append(y.to_sparse().to("cuda")) # NOTE: was cpu
+                print("Size of s before sparse conversion: ", s.element_size() * s.numel())
                 old_stps.append(s.to_sparse().to("cuda")) # NOTE: was cpu
                 ro.append((1.0 / ys).to("cuda")) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
