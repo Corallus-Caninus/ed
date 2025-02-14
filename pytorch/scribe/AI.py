@@ -79,7 +79,6 @@ def closure():
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
-  print("Initial total_loss:", total_loss) # ADDED PRINT
   if num_tokens == chunk_size+1:
     chunk_size += 1
   torch.cuda.empty_cache()
@@ -97,17 +96,16 @@ def closure():
     cache = outputs.cache_params
     num_steps += 1
     current_loss = outputs.loss.item()
-    print(f"Chunk {i}-{end_idx} loss: {current_loss}") # ADDED PRINT
     avg_loss += current_loss # Accumulate loss values
 
   outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
   last_chunk_loss = outputs.loss.item()
-  print(f"Last chunk loss: {last_chunk_loss}") # ADDED PRINT
   avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
   avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
-  print("Average loss before backward:", avg_loss) # ADDED PRINT
   outputs.loss.item = avg_loss # Assign average loss value to outputs.loss.item
-  outputs.loss.backward() # Perform backward pass on the original outputs.loss tensor
+#  outputs.loss.backward() # Perform backward pass on the original outputs.loss tensor
+  loss = outputs.loss # Perform backward pass on the original outputs.loss tensor
+  loss.backward()
 
   print("-", end="")
   end_time = time.time()
