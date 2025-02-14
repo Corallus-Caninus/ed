@@ -60,12 +60,7 @@ else:
     dataset = dataset.map(encode)
     dataset = dataset.filter(lambda item: item['text'] != None )
     dataset.save_to_disk("chunked.ds")
-dataloader_train = DataLoader(dataset, batch_size=1, shuffle=True)
-
 model.train()
-
-dataloader_train, optimizer = accelerator.prepare( dataloader_train, optimizer)
-data_iter_train = iter(dataloader_train)
 
 batch_train = None
 input_ids = None
@@ -115,8 +110,11 @@ def closure():
 
 num_iters = 1000
 step_count = 0
+dataset_size = len(dataset) # Get dataset size outside the loop
+
 while True:
-  batch_train = next(data_iter_train)['text']
+  random_index = torch.randint(0, dataset_size, (1,)).item() # Generate a random index
+  batch_train = dataset[random_index]['text'] # Access data using random index
 
   tokens = tokenizer(batch_train,truncation=True, max_length=2100,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
