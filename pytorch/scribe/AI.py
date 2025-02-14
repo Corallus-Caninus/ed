@@ -64,7 +64,6 @@ dataloader_train = DataLoader(dataset, batch_size=1, shuffle=True)
 
 model.train()
 
-optimizer = LBFGS(model.parameters(), lr=1., history_size=3.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
 dataloader_train, optimizer = accelerator.prepare( dataloader_train, optimizer)
 data_iter_train = iter(dataloader_train)
 
