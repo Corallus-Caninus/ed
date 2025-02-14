@@ -615,6 +615,7 @@ class LBFGS(Optimizer):
               t = 1
               gc.collect()
           else:
+              torch.cuda.empty_cache() # Clear cache before direction calculation
 #              flat_grad = self._gather_norm_flat_grad(1, True)
 #              flat_grad = self._gather_norm_flat_grad(2, False)
               # do lbfgs update (update memory).to("cpu")
@@ -643,6 +644,7 @@ class LBFGS(Optimizer):
                         ro.pop(0)
                   except Exception as e:
                     print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
+                torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
                 old_dirs.append(y.to_sparse().to("cuda")) # NOTE: was cpu
                 old_stps.append(s.to_sparse().to("cuda")) # NOTE: was cpu
