@@ -885,9 +885,9 @@ class LBFGS(Optimizer):
         try:
             history = torch.load(filename)
             state = self.state[self._params[0]]
-            state["old_dirs"] = history.get("old_dirs", []),
-            state["old_stps"] = history.get("old_stps", []),
-            state["ro"] = history.get("ro", []),
+            state["old_dirs"] = [tensor.to("cuda") for tensor in history.get("old_dirs", [])]
+            state["old_stps"] = [tensor.to("cuda") for tensor in history.get("old_stps", [])]
+            state["ro"] = [tensor.to("cuda") for tensor in history.get("ro", [])]
             state["prev_flat_grad"] = history.get("prev_flat_grad", None)
             print(f"LBFGS history loaded from {filename}")
         except FileNotFoundError:
