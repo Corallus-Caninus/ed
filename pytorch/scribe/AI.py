@@ -66,6 +66,8 @@ batch_train = None
 input_ids = None
 attention_mask = None
 
+total_loss = 0. # Initialize total_loss OUTSIDE closure to accumulate across steps
+
 def closure():
   start_time = time.time()
   loss = 0
@@ -76,7 +78,6 @@ def closure():
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
-  total_loss = 0. # Initialize total_loss
   print("Initial total_loss:", total_loss) # ADDED PRINT
   if num_tokens == chunk_size+1:
     chunk_size += 1
