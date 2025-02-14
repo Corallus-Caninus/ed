@@ -457,7 +457,7 @@ class LBFGS(Optimizer):
                 mask = torch.logical_and(sparse_indices[0, :] >= offset, sparse_indices[0, :] < offset + numel)
                 view_indices = sparse_indices[:, mask] - offset # Adjust indices to be relative to the view
                 view_values = sparse_values[mask]
-                view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=update.device)
+                view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=update.device).coalesce() #TODO: verify via profiling if coalesce is necessary
 
                 p_flat = p.view(-1)
                 if view_values.numel() > 0:  # Check if there are any values to update
@@ -713,7 +713,7 @@ class LBFGS(Optimizer):
           direction_values[mask] = 0
           print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
           d = d.coalesce()
-          d = torch.sparse_coo_tensor(d.indices(), direction_values, d.size())
+          d = torch.sparse_coo_tensor(d.indices(), direction_values, d.size()).coalesce() #TODO: verify via profiling if coalesce is necessary
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
