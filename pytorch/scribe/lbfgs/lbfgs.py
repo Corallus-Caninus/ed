@@ -622,6 +622,7 @@ class LBFGS(Optimizer):
 #              flat_grad = self._gather_norm_flat_grad(2, False)
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
+              print(f"d: {d}, t: {t}")
               s = (d.to("cuda").mul(t))
               print(f"Is s sparse after multiplication? {s.is_sparse}")
               ys_sparse_product = y * s
