@@ -676,12 +676,13 @@ class LBFGS(Optimizer):
           # multiply by initial Hessian
               # r/d is the final direction
               d = r = torch.mul(q, H_diag)
-              del q
-              del H_diag
+              del q # DEL 5: q is no longer needed after direction d is computed
+              del H_diag # DEL 6: H_diag is no longer needed
               for i in range(num_old):
                   # Sparse dot product using element-wise multiplication and sum, replaced to_dense().dot()
                   sparse_product_be = old_dirs[i].to("cuda") * r
                   be_i = sparse_product_be.sum() * ro[i].to("cuda") # replaced to_dense().dot()
+                  del sparse_product_be # DEL 7: sparse_product_be is no longer needed
 
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
 
@@ -705,8 +706,8 @@ class LBFGS(Optimizer):
           print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
           d = d.coalesce()
           d = torch.sparse_coo_tensor(d.indices(), direction_values, d.size())
-          del mask
-          del direction_values
+          del mask # DEL 9: mask is no longer needed
+          del direction_values # DEL 10: direction_values is no longer needed
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
           ############################################################
