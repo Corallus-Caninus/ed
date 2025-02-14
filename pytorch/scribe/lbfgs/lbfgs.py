@@ -283,6 +283,12 @@ def _strong_wolfe(
 class LBFGS(Optimizer):
     """Implements L-BFGS algorithm.
 
+    # Memory allocation strategies:
+    # - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True  (reduces fragmentation for variable size tensors)
+    # - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:<value> (experiment with segment split size, less direct impact on fragmentation)
+    # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    # export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
+
     Heavily inspired by `minFunc
     <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
 
