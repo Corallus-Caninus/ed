@@ -103,7 +103,7 @@ def closure():
   avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
   avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
   outputs.loss.item = avg_loss # Assign average loss value to outputs.loss.item
-  print(f"Output tensor before backprop: {outputs.loss.item()}")
+  print(f"Output tensor before backprop: {outputs.loss.item}")
   print(f"Accumulated loss (avg_loss): {avg_loss}")
   print(f"Final gradient loss (outputs.loss.item()): {outputs.loss.item()}")
 #  outputs.loss.backward() # Perform backward pass on the original outputs.loss tensor
