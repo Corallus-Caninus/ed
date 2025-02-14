@@ -141,7 +141,7 @@ while True:
   optimizer.step(closure)
   step_count += 1
 
-  if step_count % 10 == 0:
+  if step_count % 1 == 0:
       optimizer.save_history(history_filename)
       print(f"LBFGS history saved to {history_filename} at step {step_count}")
 
