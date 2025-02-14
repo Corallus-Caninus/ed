@@ -81,47 +81,32 @@ def closure():
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
+  total_loss = 0. # Initialize total_loss
   if num_tokens == chunk_size+1:
-#TODO: instead we need to look at modulo for this
-#TODO: KISS, just pad it..
-    chunk_size += 1 #TODO: weird off by 1 error
- # TODO: Spread the gradient throughout the input vector (every 10 iteration generate gradients with torch.set_grad_enable(True) etc) . However, getting information into the model first is somewhat preferable since we dont clobber the anchor inputs (first N inputs to a recurrent model dont have information)TODO: spread it to prevent vanishing gradient (sparse gradients across the input vector)
-#  with torch.no_grad():
+    chunk_size += 1
   torch.cuda.empty_cache()
   for i in range(0, num_tokens - grad_vector_size, chunk_size):
-    end_idx = min(i + chunk_size, num_tokens - grad_vector_size)  # Make sure we don't go beyond the sequence length
-    cur_input_ids = input_ids[:, i:end_idx]  # Select tokens i to end_idx
-    cur_attention_mask = attention_mask[:, i:end_idx]  # Select the attention mask for the chunk
-    
-#    outputs = model(input_ids[:, :-1], attention_mask=attention_mask[:, :-1],labels = input_ids[:, :-1], use_cache=True)
-#TODO: the mamba2 paper says that since its attention like vectorized we dont actually do one token at a time, we need to batch with the attention-like SSM vectorization width
+    end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
+    cur_input_ids = input_ids[:, i:end_idx]
+    cur_attention_mask = attention_mask[:, i:end_idx]
+
     if cache is not None:
-#      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True, cache_position=[i])
-      with torch.no_grad():
+      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
         outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
-#      outputs_grad = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,  cache_position=[i])
-#      outputs_grad.loss.backward()
-#      avg_loss += outputs_grad.loss.item()
     else:
-      with torch.no_grad():
+      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
         outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
-#      outputs.loss.backward()
-#      avg_loss += outputs.loss.item()
     cache = outputs.cache_params
     num_steps += 1
-#    avg_loss += outputs.loss.item()
+    total_loss += outputs.loss.item() # Accumulate loss values
+
   outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
-  loss = outputs.loss
-#  loss = loss/num_steps
-#  outputs.loss.item = loss
-#  outputs.logits = outputs.logits[:, -1:, :]
-#  outputs.loss = (outputs.loss + avg_loss) / num_steps
-#  print(outputs.loss)
-#  loss =  outputs.loss
-  loss.backward()
-#  loss = avg_loss/num_steps
+  total_loss += outputs.loss.item() # Accumulate loss from the last chunk as well
+  avg_loss = total_loss / (num_steps + 1) # Calculate average loss (including last chunk)
+  loss = avg_loss # Use avg_loss for backward pass
+  loss.backward() # Perform backward pass on the average loss
+
   print("-", end="")
-#  torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1., norm_type=2) #TODO: try just l2 norming them here instead of with clipping
   end_time = time.time()
   elapsed_time = end_time - start_time
   del cache
