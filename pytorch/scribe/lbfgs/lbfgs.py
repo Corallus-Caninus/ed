@@ -695,6 +695,7 @@ class LBFGS(Optimizer):
 
               sparse_product_be = None # Initialize for reuse
               for i in range(num_old):
+                  torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   if sparse_product_be is None:
                       sparse_product_be = old_dirs[i].to("cuda") * r
                   else:
