@@ -29,11 +29,12 @@ print("num parameters: " + str(pytorch_total_params))
 
 history_filename = "lbfgs_history.pth"
 
-if os.path.exists(filename):
-  unwrapped_model = accelerator.unwrap_model(model)
-  unwrapped_model.load_state_dict(torch.load(filename))
+if os.path.exists(filename): # Load model weights first
+    unwrapped_model = accelerator.unwrap_model(model)
+    unwrapped_model.load_state_dict(torch.load(filename))
 
-if os.path.exists(history_filename):
+optimizer = LBFGS(model.parameters(), lr=1., history_size=3.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
+if os.path.exists(history_filename): # Then load optimizer history
     optimizer.load_history(history_filename)
 
 datalist = []
