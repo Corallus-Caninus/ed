@@ -98,7 +98,7 @@ def closure():
   outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
   total_loss += outputs.loss.item() # Accumulate loss from the last chunk as well
   avg_loss = total_loss / (num_steps + 1) # Calculate average loss (including last chunk)
-  loss = avg_loss # Use avg_loss for backward pass
+  loss = torch.tensor(avg_loss, requires_grad=True) # Use avg_loss for backward pass
   loss.backward() # Perform backward pass on the average loss
 
   print("-", end="")
