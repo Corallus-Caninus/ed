@@ -666,26 +666,33 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.to("cuda").neg()
-              for i in range(num_old - 1, -1, -1):
-                  # Sparse dot product using element-wise multiplication and sum, replaced to_dense().dot()
-                  sparse_product_al = old_stps[i].to("cuda") * ((q.to("cuda")) * ro[i].to("cuda"))
-                  al[i] = sparse_product_al.sum() # replaced to_dense().dot()
 
+              sparse_product_al = None # Initialize for reuse
+              for i in range(num_old - 1, -1, -1):
+                  if sparse_product_al is None:
+                      sparse_product_al = old_stps[i].to("cuda") * ((q.to("cuda")) * ro[i].to("cuda"))
+                  else:
+                      sparse_product_al.copy_(old_stps[i].to("cuda") * ((q.to("cuda")) * ro[i].to("cuda")))
+                  al[i] = sparse_product_al.sum() # replaced to_dense().dot()
                   q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
-                  al[i] = al[i].to("cuda") #NOTE: was cpu 
+                  al[i] = al[i].to("cuda") #NOTE: was cpu
 
           # multiply by initial Hessian
               # r/d is the final direction
               d = r = torch.mul(q, H_diag)
               del q # DEL 5: q is no longer needed after direction d is computed
               del H_diag # DEL 6: H_diag is no longer needed
-              for i in range(num_old):
-                  # Sparse dot product using element-wise multiplication and sum, replaced to_dense().dot()
-                  sparse_product_be = old_dirs[i].to("cuda") * r
-                  be_i = sparse_product_be.sum() * ro[i].to("cuda") # replaced to_dense().dot()
-                  del sparse_product_be # DEL 7: sparse_product_be is no longer needed
 
+              sparse_product_be = None # Initialize for reuse
+              for i in range(num_old):
+                  if sparse_product_be is None:
+                      sparse_product_be = old_dirs[i].to("cuda") * r
+                  else:
+                      sparse_product_be.copy_(old_dirs[i].to("cuda") * r)
+                  be_i = sparse_product_be.sum() * ro[i].to("cuda") # replaced to_dense().dot()
                   r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
+              del sparse_product_al # Delete after loop
+              del sparse_product_be # Delete after loop
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
 #              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cuda") #NOTE: was cpu
