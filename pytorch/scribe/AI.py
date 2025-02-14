@@ -27,9 +27,14 @@ model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda")
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
+history_filename = "lbfgs_history.pth"
+
 if os.path.exists(filename):
   unwrapped_model = accelerator.unwrap_model(model)
   unwrapped_model.load_state_dict(torch.load(filename))
+
+if os.path.exists(history_filename):
+    optimizer.load_history(history_filename)
 
 datalist = []
 if os.path.exists("chunked.ds"):
@@ -124,6 +129,7 @@ def closure():
   return loss
 
 num_iters = 1000
+step_count = 0
 while True:
   batch_train = next(data_iter_train)['text']
 
@@ -133,6 +139,11 @@ while True:
 
   print("-----------------------step---------------------")
   optimizer.step(closure)
+  step_count += 1
+
+  if step_count % 10 == 0:
+      optimizer.save_history(history_filename)
+      print(f"LBFGS history saved to {history_filename} at step {step_count}")
 
   torch.cuda.empty_cache()
   prompt = "The Factor programming language is "
