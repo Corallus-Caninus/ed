@@ -655,7 +655,7 @@ class LBFGS(Optimizer):
                 #print(f"Storage format of y_sparse: {y_sparse.storage()}")
                 #print("Size of y before sparse conversion: ", y_sparse.element_size() * y_sparse.numel()) #comment out
                 old_dirs.append(y_sparse) # NOTE: was cpu
-                s_sparse = s.to_sparse().to("cuda").coalesce()
+                s_sparse = s.to_sparse().coalesce()
                 print(f"Is s_sparse actually sparse? {s_sparse.is_sparse}")
                 print(f"Number of non-zero elements in s_sparse: {s_sparse.values().numel()}")
                 #print(f"Storage format of s_sparse: {s_sparse.storage()}")
