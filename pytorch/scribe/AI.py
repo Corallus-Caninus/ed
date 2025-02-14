@@ -69,12 +69,12 @@ attention_mask = None
 total_loss = 0. # Initialize total_loss OUTSIDE closure to accumulate across steps
 
 def closure():
-  global total_loss
+  total_loss
   start_time = time.time()
   loss = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   cache = None
-  chunk_size=500 #1000
+  chunk_size=1000 #1000
   grad_vector_size = 100 #5
   num_tokens = input_ids.size(1)
   num_steps = 0
@@ -98,13 +98,13 @@ def closure():
     num_steps += 1
     current_loss = outputs.loss.item()
     print(f"Chunk {i}-{end_idx} loss: {current_loss}") # ADDED PRINT
-    total_loss += current_loss # Accumulate loss values
+    avg_loss += current_loss # Accumulate loss values
 
   outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
   last_chunk_loss = outputs.loss.item()
   print(f"Last chunk loss: {last_chunk_loss}") # ADDED PRINT
-  total_loss += last_chunk_loss # Accumulate loss from the last chunk as well
-  avg_loss = total_loss / (num_steps + 1) # Calculate average loss (including last chunk)
+  avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
+  avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
   print("Average loss before backward:", avg_loss) # ADDED PRINT
   outputs.loss.item = avg_loss # Assign average loss value to outputs.loss.item
   outputs.loss.backward() # Perform backward pass on the original outputs.loss tensor
