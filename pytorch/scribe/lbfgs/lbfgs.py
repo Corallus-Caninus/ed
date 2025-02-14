@@ -636,11 +636,9 @@ class LBFGS(Optimizer):
                 if torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
-                    print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {history_size} GB") # Debug print
                     while cuda_memory_allocated >= history_size:#TODO: history size is the amount of memory available from the device
                         cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
                         # shift  history by one (limited-memory)
-                        print(f"pop from history.. History size: {len(old_dirs)}", end=' ')
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
@@ -651,10 +649,6 @@ class LBFGS(Optimizer):
                 y_sparse = y.to_sparse().to("cuda").coalesce()
                 old_dirs.append(y_sparse) # NOTE: was cpu
                 s_sparse = s.to_sparse().coalesce()
-                print(f"Is s_sparse actually sparse? {s_sparse.is_sparse}")
-                print(f"Number of non-zero elements in s_sparse: {s_sparse.values().numel()}")
-                #print(f"Storage format of s_sparse: {s_sparse.storage()}")
-                #print("Size of s after sparse conversion: ", s_sparse.element_size() * s_sparse.numel()) #comment out
                 old_stps.append(s_sparse) # NOTE: was cpu
                 ro.append((1.0 / ys).to("cuda")) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
