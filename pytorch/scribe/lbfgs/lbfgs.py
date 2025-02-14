@@ -622,7 +622,7 @@ class LBFGS(Optimizer):
 #              flat_grad = self._gather_norm_flat_grad(2, False)
               # do lbfgs update (update memory).to("cpu")
               y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
-              print(f"Number of elements in d: {d.coalesce().values().numel()}, Number of elements in t: {torch.numel(t)}")
+              print(f"Number of elements in d: {d.coalesce().values().numel()}, Number of elements in t: {torch.tensor(t).numel()}")
               s = (d.to("cuda").mul(t))
               print(f"Number of elements in s: {s.coalesce().values().numel()}")
               print(f"Is s sparse after multiplication? {s.is_sparse}")
