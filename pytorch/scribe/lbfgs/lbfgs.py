@@ -418,7 +418,7 @@ class LBFGS(Optimizer):
         views = torch.cat(views, 0)
         norm = torch.linalg.vector_norm(views, 1)
 #        norm = views.max()
-        views = views/norm
+        views.div_(norm)
 #TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
 #TODO: what if we normaling by the max value and let clopping handle what the l1 would do anyways? we would only need to tune the clopping hyperparameter and would get essentially what we want with l1
         #Clop
@@ -705,7 +705,7 @@ class LBFGS(Optimizer):
 #TODO: should we be iterating each tensor for norm like in flat_grad?
           total_norm = torch.abs(d.coalesce().values()).sum()
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
-          d = d/total_norm
+          d.div_(total_norm)
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
 #            Clop
           direction_values = d.coalesce().values()
