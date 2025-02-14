@@ -868,3 +868,29 @@ class LBFGS(Optimizer):
 #      state["n_iter"] = 0 #TODO: MoE equivalent centinuous sparse model using l1 with novel direction per iteration, if we reuse the hessian and there is sparsity the curvature will bias to a lopsided model but is appropriate for l2
 
       return orig_loss
+
+    def save_history(self, filename):
+        """Save LBFGS history to a file."""
+        state = self.state[self._params[0]]
+        history = {
+            "old_dirs": state.get("old_dirs", []),
+            "old_stps": state.get("old_stps", []),
+            "ro": state.get("ro", []),
+            "prev_flat_grad": state.get("prev_flat_grad", None),
+        }
+        torch.save(history, filename)
+
+    def load_history(self, filename):
+        """Load LBFGS history from a file."""
+        try:
+            history = torch.load(filename)
+            state = self.state[self._params[0]]
+            state["old_dirs"] = history.get("old_dirs", []),
+            state["old_stps"] = history.get("old_stps", []),
+            state["ro"] = history.get("ro", []),
+            state["prev_flat_grad"] = history.get("prev_flat_grad", None)
+            print(f"LBFGS history loaded from {filename}")
+        except FileNotFoundError:
+            print(f"History file {filename} not found. Starting from scratch.")
+        except Exception as e:
+            print(f"Error loading LBFGS history from {filename}: {e}. Starting from scratch.")
