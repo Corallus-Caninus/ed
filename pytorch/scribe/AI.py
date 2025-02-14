@@ -71,7 +71,7 @@ def closure():
   loss = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   cache = None
-  chunk_size=1000 #1000
+  chunk_size=2000 #1000
   grad_vector_size = 100 #5
   num_tokens = input_ids.size(1)
   num_steps = 0
