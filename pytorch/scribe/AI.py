@@ -69,6 +69,7 @@ attention_mask = None
 total_loss = 0. # Initialize total_loss OUTSIDE closure to accumulate across steps
 
 def closure():
+  global total_loss
   start_time = time.time()
   loss = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
