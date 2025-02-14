@@ -736,8 +736,12 @@ class LBFGS(Optimizer):
           mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
           direction_values[mask] = 0
           print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
-          d = d.coalesce()
-          d = torch.sparse_coo_tensor(d.indices(), direction_values, d.size()).coalesce() #TODO: verify via profiling if coalesce is necessary
+          # Get the indices *after* clopping
+          indices = d.coalesce().indices()
+          valid_indices_mask = direction_values != 0
+          valid_indices = indices[:, valid_indices_mask]
+
+          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce() #TODO: verify via profiling if coalesce is necessary
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
