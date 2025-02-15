@@ -51,16 +51,16 @@ def _strong_wolfe(
     if c2 == 0:
       c2 = 0.25
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
-#    g = g.clone(memory_format=torch.contiguous_format)#.to("cpu")
+#    g = g.clone(memory_format=torch.contiguous_format)
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
-    gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
+    gtd_new_sparse_product = g_new * d
     gtd_new = gtd_new_sparse_product.sum()
     del gtd_new_sparse_product
-#    g_new = g_new#.to("cpu")
-#    gtd_new = gtd_new.to("cpu")
+#    g_new = g_new#
+#    gtd_new = gtd_new#
     t_orig = t
     success = False
 
@@ -81,7 +81,7 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-        if  (f_new > (f + c1 * t * gtd.to("cuda"))) or f_new > f_best : #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+        if  (f_new > (f + c1 * t * gtd)) or f_new > f_best : #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -90,7 +90,7 @@ def _strong_wolfe(
             break
 
 #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if abs(gtd_new.to("cuda")) <= -c2 * gtd.to("cuda"): # and f_new <= f_best :
+        if abs(gtd_new) <= -c2 * gtd: # and f_new <= f_best :
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -130,13 +130,13 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
-        gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
+        gtd_new_sparse_product = g_new * d
         gtd_new = gtd_new_sparse_product.sum()
         del gtd_new_sparse_product
-#        g_new = g_new.to("cpu")
+#        g_new = g_new#
         ls_iter += 1
         #RELAXED WOLFE CONDITION
-#        cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
+#        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
 #        if cur_c2 <= best_c2 and f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
         if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
           success = True
@@ -474,7 +474,7 @@ class LBFGS(Optimizer):
 
 
             else: #dense path for non-sparse tensors just in case
-                view = update.to("cuda")[offset : offset + numel]
+                view = update[offset : offset + numel]
                 # view as to avoid deprecated pointwise semantics
                 p.add_(view.view_as(p), alpha=step_size)
             offset += numel
@@ -491,7 +491,7 @@ class LBFGS(Optimizer):
             p.copy_(pdata)
 
     def _directional_evaluate(self, closure, x, t, d):
-        self._add_grad(t, d.to("cuda"))
+        self._add_grad(t, d)
         loss = float(closure())
         flat_grad = self._gather_norm_flat_grad(1, True)
 #        flat_grad = self._gather_flat_grad()
@@ -621,9 +621,9 @@ class LBFGS(Optimizer):
               torch.cuda.empty_cache() # Clear cache before direction calculation
 #              flat_grad = self._gather_norm_flat_grad(1, True)
 #              flat_grad = self._gather_norm_flat_grad(2, False)
-              # do lbfgs update (update memory).to("cpu")
-              y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
-              s = (d.to("cuda").mul(t))
+              # do lbfgs update (update memory)
+              y = flat_grad.sub(prev_flat_grad)
+              s = (d.mul(t))
               ys_sparse_product = y * s
               ys = ys_sparse_product.sum()#y*s
               del ys_sparse_product
@@ -631,7 +631,7 @@ class LBFGS(Optimizer):
 #TODO: with normalization, armijo should be able to solve s.t. c1 <= 1 since loss reduction is 1:1 if the direction approx is 100% accurate since direction is normalized. We also can expect flat_grad.dot(d) to be 0 if approx is 100% accurate since we set number of iterations based on c2 condition convergence minima. e.g.: c2 = 0.9 we do 10 iterations for 100% reduction.
 		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
 #              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
-              if ys > 0.0: 
+              if ys > 0.0:
                 # updating memory
 #                if len(old_dirs) <= history_size:
                 if torch.cuda.is_available():
@@ -648,11 +648,11 @@ class LBFGS(Optimizer):
                     print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-                y_sparse = y.to_sparse().to("cuda").coalesce()
+                y_sparse = y.to_sparse().coalesce()
                 old_dirs.append(y_sparse) # NOTE: was cpu
                 s_sparse = s.to_sparse().coalesce()
                 old_stps.append(s_sparse) # NOTE: was cpu
-                ro.append((1.0 / ys).to("cuda")) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                ro.append((1.0 / ys)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
               y_squared_sparse_product = y * y
@@ -662,9 +662,9 @@ class LBFGS(Optimizer):
               del y_squared
 
 
-              y = y.to("cuda") #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
-              s = s.to("cuda") #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
-              ys = ys.to("cuda") #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
+              y = y #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
+              s = s #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
+              ys = ys #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
 
               # compute the approximate (L-BFGS) inverse Hessian
               # multiplied by the gradient
@@ -677,17 +677,17 @@ class LBFGS(Optimizer):
 #              al = state["al"]
 
               # iteration in L-BFGS loop collapsed to use just one buffer
-              q = flat_grad.to("cuda").neg()
+              q = flat_grad.neg()
 
               sparse_product_al = None # Initialize for reuse
               for i in range(num_old - 1, -1, -1):
                   if sparse_product_al is None:
-                      sparse_product_al = old_stps[i].to("cuda") * ((q.to("cuda")) * ro[i].to("cuda"))
+                      sparse_product_al = old_stps[i] * ((q) * ro[i])
                   else:
-                      sparse_product_al.copy_(old_stps[i].to("cuda") * ((q.to("cuda")) * ro[i].to("cuda")))
+                      sparse_product_al.copy_(old_stps[i] * ((q) * ro[i]))
                   al[i] = sparse_product_al.sum() # replaced to_dense().dot()
-                  q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
-                  al[i] = al[i].to("cuda") #NOTE: was cpu
+                  q.add_(old_dirs[i], alpha=-al[i])
+                  al[i] = al[i] #NOTE: was cpu
 
           # multiply by initial Hessian
               # r/d is the final direction
@@ -699,20 +699,20 @@ class LBFGS(Optimizer):
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   if sparse_product_be is None:
-                      sparse_product_be = old_dirs[i].to("cuda") * r
+                      sparse_product_be = old_dirs[i] * r
                   else:
-                      sparse_product_be.copy_(old_dirs[i].to("cuda") * r)
-                  be_i = sparse_product_be.sum() * ro[i].to("cuda") # replaced to_dense().dot()
-                  r.add_(old_stps[i].to("cuda"), alpha=al[i].to("cuda") - be_i)
+                      sparse_product_be.copy_(old_dirs[i] * r)
+                  be_i = sparse_product_be.sum() * ro[i] # replaced to_dense().dot()
+                  r.add_(old_stps[i], alpha=al[i] - be_i)
               del sparse_product_al # Delete after loop
               del sparse_product_be # Delete after loop
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
-#              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format).to("cuda") #NOTE: was cpu
-              prev_flat_grad = flat_grad.to("cuda") #NOTE: was cpu
+#              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was cpu
+              prev_flat_grad = flat_grad#NOTE: was cpu
           else:
-#              prev_flat_grad.copy_(flat_grad).to("cuda") #NOTE: was cpu
-              prev_flat_grad = flat_grad.to("cuda") #NOTE: was cpu
+#              prev_flat_grad.copy_(flat_grad)#NOTE: was cpu
+              prev_flat_grad = flat_grad#NOTE: was cpu
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
@@ -758,24 +758,24 @@ class LBFGS(Optimizer):
           # directional derivative
   	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
 #          flat_grad = self._gather_norm_flat_grad(1, True) TODO: is this right?
-          gtd_sparse_product = flat_grad.to("cuda") * d.to("cuda")
+          gtd_sparse_product = flat_grad * d
           gtd = gtd_sparse_product.sum() # g * d
           del gtd_sparse_product
 #          if state["n_iter"] != 1:
 #          avg = gtd.abs().mean()
-#          print("got avg: " + str(avg)) 
+#          print("got avg: " + str(avg))
 ##          t = min(1e16, 1/avg)
           t = self.t #TODO: this should be set based on an average of step sizes or something. We can track what the learning rate should be to increase the speed of bracket search without missing points at lower step sizes.
 ##            t = min(5e5, 5e-5/ avg)
 #          print("got t: " + str(t))
 
-#          flat_grad = flat_grad.to("cpu")
-#          gtd=gtd.to("cpu")
-#          flat_grad = flat_grad.to("cpu")
+#          flat_grad = flat_grad#
+#          gtd=gtd#
+#          flat_grad = flat_grad#
 #          gtd=gtd
-#          d = d.to("cpu") 
-#          d = d 
-#          t = t.to("cpu") 
+#          d = d#
+#          d = d
+#          t = t#
 
           # directional derivative is below tolerance
 #NOTE: if we dont break here we are surely going to zoom on the bracket. This is preferable to just skipping until the data point aligns with the hessian but may prefer reseting the hessian instead.
@@ -891,9 +891,9 @@ class LBFGS(Optimizer):
         try:
             history = torch.load(filename)
             state = self.state[self._params[0]]
-            state["old_dirs"] = [tensor.to("cuda") for tensor in history.get("old_dirs", [])]
-            state["old_stps"] = [tensor.to("cuda") for tensor in history.get("old_stps", [])]
-            state["ro"] = [tensor.to("cuda") for tensor in history.get("ro", [])]
+            state["old_dirs"] = [tensor for tensor in history.get("old_dirs", [])]
+            state["old_stps"] = [tensor for tensor in history.get("old_stps", [])]
+            state["ro"] = [tensor for tensor in history.get("ro", [])]
             state["prev_flat_grad"] = history.get("prev_flat_grad", None)
             print(f"LBFGS history loaded from {filename}")
         except FileNotFoundError:
