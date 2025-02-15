@@ -684,9 +684,9 @@ class LBFGS(Optimizer):
               sparse_product_al = None # Initialize for reuse
               for i in range(num_old - 1, -1, -1):
                   if sparse_product_al is None:
-                      sparse_product_al = old_stps[i] * ((q) * ro[i])
+                      sparse_product_al = old_stps[i].to(q.device) * ((q) * ro[i])
                   else:
-                      sparse_product_al.copy_(old_stps[i] * ((q) * ro[i]))
+                      sparse_product_al.copy_(old_stps[i].to(q.device) * ((q) * ro[i]))
                   al[i] = sparse_product_al.sum() # replaced to_dense().dot()
                   q.add_(old_dirs[i], alpha=-al[i])
                   al[i] = al[i] #NOTE: was cpu
