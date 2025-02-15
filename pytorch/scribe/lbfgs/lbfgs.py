@@ -181,13 +181,13 @@ def _strong_wolfe(
         t = _cubic_interpolate(
             bracket[0],
             bracket_f[0],
-            bracket_gtd[0].to("cuda"),  # type: ignore[possibly-undefined]
+            bracket_gtd[0], # type: ignore[possibly-undefined]
             bracket[1],
             bracket_f[1],
-            bracket_gtd[1].to("cuda"),
+            bracket_gtd[1], # type: ignore[possibly-undefined]
         )
-#        bracket_gtd[1].to("cpu"),
-#        bracket_gtd[0].to("cpu"),  # type: ignore[possibly-undefined]
+#        bracket_gtd[1]#,
+#        bracket_gtd[0]#,  # type: ignore[possibly-undefined]
 
         # test that we are making sufficient progress:
         # in case `t` is so close to boundary, we mark that we are making
@@ -219,23 +219,23 @@ def _strong_wolfe(
         # Evaluate new point
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
-        gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
+        gtd_new_sparse_product = g_new * d
         gtd_new = gtd_new_sparse_product.sum()
         del gtd_new_sparse_product
-#        g_new = g_new.to("cpu")
+#        g_new = g_new#
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
-        if f_new > (f + c1 * t * gtd.to("cuda")) or f_new >= bracket_f[low_pos] or f_new > f_best: #NOTE: Ward condition
+        if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos] or f_new > f_best: #NOTE: Ward condition
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
 #            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
-            bracket_g[high_pos] = g_new  # type: ignore[possibly-undefined]
+            bracket_g = [g_new]  # type: ignore[possibly-undefined]
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
-            if abs(gtd_new) <= -c2 * gtd.to("cuda") and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
+            if abs(gtd_new) <= -c2 * gtd and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
                 # Wolfe conditions satisfied
                 print("STRONG WOLFE")
                 success = True
@@ -249,7 +249,7 @@ def _strong_wolfe(
 
             #RELAXED WOLFE CONDITION
     #        cur_c1 = (f + t*gtd) - f_new
-#            cur_c2 =  abs(gtd_new.to("cuda")) - -gtd.to("cuda")  #TODO: inverted case
+#            cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
     #        if cur_c2 < best_c2 && cur_c1 < best_c1:
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
 #            if cur_c2 <= best_c2 and f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
@@ -266,7 +266,7 @@ def _strong_wolfe(
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-#            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  
+#            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
             bracket_g[low_pos] = g_new
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
