@@ -338,7 +338,7 @@ class LBFGS(Optimizer):
         bracket_shove: float =(1/3),
         capture_min_step: float =1.,
         capture_max_step: float =100,
-        gradient_clop: float = 1e-7,
+        gradient_clop: float = 5e-7,
         direction_clop: float = 5e-7
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
