@@ -1,5 +1,4 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2' # Set to all devices
 
 import torch
 
