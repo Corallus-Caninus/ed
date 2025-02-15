@@ -1,8 +1,10 @@
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2' # Set to all devices
+
 import torch
 
 print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
 
-import os
 import gc
 from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel 
 from torch.nn.parallel import DistributedDataParallel
