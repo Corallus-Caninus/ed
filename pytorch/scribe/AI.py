@@ -1,7 +1,10 @@
+import torch
+
+print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
+
 import os
 import gc
 from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel 
-import torch
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Dataset, DataLoader
 from lbfgs import LBFGS
