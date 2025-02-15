@@ -499,7 +499,6 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.no_grad()
-    @torch.compile
     @torch.no_grad()
     def step(self, closure):
       """Perform a single optimization step.
