@@ -622,6 +622,8 @@ class LBFGS(Optimizer):
 #              flat_grad = self._gather_norm_flat_grad(1, True)
 #              flat_grad = self._gather_norm_flat_grad(2, False)
               # do lbfgs update (update memory)
+              if prev_flat_grad is not None:
+                  prev_flat_grad = prev_flat_grad.to(flat_grad.device) # Ensure prev_flat_grad is on the same device as flat_grad
               y = flat_grad.sub(prev_flat_grad)
               s = (d.mul(t))
               ys_sparse_product = y * s
