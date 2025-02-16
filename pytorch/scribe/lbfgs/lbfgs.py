@@ -885,11 +885,14 @@ class LBFGS(Optimizer):
     def save_history(self, filename):
         """Save LBFGS history to a file."""
         state = self.state[self._params[0]]
+        state_dict = self.state[self._params[0]]
         history = {
-            "old_dirs": state.get("old_dirs", []),
-            "old_stps": state.get("old_stps", []),
-            "ro":  state.get("ro", []),
-            "prev_flat_grad": state.get("prev_flat_grad", None),
+            "old_dirs": state_dict.get("old_dirs", []),
+            "old_stps": state_dict.get("old_stps", []),
+            "ro":  state_dict.get("ro", []),
+            "prev_flat_grad": state_dict.get("prev_flat_grad", None),
+            "t": self.t, # Save step size t
+            "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
         }
         torch.save(history, filename)
 
@@ -899,10 +902,15 @@ class LBFGS(Optimizer):
             history = torch.load(filename)
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
+            state = self.state[self._params[0]]
+            device = self.direction_device # Get the device of the model parameters
             state["old_dirs"] = history.get("old_dirs", []) # Load history without moving to CPU
             state["old_stps"] = history.get("old_stps", []) # Load history without moving to CPU
             state["ro"] = history.get("ro", []) # Load history without moving to CPU
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history without moving to CPU
+            self.t = history.get("t", 1) # Load step size t, default to 1 if not found
+            state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
+
             if state["prev_flat_grad"] is not None:
                 state["prev_flat_grad"] = state["prev_flat_grad"].to(device) # Move prev_flat_grad to direction_device if it exists
             state["old_dirs"] = [tensor.to(device) for tensor in state.get("old_dirs", [])] # Move loaded tensors to the correct device
