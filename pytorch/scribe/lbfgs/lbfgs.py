@@ -695,22 +695,15 @@ class LBFGS(Optimizer):
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
 
-              sparse_product_al = torch.zeros_like(old_stps[0]) if old_stps else None # Pre-allocate
-              intermediate_be = torch.zeros_like(old_dirs[0]) if old_dirs else None # Pre-allocate for be_i calculation
-              be_i = torch.tensor(0.0).to(intermediate_be) if intermediate_be is not None else torch.tensor(0.0).to(d) # Pre-allocate be_i as tensor
+              be_i = torch.tensor(0.0).to(d) # Pre-allocate be_i as tensor
 
               for i in range(num_old - 1, -1, -1):
-                  if sparse_product_al is None:
-                      sparse_product_al = old_stps[i] * ((q) * ro[i])
-                  else:
-                      sparse_product_al.copy_(old_stps[i] * ((q) * ro[i]))
-                  al[i] = sparse_product_al.sum() # replaced to_dense().dot()
+                  al[i] = (old_stps[i] * ((q) * ro[i])).sum() # replaced to_dense().dot()
                   q.add_(old_dirs[i], alpha=-al[i])
               del H_diag # DEL 6: H_diag is no longer needed
 
               for i in range(num_old):
-                  intermediate_be.copy_(old_dirs[i] * d) # Use copy_ to update intermediate_be
-                  d.add_(old_stps[i], alpha=al[i] - intermediate_be.sum() * ro[i])
+                  d.add_(old_stps[i], alpha=al[i] - (old_dirs[i] * d).sum() * ro[i])
               #del sparse_product_al # Delete after loop
               #del intermediate_be # Delete after loop
 
