@@ -515,14 +515,7 @@ class LBFGS(Optimizer):
     def jit_loop2(old_stps: list[Tensor], old_dirs: list[Tensor], ro: Tensor, d: Tensor, al: Tensor, direction_device: str):
         num_old = len(old_dirs)
         for i in range(num_old):
-            # Move intermediate tensors to CPU to reduce GPU memory usage
-            old_stps_i = old_stps[i].to("cpu")
-            old_dirs_i = old_dirs[i].to("cpu")
-            d_cpu = d.to("cpu")
-            al_i = al[i].to("cpu")
-            ro_i = ro[i].to("cpu")
-
-            d.add_(old_stps_i.to(direction_device), alpha=al_i - (old_dirs_i.to(direction_device) * d_cpu.to(direction_device)).sum() * ro_i)
+            d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i])
             torch.cuda.empty_cache()
         return d
 
@@ -726,6 +719,7 @@ class LBFGS(Optimizer):
               d = self.jit_loop2(old_stps, old_dirs, ro_tensor, d, al_tensor, str(self.direction_device))
               del ro_tensor
               del al_tensor
+              torch.cuda.empty_cache()
 
               del H_diag  # DEL 6: H_diag is no longer needed
               # del sparse_product_al # Delete after loop
