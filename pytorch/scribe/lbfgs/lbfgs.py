@@ -663,9 +663,9 @@ class LBFGS(Optimizer):
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-                y_sparse = y.to_sparse().cpu() # Keep y_sparse on CPU
+                y_sparse = y.to_sparse().to(self.direction_device) # Store y_sparse on direction_device
                 old_dirs.append(y_sparse) # NOTE: was cpu
-                s_sparse = s.to_sparse().cpu() # Keep s_sparse on CPU
+                s_sparse = s.to_sparse().to(self.direction_device) # Store s_sparse on direction_device
                 old_stps.append(s_sparse) # NOTE: was cpu
                 ro.append((1.0 / ys)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
@@ -713,7 +713,7 @@ class LBFGS(Optimizer):
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
-          total_norm = torch.abs(d.coalesce().values()).sum() # Keep total_norm on CPU
+          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d.div_(total_norm)
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
@@ -727,7 +727,7 @@ class LBFGS(Optimizer):
           valid_indices_mask = direction_values != 0
           valid_indices = indices[:, valid_indices_mask]
 
-          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().cpu() # Keep d on CPU #TODO: verify via profiling if coalesce is necessary
+          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) # Move d to direction_device #TODO: verify via profiling if coalesce is necessary
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
@@ -877,9 +877,9 @@ class LBFGS(Optimizer):
         """Save LBFGS history to a file."""
         state = self.state[self._params[0]]
         history = {
-            "old_dirs": [tensor.to('cpu') for tensor in state.get("old_dirs", [])], # Save to CPU
-            "old_stps": [tensor.to('cpu') for tensor in state.get("old_stps", [])], # Save to CPU
-            "ro":  [tensor.to('cpu') for tensor in state.get("ro", [])], # Save to CPU
+            "old_dirs": state.get("old_dirs", []),
+            "old_stps": state.get("old_stps", []),
+            "ro":  state.get("ro", []),
             "prev_flat_grad": state.get("prev_flat_grad", None),
         }
         torch.save(history, filename)
@@ -890,10 +890,15 @@ class LBFGS(Optimizer):
             history = torch.load(filename)
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
-            state["old_dirs"] = [tensor.to(device) for tensor in history.get("old_dirs", [])] # Move loaded tensors to the correct device
-            state["old_stps"] = [tensor.to(device) for tensor in history.get("old_stps", [])] # Move loaded tensors to the correct device
-            state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Move loaded tensors to the correct device
-            state["prev_flat_grad"] = history.get("prev_flat_grad", None).to(device) if history.get("prev_flat_grad", None) is not None else None # Move loaded tensors to the correct device
+            state["old_dirs"] = history.get("old_dirs", []) # Load history without moving to CPU
+            state["old_stps"] = history.get("old_stps", []) # Load history without moving to CPU
+            state["ro"] = history.get("ro", []) # Load history without moving to CPU
+            state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history without moving to CPU
+            if state["prev_flat_grad"] is not None:
+                state["prev_flat_grad"] = state["prev_flat_grad"].to(device) # Move prev_flat_grad to direction_device if it exists
+            state["old_dirs"] = [tensor.to(device) for tensor in state.get("old_dirs", [])] # Move loaded tensors to the correct device
+            state["old_stps"] = [tensor.to(device) for tensor in state.get("old_stps", [])] # Move loaded tensors to the correct device
+            state["ro"] = [tensor.to(device) for tensor in state.get("ro", [])] # Move loaded tensors to the correct device
             print(f"LBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
