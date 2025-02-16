@@ -712,17 +712,11 @@ class LBFGS(Optimizer):
               del q # DEL 5: q is no longer needed after direction d is computed
               del H_diag # DEL 6: H_diag is no longer needed
 
-
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
-                  if sparse_product_be is None:
-                      sparse_product_be = old_dirs[i] * r
-                  else:
-                      sparse_product_be.copy_(old_dirs[i] * r)
-                  be_i = sparse_product_be.sum() * ro[i] # replaced to_dense().dot()
+                  be_i = (old_dirs[i] * r).sum() * ro[i] # replaced to_dense().dot()
                   r.add_(old_stps[i], alpha=al[i] - be_i)
               del sparse_product_al # Delete after loop
-              del sparse_product_be # Delete after loop
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
 #              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was self.direction_device
