@@ -896,7 +896,7 @@ class LBFGS(Optimizer):
         try:
             history = torch.load(filename)
             state = self.state[self._params[0]]
-            device = self._params[0].device # Get the device of the model parameters
+            device = self.direction_device # Get the device of the model parameters
             state["old_dirs"] = [tensor.to(self.direction_device) for tensor in history.get("old_dirs", [])] # Move loaded tensors to the correct device
             state["old_stps"] = [tensor.to(self.direction_device) for tensor in history.get("old_stps", [])] # Move loaded tensors to the correct device
             state["ro"] = [tensor.to(self.direction_device) for tensor in history.get("ro", [])] # Move loaded tensors to the correct device
