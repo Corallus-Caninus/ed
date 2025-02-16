@@ -36,10 +36,10 @@ history_filename = "lbfgs_history.pth"
 if os.path.exists(filename): # Load model weights and optimizer history
     unwrapped_model = accelerator.unwrap_model(model)
     unwrapped_model.load_state_dict(torch.load(filename, weights_only=True))
-    optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9, direction_device='cpu')
+    optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
     optimizer.load_history(history_filename)
 else: # Initialize optimizer if no checkpoint exists
-    optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9, direction_device='cpu')
+    optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
 
 datalist = []
 if os.path.exists("chunked.ds"):
