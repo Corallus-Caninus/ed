@@ -709,7 +709,6 @@ class LBFGS(Optimizer):
               del H_diag # DEL 6: H_diag is no longer needed
 
               for i in range(num_old):
-                  torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   intermediate_be.copy_(old_dirs[i] * d) # Use copy_ to update intermediate_be
                   be_i.copy_(intermediate_be.sum() * ro[i]) # Use copy_ to update pre-allocated be_i
                   d.add_(old_stps[i], alpha=al[i] - be_i)
