@@ -708,8 +708,8 @@ class LBFGS(Optimizer):
 
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
-                  be_i = (old_dirs[i] * r).sum() * ro[i] # replaced to_dense().dot()
-                  r.add_(old_stps[i], alpha=al[i] - be_i)
+                  be_i = (old_dirs[i] * d).sum() * ro[i] # replaced to_dense().dot()
+                  d.add_(old_stps[i], alpha=al[i] - be_i)
               del sparse_product_al # Delete after loop
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
