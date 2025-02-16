@@ -715,8 +715,8 @@ class LBFGS(Optimizer):
                       intermediate_be.copy_(old_dirs[i] * d) # Use copy_ for subsequent iterations
                   be_i = intermediate_be.sum() * ro[i] # replaced to_dense().dot()
                   d.add_(old_stps[i], alpha=al[i] - be_i)
-              del sparse_product_al # Delete after loop
-              del intermediate_be # Delete after loop
+              #del sparse_product_al # Delete after loop
+              #del intermediate_be # Delete after loop
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
 #              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was self.direction_device
