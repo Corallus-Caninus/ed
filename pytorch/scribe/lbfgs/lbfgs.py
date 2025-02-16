@@ -705,7 +705,6 @@ class LBFGS(Optimizer):
                       sparse_product_al.copy_(old_stps[i] * ((q) * ro[i]))
                   al[i] = sparse_product_al.sum() # replaced to_dense().dot()
                   q.add_(old_dirs[i], alpha=-al[i])
-                  al[i] = al[i] #NOTE: was cpu
 
           # multiply by initial Hessian
               # r/d is the final direction
