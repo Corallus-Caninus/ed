@@ -5,7 +5,6 @@ import torch
 from torch import Tensor
 import gc
 import psutil
-import torch.jit
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
@@ -502,6 +501,23 @@ class LBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
+    @torch.jit.script
+    def jit_loop1(old_stps, old_dirs, ro, q, direction_device):
+        num_old = len(old_dirs)
+        al = [0] * num_old  # Initialize al as list
+
+        for i in range(num_old - 1, -1, -1):
+            al[i] = (old_stps[i].to(direction_device) * ((q) * ro[i])).sum()
+            q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
+        return q, al
+
+    @torch.jit.script
+    def jit_loop2(old_stps, old_dirs, ro, d, al, direction_device):
+        num_old = len(old_dirs)
+        for i in range(num_old):
+            d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i])
+        return d
+
     @torch.no_grad()
     @torch.no_grad()
     def step(self, closure):
@@ -694,14 +710,14 @@ class LBFGS(Optimizer):
 #              al = state["al"]
 
               # iteration in L-BFGS loop collapsed to use just one buffer
-              q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
+              q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
               q, al = jit_loop1(old_stps, old_dirs, ro, q, self.direction_device)
               d = q.mul(H_diag)
               d = jit_loop2(old_stps, old_dirs, ro, d, al, self.direction_device)
 
               del H_diag  # DEL 6: H_diag is no longer needed
-              #del sparse_product_al # Delete after loop
-              #del intermediate_be # Delete after loop
+              # del sparse_product_al # Delete after loop
+              # del intermediate_be # Delete after loop
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
 #              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was self.direction_device
