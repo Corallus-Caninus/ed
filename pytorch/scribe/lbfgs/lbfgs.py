@@ -622,13 +622,12 @@ class LBFGS(Optimizer):
               gc.collect()
           else:
               torch.cuda.empty_cache() # Clear cache before direction calculation
-#              flat_grad = self._gather_norm_flat_grad(1, True)
-#              flat_grad = self._gather_norm_flat_grad(2, False)
-              # do lbfgs update (update memory)
+              flat_grad = flat_grad.to(self.direction_device) # Move flat_grad to direction_device
+              d = d.to(self.direction_device) # Move d to direction_device
               if prev_flat_grad is not None:
-                  prev_flat_grad = prev_flat_grad.to(flat_grad.device) # Ensure prev_flat_grad is on the same device as flat_grad
+                  prev_flat_grad = prev_flat_grad.to(self.direction_device) # Move prev_flat_grad to direction_device
               y = flat_grad.sub(prev_flat_grad)
-              s = (d.mul(t))
+              s = (d.mul(t)).to(self.direction_device) # Move s to direction_device
               ys_sparse_product = y * s
               ys = ys_sparse_product.sum()#y*s
               del ys_sparse_product
@@ -682,21 +681,21 @@ class LBFGS(Optimizer):
 #              al = state["al"]
 
               # iteration in L-BFGS loop collapsed to use just one buffer
-              q = flat_grad.neg()
+              q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
 
               sparse_product_al = None # Initialize for reuse
               for i in range(num_old - 1, -1, -1):
                   if sparse_product_al is None:
-                      sparse_product_al = old_stps[i].to(q.device) * ((q) * ro[i])
+                      sparse_product_al = old_stps[i].to(self.direction_device) * ((q) * ro[i]) # Move old_stps[i] to direction_device
                   else:
-                      sparse_product_al.copy_(old_stps[i].to(q.device) * ((q) * ro[i]))
+                      sparse_product_al.copy_(old_stps[i].to(self.direction_device) * ((q) * ro[i])) # Move old_stps[i] to direction_device
                   al[i] = sparse_product_al.sum() # replaced to_dense().dot()
-                  q.add_(old_dirs[i].to(q.device), alpha=-al[i]) #Move old_dirs[i] to q.device
+                  q.add_(old_dirs[i].to(self.direction_device), alpha=-al[i]) #Move old_dirs[i] and q to direction_device
                   al[i] = al[i] #NOTE: was cpu
 
           # multiply by initial Hessian
               # r/d is the final direction
-              d = r = torch.mul(q, H_diag)
+              d = r = torch.mul(q, H_diag).to(self.direction_device) # Move q and H_diag to direction_device, and r/d to direction_device
               del q # DEL 5: q is no longer needed after direction d is computed
               del H_diag # DEL 6: H_diag is no longer needed
 
@@ -704,11 +703,11 @@ class LBFGS(Optimizer):
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   if sparse_product_be is None:
-                      sparse_product_be = old_dirs[i].to(r.device) * r #Move old_dirs[i] to r.device
+                      sparse_product_be = old_dirs[i].to(self.direction_device) * r # Move old_dirs[i] and r to direction_device
                   else:
-                      sparse_product_be.copy_(old_dirs[i].to(r.device) * r) #Move old_dirs[i] to r.device
+                      sparse_product_be.copy_(old_dirs[i].to(self.direction_device) * r) # Move old_dirs[i] and r to direction_device
                   be_i = sparse_product_be.sum() * ro[i] # replaced to_dense().dot()
-                  r.add_(old_stps[i].to(r.device), alpha=al[i] - be_i) #Move old_stps[i] to r.device
+                  r.add_(old_stps[i].to(self.direction_device), alpha=al[i] - be_i) #Move old_stps[i] and r to direction_device
               del sparse_product_al # Delete after loop
               del sparse_product_be # Delete after loop
 
@@ -721,7 +720,7 @@ class LBFGS(Optimizer):
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
-          total_norm = torch.abs(d.coalesce().values()).sum()
+          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d.div_(total_norm)
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
@@ -735,7 +734,7 @@ class LBFGS(Optimizer):
           valid_indices_mask = direction_values != 0
           valid_indices = indices[:, valid_indices_mask]
 
-          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) #TODO: verify via profiling if coalesce is necessary
+          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) #Move d to direction_device #TODO: verify via profiling if coalesce is necessary
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
