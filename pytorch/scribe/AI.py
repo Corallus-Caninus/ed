@@ -35,7 +35,12 @@ history_filename = "lbfgs_history.pth"
 
 if os.path.exists(filename): # Load model weights and optimizer history
     unwrapped_model = accelerator.unwrap_model(model)
-    unwrapped_model.load_state_dict(torch.load(filename, weights_only=True))
+    try:
+        unwrapped_model.load_state_dict(torch.load(filename, weights_only=True))
+    except FileNotFoundError:
+        print(f"Model checkpoint file '{filename}' not found. Starting from scratch.")
+    except Exception as e:
+        print(f"Error loading model checkpoint from '{filename}': {e}. Starting from scratch.")
     optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
     optimizer.load_history(history_filename)
 else: # Initialize optimizer if no checkpoint exists
