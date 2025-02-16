@@ -516,7 +516,6 @@ class LBFGS(Optimizer):
         num_old = len(old_dirs)
         for i in range(num_old):
             d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i])
-            torch.cuda.empty_cache()
         return d
 
     @torch.no_grad()
