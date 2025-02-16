@@ -638,7 +638,7 @@ class LBFGS(Optimizer):
               if ys > 0.0:
                 # updating memory
 #                if len(old_dirs) <= history_size:
-                if torch.cuda.is_available():
+                if self.direction_device == 'cuda' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
                     print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {history_size} GB") # Debug print
@@ -650,6 +650,18 @@ class LBFGS(Optimizer):
                         ro.pop(0)
                   except Exception as e:
                     print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
+                elif self.direction_device == 'cpu':
+                  try:
+                    cpu_ram_available = psutil.virtual_memory().available / (1024**3) # Available RAM in GB
+                    print(f"CPU RAM available: {cpu_ram_available} GB, history_size: {history_size} GB") # Debug print
+                    while cpu_ram_available <= history_size: # If available RAM is less than history_size
+                        cpu_ram_available = psutil.virtual_memory().available / (1024**3)
+                        # shift history by one (limited-memory)
+                        old_dirs.pop(0)
+                        old_stps.pop(0)
+                        ro.pop(0)
+                  except Exception as e:
+                    print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
                 y_sparse = y.to_sparse().to(self.direction_device)
