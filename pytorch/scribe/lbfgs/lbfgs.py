@@ -695,14 +695,16 @@ class LBFGS(Optimizer):
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
 
-              sparse_product_al = None # Initialize for reuse
+              sparse_product_al = torch.zeros_like(old_stps[0]) if old_stps else None # Pre-allocate
+              sparse_product_be = torch.zeros_like(old_dirs[0]) if old_dirs else None # Pre-allocate
+
               for i in range(num_old - 1, -1, -1):
                   if sparse_product_al is None:
-                      sparse_product_al = old_stps[i] * ((q) * ro[i]) # Move old_stps[i] to direction_device
+                      sparse_product_al = old_stps[i] * ((q) * ro[i])
                   else:
-                      sparse_product_al.copy_(old_stps[i] * ((q) * ro[i])) # Move old_stps[i] to direction_device
+                      sparse_product_al.copy_(old_stps[i] * ((q) * ro[i]))
                   al[i] = sparse_product_al.sum() # replaced to_dense().dot()
-                  q.add_(old_dirs[i], alpha=-al[i]) #Move old_dirs[i] and q to direction_device
+                  q.add_(old_dirs[i], alpha=-al[i])
                   al[i] = al[i] #NOTE: was cpu
 
           # multiply by initial Hessian
@@ -711,15 +713,15 @@ class LBFGS(Optimizer):
               del q # DEL 5: q is no longer needed after direction d is computed
               del H_diag # DEL 6: H_diag is no longer needed
 
-              sparse_product_be = None # Initialize for reuse
+
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   if sparse_product_be is None:
-                      sparse_product_be = old_dirs[i] * r # Move old_dirs[i] and r to direction_device
+                      sparse_product_be = old_dirs[i] * r
                   else:
-                      sparse_product_be.copy_(old_dirs[i] * r) # Move old_dirs[i] and r to direction_device
+                      sparse_product_be.copy_(old_dirs[i] * r)
                   be_i = sparse_product_be.sum() * ro[i] # replaced to_dense().dot()
-                  r.add_(old_stps[i], alpha=al[i] - be_i) #Move old_stps[i] and r to direction_device
+                  r.add_(old_stps[i], alpha=al[i] - be_i)
               del sparse_product_al # Delete after loop
               del sparse_product_be # Delete after loop
 
