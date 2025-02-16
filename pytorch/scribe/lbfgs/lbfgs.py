@@ -648,7 +648,6 @@ class LBFGS(Optimizer):
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
-                        print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                   except Exception as e:
                     print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
                 elif self.direction_device == 'cpu':
@@ -661,6 +660,7 @@ class LBFGS(Optimizer):
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
+                    print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                   except Exception as e:
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
                 torch.cuda.empty_cache() # Clear cache before history update
