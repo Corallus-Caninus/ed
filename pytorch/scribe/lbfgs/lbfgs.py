@@ -502,7 +502,7 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def jit_loop1(old_stps, old_dirs, ro, q, direction_device):
+    def jit_loop1(old_stps, old_dirs, ro, q, direction_device: str):
         num_old = len(old_dirs)
         al = [torch.zeros(1, device=direction_device, dtype=q.dtype) for _ in range(num_old)]  # Initialize al as list of Tensors
 
@@ -512,7 +512,7 @@ class LBFGS(Optimizer):
         return q, al
 
     @torch.jit.script
-    def jit_loop2(old_stps, old_dirs, ro, d, al, direction_device):
+    def jit_loop2(old_stps, old_dirs, ro, d, al, direction_device: str):
         num_old = len(old_dirs)
         for i in range(num_old):
             d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i])
@@ -711,9 +711,9 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
-              q, al = self.jit_loop1(old_stps, old_dirs, ro, q, self.direction_device)
+              q, al = self.jit_loop1(old_stps, old_dirs, ro, q, str(self.direction_device))
               d = q.mul(H_diag)
-              d = self.jit_loop2(old_stps, old_dirs, ro, d, al, self.direction_device)
+              d = self.jit_loop2(old_stps, old_dirs, ro, d, al, str(self.direction_device))
 
               del H_diag  # DEL 6: H_diag is no longer needed
               # del sparse_product_al # Delete after loop
