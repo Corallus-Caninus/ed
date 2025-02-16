@@ -501,6 +501,23 @@ class LBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
+    @torch.jit.script
+    def jit_loop1(old_stps, old_dirs, ro, q, direction_device):
+        num_old = len(old_dirs)
+        al = [0] * num_old  # Initialize al as list
+
+        for i in range(num_old - 1, -1, -1):
+            al[i] = (old_stps[i].to(direction_device) * ((q) * ro[i])).sum()
+            q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
+        return q, al
+
+    @torch.jit.script
+    def jit_loop2(old_stps, old_dirs, ro, d, al, direction_device):
+        num_old = len(old_dirs)
+        for i in range(num_old):
+            d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i])
+        return d
+
     @torch.no_grad()
     @torch.no_grad()
     def step(self, closure):
