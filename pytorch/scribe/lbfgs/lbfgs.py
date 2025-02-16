@@ -512,10 +512,18 @@ class LBFGS(Optimizer):
         return q, al
 
     @torch.jit.script
-    def jit_loop2(old_stps: list[Tensor], old_dirs: list[Tensor], ro, d, al, direction_device: str):
+    def jit_loop2(old_stps: list[Tensor], old_dirs: list[Tensor], ro: Tensor, d: Tensor, al: Tensor, direction_device: str):
         num_old = len(old_dirs)
         for i in range(num_old):
-            d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i])
+            # Move intermediate tensors to CPU to reduce GPU memory usage
+            old_stps_i = old_stps[i].to("cpu")
+            old_dirs_i = old_dirs[i].to("cpu")
+            d_cpu = d.to("cpu")
+            al_i = al[i].to("cpu")
+            ro_i = ro[i].to("cpu")
+
+            d.add_(old_stps_i.to(direction_device), alpha=al_i - (old_dirs_i.to(direction_device) * d_cpu.to(direction_device)).sum() * ro_i)
+            torch.cuda.empty_cache()
         return d
 
     @torch.no_grad()
@@ -711,9 +719,9 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
-              ro_tensor = torch.tensor(ro, device=self.direction_device)
+              ro_tensor = torch.tensor(ro, device=self.direction_device, dtype=torch.float32)
               q, al = self.jit_loop1(old_stps, old_dirs, ro_tensor, q, str(self.direction_device))
-              al_tensor = torch.tensor(al, device=self.direction_device)
+              al_tensor = torch.tensor(al, device=self.direction_device, dtype=torch.float32)
               d = q.mul(H_diag)
               d = self.jit_loop2(old_stps, old_dirs, ro_tensor, d, al_tensor, str(self.direction_device))
               del ro_tensor
