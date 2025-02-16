@@ -30,8 +30,7 @@ history_filename = "lbfgs_history.pth"
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
-    config = MambaConfig.from_pretrained("AntonV/mamba2-130m-hf") # Load config to initialize model
-    model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
+    model = Mamba2ForCausalLM(MambaConfig()).to("cuda") # Initialize model with default config
     try:
         model.load_state_dict(torch.load(filename, weights_only=True))
         print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
