@@ -698,11 +698,11 @@ class LBFGS(Optimizer):
               sparse_product_al = None # Initialize for reuse
               for i in range(num_old - 1, -1, -1):
                   if sparse_product_al is None:
-                      sparse_product_al = old_stps[i].to(self.direction_device) * ((q) * ro[i]) # Move old_stps[i] to direction_device
+                      sparse_product_al = old_stps[i] * ((q) * ro[i]) # Move old_stps[i] to direction_device
                   else:
-                      sparse_product_al.copy_(old_stps[i].to(self.direction_device) * ((q) * ro[i])) # Move old_stps[i] to direction_device
+                      sparse_product_al.copy_(old_stps[i] * ((q) * ro[i])) # Move old_stps[i] to direction_device
                   al[i] = sparse_product_al.sum() # replaced to_dense().dot()
-                  q.add_(old_dirs[i].to(self.direction_device), alpha=-al[i]) #Move old_dirs[i] and q to direction_device
+                  q.add_(old_dirs[i], alpha=-al[i]) #Move old_dirs[i] and q to direction_device
                   al[i] = al[i] #NOTE: was cpu
 
           # multiply by initial Hessian
@@ -715,11 +715,11 @@ class LBFGS(Optimizer):
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   if sparse_product_be is None:
-                      sparse_product_be = old_dirs[i].to(self.direction_device) * r # Move old_dirs[i] and r to direction_device
+                      sparse_product_be = old_dirs[i] * r # Move old_dirs[i] and r to direction_device
                   else:
-                      sparse_product_be.copy_(old_dirs[i].to(self.direction_device) * r) # Move old_dirs[i] and r to direction_device
+                      sparse_product_be.copy_(old_dirs[i] * r) # Move old_dirs[i] and r to direction_device
                   be_i = sparse_product_be.sum() * ro[i] # replaced to_dense().dot()
-                  r.add_(old_stps[i].to(self.direction_device), alpha=al[i] - be_i) #Move old_stps[i] and r to direction_device
+                  r.add_(old_stps[i], alpha=al[i] - be_i) #Move old_stps[i] and r to direction_device
               del sparse_product_al # Delete after loop
               del sparse_product_be # Delete after loop
 
@@ -895,9 +895,9 @@ class LBFGS(Optimizer):
         """Save LBFGS history to a file."""
         state = self.state[self._params[0]]
         history = {
-            "old_dirs": state.get("old_dirs", []),
-            "old_stps": state.get("old_stps", []),
-            "ro": state.get("ro", []),
+            "old_dirs": [tensor.to('cpu') for tensor in state.get("old_dirs", [])], # Save to CPU
+            "old_stps": [tensor.to('cpu') for tensor in state.get("old_stps", [])], # Save to CPU
+            "ro":  [tensor.to('cpu') for tensor in state.get("ro", [])], # Save to CPU
             "prev_flat_grad": state.get("prev_flat_grad", None),
         }
         torch.save(history, filename)
@@ -908,10 +908,10 @@ class LBFGS(Optimizer):
             history = torch.load(filename)
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
-            state["old_dirs"] = [tensor.to(self.direction_device) for tensor in history.get("old_dirs", [])] # Move loaded tensors to the correct device
-            state["old_stps"] = [tensor.to(self.direction_device) for tensor in history.get("old_stps", [])] # Move loaded tensors to the correct device
-            state["ro"] = [tensor.to(self.direction_device) for tensor in history.get("ro", [])] # Move loaded tensors to the correct device
-            state["prev_flat_grad"] = history.get("prev_flat_grad", None)
+            state["old_dirs"] = [tensor.to(device) for tensor in history.get("old_dirs", [])] # Move loaded tensors to the correct device
+            state["old_stps"] = [tensor.to(device) for tensor in history.get("old_stps", [])] # Move loaded tensors to the correct device
+            state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Move loaded tensors to the correct device
+            state["prev_flat_grad"] = history.get("prev_flat_grad", None).to(device) if history.get("prev_flat_grad", None) is not None else None # Move loaded tensors to the correct device
             print(f"LBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
