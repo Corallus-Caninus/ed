@@ -504,7 +504,7 @@ class LBFGS(Optimizer):
     @torch.jit.script
     def jit_loop1(old_stps, old_dirs, ro, q, direction_device):
         num_old = len(old_dirs)
-        al = [0] * num_old  # Initialize al as list
+        al = [torch.zeros(1, device=direction_device, dtype=q.dtype) for _ in range(num_old)]  # Initialize al as list of Tensors
 
         for i in range(num_old - 1, -1, -1):
             al[i] = (old_stps[i].to(direction_device) * ((q) * ro[i])).sum()
