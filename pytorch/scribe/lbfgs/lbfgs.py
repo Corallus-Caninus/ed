@@ -696,7 +696,6 @@ class LBFGS(Optimizer):
               q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
 
               sparse_product_al = torch.zeros_like(old_stps[0]) if old_stps else None # Pre-allocate
-              sparse_product_be = torch.zeros_like(old_dirs[0]) if old_dirs else None # Pre-allocate
 
               for i in range(num_old - 1, -1, -1):
                   if sparse_product_al is None:
@@ -705,11 +704,6 @@ class LBFGS(Optimizer):
                       sparse_product_al.copy_(old_stps[i] * ((q) * ro[i]))
                   al[i] = sparse_product_al.sum() # replaced to_dense().dot()
                   q.add_(old_dirs[i], alpha=-al[i])
-
-          # multiply by initial Hessian
-              # r/d is the final direction
-              d = r = torch.mul(q, H_diag).to(self.direction_device) # Move q and H_diag to direction_device, and r/d to direction_device
-              del q # DEL 5: q is no longer needed after direction d is computed
               del H_diag # DEL 6: H_diag is no longer needed
 
               for i in range(num_old):
