@@ -518,7 +518,8 @@ class LBFGS(Optimizer):
         for i in range(num_old):
             sparse_product = old_dirs[i].to(direction_device) * d.to(direction_device)
             inner_product = sparse_product.sum()
-            del sparse_product
+            if 'sparse_product' in locals():
+              del sparse_product
             d.add_(old_stps[i].to(direction_device), alpha=al[i] - inner_product * ro[i])
         del inner_product
         return d
