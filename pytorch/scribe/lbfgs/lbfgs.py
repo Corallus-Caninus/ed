@@ -695,12 +695,12 @@ class LBFGS(Optimizer):
               q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
 
               for i in range(num_old - 1, -1, -1):
-                  al[i] = (old_stps[i].to(self.direction_device) * ((q) * ro[i])).sum() # Move old_stps[i] to GPU
-                  q.add_(old_dirs[i].to(self.direction_device), alpha=-al[i]) # Move old_dirs[i] to GPU
+                  al[i] = (old_stps[i].to(self.direction_device) * ((q) * ro[i])).sum() # Calculations on direction_device (GPU if specified)
+                  q.add_(old_dirs[i].to(self.direction_device), alpha=-al[i]) # Calculations on direction_device (GPU if specified)
               del H_diag # DEL 6: H_diag is no longer needed
 
               for i in range(num_old):
-                  d.add_(old_stps[i].to(self.direction_device), alpha=al[i] - (old_dirs[i].to(self.direction_device) * d.to(self.direction_device)).sum() * ro[i]) # Move old_stps[i], old_dirs[i], and d to GPU
+                  d.add_(old_stps[i].to(self.direction_device), alpha=al[i] - (old_dirs[i].to(self.direction_device) * d.to(self.direction_device)).sum() * ro[i]) # Calculations on direction_device (GPU if specified)
               #del sparse_product_al # Delete after loop
               #del intermediate_be # Delete after loop
 
