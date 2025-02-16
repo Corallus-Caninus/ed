@@ -38,6 +38,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     try:
         unwrapped_model.load_state_dict(torch.load(filename, weights_only=True))
         print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
+        model = accelerator.prepare_model(unwrapped_model) # Re-wrap the model
     except FileNotFoundError:
         print(f"Model checkpoint file '{filename}' not found. Starting from scratch.")
     except Exception as e:
