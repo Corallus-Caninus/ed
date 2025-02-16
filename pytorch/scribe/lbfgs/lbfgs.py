@@ -516,7 +516,9 @@ class LBFGS(Optimizer):
         num_old = len(old_dirs)
         inner_product = torch.zeros(1, device=direction_device, dtype=ro.dtype)  # Initialize inner_product as a Tensor
         for i in range(num_old):
-            inner_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).sum()
+            sparse_product = old_dirs[i].to(direction_device) * d.to(direction_device)
+            inner_product = sparse_product.sum()
+            del sparse_product
             d.add_(old_stps[i].to(direction_device), alpha=al[i] - inner_product * ro[i])
         del inner_product
         return d
