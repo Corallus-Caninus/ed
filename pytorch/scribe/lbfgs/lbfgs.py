@@ -829,7 +829,7 @@ class LBFGS(Optimizer):
 #              flat_grad = flat_grad.to("cuda")
               self.t  = t
               self._add_grad(t, d)
-              print("got stepsize: " + str(t) + "  and loss: " + str(loss))
+              print(f"got stepsize: {t} and loss: {loss} on device: {self.direction_device}")
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
 #              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
               opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
