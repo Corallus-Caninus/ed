@@ -710,8 +710,7 @@ class LBFGS(Optimizer):
 
               for i in range(num_old):
                   intermediate_be.copy_(old_dirs[i] * d) # Use copy_ to update intermediate_be
-                  be_i.copy_(intermediate_be.sum() * ro[i]) # Use copy_ to update pre-allocated be_i
-                  d.add_(old_stps[i], alpha=al[i] - be_i)
+                  d.add_(old_stps[i], alpha=al[i] - intermediate_be.sum() * ro[i])
               #del sparse_product_al # Delete after loop
               #del intermediate_be # Delete after loop
 
