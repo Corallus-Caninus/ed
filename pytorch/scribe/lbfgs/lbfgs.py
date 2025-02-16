@@ -590,7 +590,7 @@ class LBFGS(Optimizer):
         prev_flat_grad = None
 
       n_iter = 0
-      d = flat_grad.neg()
+      d = flat_grad.neg().cpu() # Initialize d on CPU
       t = 1
       # optimize for a max of max_iter iterations
       while n_iter < max_iter:
@@ -623,7 +623,6 @@ class LBFGS(Optimizer):
           else:
               torch.cuda.empty_cache() # Clear cache before direction calculation
               flat_grad = flat_grad.to(self.direction_device) # Move flat_grad to direction_device
-              d = d.to(self.direction_device) # Move d to direction_device
               if prev_flat_grad is not None:
                   prev_flat_grad = prev_flat_grad.to(self.direction_device) # Move prev_flat_grad to direction_device
               y = flat_grad.sub(prev_flat_grad)
@@ -664,9 +663,9 @@ class LBFGS(Optimizer):
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-                y_sparse = y.to_sparse().to(self.direction_device)
+                y_sparse = y.to_sparse().cpu() # Keep y_sparse on CPU
                 old_dirs.append(y_sparse) # NOTE: was cpu
-                s_sparse = s.to_sparse().to(self.direction_device)
+                s_sparse = s.to_sparse().cpu() # Keep s_sparse on CPU
                 old_stps.append(s_sparse) # NOTE: was cpu
                 ro.append((1.0 / ys)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
@@ -696,12 +695,12 @@ class LBFGS(Optimizer):
               q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
 
               for i in range(num_old - 1, -1, -1):
-                  al[i] = (old_stps[i] * ((q) * ro[i])).sum() # replaced to_dense().dot()
-                  q.add_(old_dirs[i], alpha=-al[i])
+                  al[i] = (old_stps[i].to(self.direction_device) * ((q) * ro[i])).sum() # Move old_stps[i] to GPU
+                  q.add_(old_dirs[i].to(self.direction_device), alpha=-al[i]) # Move old_dirs[i] to GPU
               del H_diag # DEL 6: H_diag is no longer needed
 
               for i in range(num_old):
-                  d.add_(old_stps[i], alpha=al[i] - (old_dirs[i] * d).sum() * ro[i])
+                  d.add_(old_stps[i].to(self.direction_device), alpha=al[i] - (old_dirs[i].to(self.direction_device) * d.to(self.direction_device)).sum() * ro[i]) # Move old_stps[i], old_dirs[i], and d to GPU
               #del sparse_product_al # Delete after loop
               #del intermediate_be # Delete after loop
 
@@ -714,7 +713,7 @@ class LBFGS(Optimizer):
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
-          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
+          total_norm = torch.abs(d.coalesce().values()).sum() # Keep total_norm on CPU
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d.div_(total_norm)
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
@@ -728,7 +727,7 @@ class LBFGS(Optimizer):
           valid_indices_mask = direction_values != 0
           valid_indices = indices[:, valid_indices_mask]
 
-          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) #Move d to direction_device #TODO: verify via profiling if coalesce is necessary
+          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().cpu() # Keep d on CPU #TODO: verify via profiling if coalesce is necessary
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
