@@ -515,7 +515,7 @@ class LBFGS(Optimizer):
     def jit_loop2(old_stps: list[Tensor], old_dirs: list[Tensor], ro: Tensor, d: Tensor, al: Tensor, direction_device: str):
         num_old = len(old_dirs)
         inner_product = torch.zeros(1, device=direction_device, dtype=ro.dtype)  # Initialize inner_product as a Tensor
-        sparse_product = None
+        sparse_product = torch.sparse_coo_tensor(torch.empty(0, 2, dtype=torch.int64), torch.empty(0), (d.size(0),), device=direction_device, dtype=d.dtype).coalesce()
         for i in range(num_old):
             sparse_product = old_dirs[i].to(direction_device) * d.to(direction_device)
             inner_product = sparse_product.sum()
