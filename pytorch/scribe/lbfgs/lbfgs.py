@@ -5,6 +5,7 @@ import torch
 from torch import Tensor
 import gc
 import psutil
+import torch.jit
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
@@ -694,22 +695,11 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
+              q, al = jit_loop1(old_stps, old_dirs, ro, q, self.direction_device)
+              d = q.mul(H_diag)
+              d = jit_loop2(old_stps, old_dirs, ro, d, al, self.direction_device)
 
-              if self.direction_device == 'cpu':
-                  for i in range(num_old - 1, -1, -1):
-                      al[i] = (old_stps[i].to(self.direction_device) * ((q) * ro[i])).sum() # Calculations on direction_device (GPU if specified)
-                      q.add_(old_dirs[i].to(self.direction_device), alpha=-al[i]) # Calculations on direction_device (GPU if specified)
-                  for i in range(num_old):
-                      d.add_(old_stps[i].to(self.direction_device), alpha=al[i] - (old_dirs[i].to(self.direction_device) * d.to(self.direction_device)).sum() * ro[i]) # Calculations on direction_device (GPU if specified)
-              else: # direction_device is not 'cpu', assume it's cuda or another GPU
-                  for i in range(num_old - 1, -1, -1):
-                      al[i] = (old_stps[i] * ((q) * ro[i])).sum() # Calculations on direction_device (GPU if specified)
-                      q.add_(old_dirs[i], alpha=-al[i]) # Calculations on direction_device (GPU if specified)
-                  for i in range(num_old):
-                      d.add_(old_stps[i], alpha=al[i] - (old_dirs[i] * d).sum() * ro[i]) # Calculations on direction_device (GPU if specified)
-
-
-              del H_diag # DEL 6: H_diag is no longer needed
+              del H_diag  # DEL 6: H_diag is no longer needed
               #del sparse_product_al # Delete after loop
               #del intermediate_be # Delete after loop
 
