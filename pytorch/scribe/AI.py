@@ -26,27 +26,34 @@ import time
 tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
 model_id = "AntonV/mamba2-130m-hf"
 model_id = "state-spaces/mamba2-130m"
-model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda")
+history_filename = "lbfgs_history.pth"
+
+if os.path.exists(filename): # Load model weights and optimizer history
+    print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
+    config = MambaConfig.from_pretrained("AntonV/mamba2-130m-hf") # Load config to initialize model
+    model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
+    try:
+        model.load_state_dict(torch.load(filename, weights_only=True))
+        print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
+    except FileNotFoundError:
+        print(f"Model checkpoint file '{filename}' not found, even though it was just checked. This is unexpected.")
+        model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda") # Fallback to AntonV weights
+        print(f"Loading initial weights from '{model_id}' instead.")
+    except Exception as e:
+        print(f"Error loading model checkpoint from '{filename}': {e}. Falling back to initial weights.")
+        model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda") # Fallback to AntonV weights
+        print(f"Loading initial weights from '{model_id}' instead.")
+else: # Load initial model weights from AntonV if no checkpoint exists
+    print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
+    model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda")
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
-history_filename = "lbfgs_history.pth"
+optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
 
-if os.path.exists(filename): # Load model weights and optimizer history
-    unwrapped_model = accelerator.unwrap_model(model)
-    try:
-        unwrapped_model.load_state_dict(torch.load(filename, weights_only=True))
-        print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
-        model = accelerator.prepare_model(unwrapped_model) # Re-wrap the model
-    except FileNotFoundError:
-        print(f"Model checkpoint file '{filename}' not found. Starting from scratch.")
-    except Exception as e:
-        print(f"Error loading model checkpoint from '{filename}': {e}. Starting from scratch.")
-    optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
+if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
-else: # Initialize optimizer if no checkpoint exists
-    optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-5, c1=1e-6, c2=0.9)
 
 datalist = []
 if os.path.exists("chunked.ds"):
