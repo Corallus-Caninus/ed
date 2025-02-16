@@ -590,8 +590,7 @@ class LBFGS(Optimizer):
         prev_flat_grad = None
 
       n_iter = 0
-      d = flat_grad.neg().cpu() # Initialize d on CPU
-      d = d.to(self.direction_device) # Move d to direction_device before loops
+      d = flat_grad.neg().to(self.direction_device) # Initialize d on direction_device
       t = 1
       # optimize for a max of max_iter iterations
       while n_iter < max_iter:
