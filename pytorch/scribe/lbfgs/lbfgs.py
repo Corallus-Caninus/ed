@@ -722,6 +722,7 @@ class LBFGS(Optimizer):
               q, al = self.jit_loop1(old_stps, old_dirs, ro_tensor, q, str(self.direction_device))
               al_tensor = torch.tensor(al, device=self.direction_device, dtype=torch.float32)
               d = q.mul(H_diag)
+              d = d.to_sparse().coalesce()
               d = self.jit_loop2(old_stps, old_dirs, ro_tensor, d, al_tensor, str(self.direction_device))
               del ro_tensor
               del al_tensor
