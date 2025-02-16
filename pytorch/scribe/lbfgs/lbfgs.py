@@ -710,7 +710,8 @@ class LBFGS(Optimizer):
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   intermediate_be.copy_(old_dirs[i] * d) # Use copy_ to update intermediate_be
-                  d.add_(old_stps[i], alpha=al[i] - intermediate_be.sum() * ro[i])
+                  intermediate_be.copy_(intermediate_be.sum() * ro[i])
+                  d.add_(old_stps[i], alpha=al[i] - intermediate_be)
               #del sparse_product_al # Delete after loop
               #del intermediate_be # Delete after loop
 
