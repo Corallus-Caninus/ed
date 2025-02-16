@@ -696,6 +696,7 @@ class LBFGS(Optimizer):
               q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
 
               sparse_product_al = torch.zeros_like(old_stps[0]) if old_stps else None # Pre-allocate
+              intermediate_be = torch.zeros_like(old_dirs[0]) if old_dirs else None # Pre-allocate for be_i calculation
 
               for i in range(num_old - 1, -1, -1):
                   if sparse_product_al is None:
@@ -708,9 +709,14 @@ class LBFGS(Optimizer):
 
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
-                  be_i = (old_dirs[i] * d).sum() * ro[i] # replaced to_dense().dot()
+                  if intermediate_be is None:
+                      intermediate_be = old_dirs[i] * d # Initialize if None
+                  else:
+                      intermediate_be.copy_(old_dirs[i] * d) # Use copy_ for subsequent iterations
+                  be_i = intermediate_be.sum() * ro[i] # replaced to_dense().dot()
                   d.add_(old_stps[i], alpha=al[i] - be_i)
               del sparse_product_al # Delete after loop
+              del intermediate_be # Delete after loop
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
 #              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was self.direction_device
