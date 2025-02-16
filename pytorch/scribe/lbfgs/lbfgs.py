@@ -648,7 +648,7 @@ class LBFGS(Optimizer):
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
-                        print(f"Current history size after pop: {len(old_dirs)}")
+                        print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                   except Exception as e:
                     print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
                 elif self.direction_device == 'cpu':
