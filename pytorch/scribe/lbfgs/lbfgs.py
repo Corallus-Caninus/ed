@@ -502,7 +502,7 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def jit_loop1(old_stps, old_dirs, ro, q, direction_device: str):
+    def jit_loop1(old_stps: list[Tensor], old_dirs: list[Tensor], ro, q, direction_device: str):
         num_old = len(old_dirs)
         al = [torch.zeros(1, device=direction_device, dtype=q.dtype) for _ in range(num_old)]  # Initialize al as list of Tensors
 
@@ -512,7 +512,7 @@ class LBFGS(Optimizer):
         return q, al
 
     @torch.jit.script
-    def jit_loop2(old_stps, old_dirs, ro, d, al, direction_device: str):
+    def jit_loop2(old_stps: list[Tensor], old_dirs: list[Tensor], ro, d, al, direction_device: str):
         num_old = len(old_dirs)
         for i in range(num_old):
             d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i])
