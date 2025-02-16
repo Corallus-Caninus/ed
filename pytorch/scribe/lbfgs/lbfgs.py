@@ -697,6 +697,7 @@ class LBFGS(Optimizer):
 
               sparse_product_al = torch.zeros_like(old_stps[0]) if old_stps else None # Pre-allocate
               intermediate_be = torch.zeros_like(old_dirs[0]) if old_dirs else None # Pre-allocate for be_i calculation
+              be_i = torch.tensor(0.0).to(intermediate_be) if intermediate_be is not None else torch.tensor(0.0).to(d) # Pre-allocate be_i as tensor
 
               for i in range(num_old - 1, -1, -1):
                   if sparse_product_al is None:
@@ -710,8 +711,8 @@ class LBFGS(Optimizer):
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   intermediate_be.copy_(old_dirs[i] * d) # Use copy_ to update intermediate_be
-                  intermediate_be.copy_(intermediate_be.sum() * ro[i])
-                  d.add_(old_stps[i], alpha=al[i] - intermediate_be)
+                  be_i.copy_(intermediate_be.sum() * ro[i]) # Use copy_ to update pre-allocated be_i
+                  d.add_(old_stps[i], alpha=al[i] - be_i)
               #del sparse_product_al # Delete after loop
               #del intermediate_be # Delete after loop
 
