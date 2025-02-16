@@ -711,9 +711,9 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
-              q, al = jit_loop1(old_stps, old_dirs, ro, q, self.direction_device)
+              q, al = self.jit_loop1(old_stps, old_dirs, ro, q, self.direction_device)
               d = q.mul(H_diag)
-              d = jit_loop2(old_stps, old_dirs, ro, d, al, self.direction_device)
+              d = self.jit_loop2(old_stps, old_dirs, ro, d, al, self.direction_device)
 
               del H_diag  # DEL 6: H_diag is no longer needed
               # del sparse_product_al # Delete after loop
