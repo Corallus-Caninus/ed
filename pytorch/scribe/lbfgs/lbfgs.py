@@ -695,8 +695,6 @@ class LBFGS(Optimizer):
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device) # Move q to direction_device
 
-              be_i = torch.tensor(0.0).to(d) # Pre-allocate be_i as tensor
-
               for i in range(num_old - 1, -1, -1):
                   al[i] = (old_stps[i] * ((q) * ro[i])).sum() # replaced to_dense().dot()
                   q.add_(old_dirs[i], alpha=-al[i])
