@@ -339,7 +339,8 @@ class LBFGS(Optimizer):
         capture_min_step: float =1.,
         capture_max_step: float =100,
         gradient_clop: float = 5e-7,
-        direction_clop: float = 5e-7
+        direction_clop: float = 5e-7,
+        direction_device: str = 'cuda'
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -362,7 +363,8 @@ class LBFGS(Optimizer):
             capture_min_step=capture_min_step,
             capture_max_step=capture_max_step,
             gradient_clop=gradient_clop,
-            direction_clop=direction_clop
+            direction_clop=direction_clop,
+            direction_device=direction_device
         )
         super().__init__(params, defaults)
 
@@ -375,6 +377,7 @@ class LBFGS(Optimizer):
         self._numel_cache = None
         self.gradient_clop = gradient_clop
         self.direction_clop = direction_clop
+        self.direction_device = direction_device
         self.t = 1
 
     def _numel(self):
@@ -403,10 +406,10 @@ class LBFGS(Optimizer):
         grad = torch.cat(views, 0)
         norm = torch.linalg.vector_norm(grad, 1)
         grad = grad/norm
-#        return torch.cat(views, 0).to("cpu")
-        return grad #.to("cpu")
+#        return torch.cat(views, 0).to(self.direction_device)
+        return grad.to(self.direction_device)
 #TODO: clip out NaN based on dtype max value
-#        return grad_raw #.to("cpu")
+#        return grad_raw #.to(self.direction_device)
 
     # gather flat grads with L2 Normalization
     def _gather_norm_flat_grad(self, norm, isClop = True):
@@ -482,7 +485,7 @@ class LBFGS(Optimizer):
 
 #TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
     def _clone_param(self):
-#        return [p.clone(memory_format=torch.contiguous_format).to("cpu") for p in self._params]
+#        return [p.clone(memory_format=torch.contiguous_format).to(self.direction_device) for p in self._params]
         return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
@@ -561,7 +564,7 @@ class LBFGS(Optimizer):
 #          H_diag = 1
 #          return orig_loss
 
-#TODO: put old_dirs, steps and ro on CPU. Perform the direction calculation as efficiently as possible with this constraint so we can use main memory for history size
+#TODO: put old_dirs, steps and ro on self.direction_device. Perform the direction calculation as efficiently as possible with this constraint so we can use main memory for history size
       # tensors cached in state (for tracing)
 #      d = state.get("d")
 #      t = state.get("t")
@@ -650,9 +653,9 @@ class LBFGS(Optimizer):
                     print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-                y_sparse = y.to_sparse()
+                y_sparse = y.to_sparse().to(self.direction_device)
                 old_dirs.append(y_sparse) # NOTE: was cpu
-                s_sparse = s.to_sparse()
+                s_sparse = s.to_sparse().to(self.direction_device)
                 old_stps.append(s_sparse) # NOTE: was cpu
                 ro.append((1.0 / ys)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
@@ -688,7 +691,7 @@ class LBFGS(Optimizer):
                   else:
                       sparse_product_al.copy_(old_stps[i].to(q.device) * ((q) * ro[i]))
                   al[i] = sparse_product_al.sum() # replaced to_dense().dot()
-                  q.add_(old_dirs[i], alpha=-al[i])
+                  q.add_(old_dirs[i].to(q.device), alpha=-al[i]) #Move old_dirs[i] to q.device
                   al[i] = al[i] #NOTE: was cpu
 
           # multiply by initial Hessian
@@ -701,20 +704,20 @@ class LBFGS(Optimizer):
               for i in range(num_old):
                   torch.cuda.empty_cache() # Add empty_cache here before the problematic line
                   if sparse_product_be is None:
-                      sparse_product_be = old_dirs[i] * r
+                      sparse_product_be = old_dirs[i].to(r.device) * r #Move old_dirs[i] to r.device
                   else:
-                      sparse_product_be.copy_(old_dirs[i] * r)
+                      sparse_product_be.copy_(old_dirs[i].to(r.device) * r) #Move old_dirs[i] to r.device
                   be_i = sparse_product_be.sum() * ro[i] # replaced to_dense().dot()
-                  r.add_(old_stps[i], alpha=al[i] - be_i)
+                  r.add_(old_stps[i].to(r.device), alpha=al[i] - be_i) #Move old_stps[i] to r.device
               del sparse_product_al # Delete after loop
               del sparse_product_be # Delete after loop
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
-#              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was cpu
-              prev_flat_grad = flat_grad#NOTE: was cpu
+#              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was self.direction_device
+              prev_flat_grad = flat_grad#NOTE: was self.direction_device
           else:
-#              prev_flat_grad.copy_(flat_grad)#NOTE: was cpu
-              prev_flat_grad = flat_grad#NOTE: was cpu
+#              prev_flat_grad.copy_(flat_grad)#NOTE: was self.direction_device
+              prev_flat_grad = flat_grad#NOTE: was self.direction_device
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
@@ -732,7 +735,7 @@ class LBFGS(Optimizer):
           valid_indices_mask = direction_values != 0
           valid_indices = indices[:, valid_indices_mask]
 
-          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce() #TODO: verify via profiling if coalesce is necessary
+          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) #TODO: verify via profiling if coalesce is necessary
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
@@ -894,9 +897,9 @@ class LBFGS(Optimizer):
             history = torch.load(filename)
             state = self.state[self._params[0]]
             device = self._params[0].device # Get the device of the model parameters
-            state["old_dirs"] = [tensor.to(device) for tensor in history.get("old_dirs", [])] # Move loaded tensors to the correct device
-            state["old_stps"] = [tensor.to(device) for tensor in history.get("old_stps", [])] # Move loaded tensors to the correct device
-            state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Move loaded tensors to the correct device
+            state["old_dirs"] = [tensor.to(self.direction_device) for tensor in history.get("old_dirs", [])] # Move loaded tensors to the correct device
+            state["old_stps"] = [tensor.to(self.direction_device) for tensor in history.get("old_stps", [])] # Move loaded tensors to the correct device
+            state["ro"] = [tensor.to(self.direction_device) for tensor in history.get("ro", [])] # Move loaded tensors to the correct device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None)
             print(f"LBFGS history loaded from {filename}")
         except FileNotFoundError:
