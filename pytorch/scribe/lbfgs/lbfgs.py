@@ -513,9 +513,13 @@ class LBFGS(Optimizer):
 
     @torch.jit.script
     def jit_loop2(old_stps: list[Tensor], old_dirs: list[Tensor], ro: Tensor, d: Tensor, al: Tensor, direction_device: str):
+    @torch.jit.script
+    def jit_loop2(old_stps: list[Tensor], old_dirs: list[Tensor], ro: Tensor, d: Tensor, al: Tensor, direction_device: str):
         num_old = len(old_dirs)
         for i in range(num_old):
-            d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i])
+            inner_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).sum()
+            d.add_(old_stps[i].to(direction_device), alpha=al[i] - inner_product * ro[i])
+            del inner_product
         return d
 
     @torch.no_grad()
