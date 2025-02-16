@@ -711,9 +711,11 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
-              q, al = self.jit_loop1(old_stps, old_dirs, ro, q, str(self.direction_device))
+              ro_tensor = torch.tensor(ro, device=self.direction_device)
+              q, al = self.jit_loop1(old_stps, old_dirs, ro_tensor, q, str(self.direction_device))
               d = q.mul(H_diag)
-              d = self.jit_loop2(old_stps, old_dirs, ro, d, al, str(self.direction_device))
+              d = self.jit_loop2(old_stps, old_dirs, ro_tensor, d, al, str(self.direction_device))
+              del ro_tensor
 
               del H_diag  # DEL 6: H_diag is no longer needed
               # del sparse_product_al # Delete after loop
