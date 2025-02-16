@@ -660,9 +660,9 @@ class LBFGS(Optimizer):
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
-                    print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                   except Exception as e:
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
+                print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
                 y_sparse = y.to_sparse().to(self.direction_device) # Store y_sparse on direction_device
