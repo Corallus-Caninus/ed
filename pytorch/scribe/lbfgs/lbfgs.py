@@ -85,7 +85,10 @@ def _strong_wolfe(
         device = gtd.device
         c1_tensor = torch.tensor(c1, device=device)
         f_tensor = torch.tensor(f, device=device)
-        gtd_tensor = torch.tensor(gtd, device=device)
+        gtd_tensor = torch.tensor(gtd, device=device).to(f_new.device)
+        f_tensor = f_tensor.to(f_new.device)
+        c1_tensor = c1_tensor.to(f_new.device)
+        t = t.to(f_new.device)
 
         if (f_new > (f_tensor + c1_tensor * t * gtd_tensor)) or f_new > f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
