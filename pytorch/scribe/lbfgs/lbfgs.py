@@ -827,7 +827,8 @@ class LBFGS(Optimizer):
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               if not success: #TODO: we chase misprinted lines
-                t = 1 #Unit vector until we restore curvature
+                first_param = next(self.param_groups[0]['params'].__iter__())
+                t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
 #                flat_grad = None
                 print("Linesearch failure, resetting..")
                 loss, flat_grad = obj_func(x_init, t, d)
