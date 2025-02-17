@@ -705,7 +705,7 @@ class LBFGS(Optimizer):
                 old_dirs.append(y_sparse) # NOTE: was cpu
                 s_sparse = s.to_sparse().to(self.direction_device) # Store s_sparse on direction_device
                 old_stps.append(s_sparse) # NOTE: was cpu
-                ro.append((1.0 / ys)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
               y_squared_sparse_product = y * y
