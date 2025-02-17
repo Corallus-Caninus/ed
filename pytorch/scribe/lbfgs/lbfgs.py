@@ -515,21 +515,23 @@ class LBFGS(Optimizer):
     @torch.jit.script
     def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str) -> Tensor:
         num_old = len(old_dirs)
-        q = flat_grad.neg().to(direction_device)
+        q = flat_grad.neg()
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
         direction_similarity = torch.empty_like(q, dtype=q.dtype, device=direction_device) # Preallocate direction_similarity tensor
 
         for i in range(num_old - 1, -1, -1):
-            direction_similarity.copy_(old_dirs[i].to(direction_device) * q) # Use inplace copy to store intermediate result
+            direction_similarity.copy_(old_dirs[i] * q) # Use inplace copy to store intermediate result
             al[i] = direction_similarity.sum().item() * ro[i].item()
-            q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
+            q.add_(old_dirs[i], alpha=-al[i])
+            q = q.coalesce()
 
         d = q.mul(H_diag).to_sparse().coalesce()
         be_i = torch.empty_like(d, dtype=q.dtype, device=direction_device) # Preallocate be_i for second loop
 
         for i in range(num_old):
-            be_i.copy_(old_dirs[i].to(direction_device) * d.to(direction_device)) # Use inplace copy and preallocated tensor
-            d.add_(old_stps[i].to(direction_device), alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
+            be_i.copy_(old_dirs[i] * d) # Use inplace copy and preallocated tensor
+            d.add_(old_stps[i], alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
+            d = d.coalesce()
         return d
 
     @torch.no_grad()
