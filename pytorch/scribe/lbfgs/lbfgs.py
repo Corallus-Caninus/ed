@@ -137,7 +137,8 @@ def _strong_wolfe(
         tmp = t
         t = _cubic_interpolate(
             t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
-        )#.item() # get scalar value from tensor
+        )
+        t = torch.tensor(t) #.item() # get scalar value from tensor
 
         # next step
         t_prev = tmp
