@@ -72,7 +72,8 @@ def _strong_wolfe(
     done = False
     ls_iter = 0
 
-    t_best = t 
+    t_best = t
+    t = torch.tensor(t) # Ensure t is a tensor before the loop
     device = gtd.device
     f_best = torch.tensor(f, device=device)
     g_best = g
