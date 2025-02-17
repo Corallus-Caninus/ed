@@ -526,16 +526,15 @@ class LBFGS(Optimizer):
         d = d.to_sparse().coalesce()
 
         al_tensor = torch.stack(al).to(direction_device).to(torch.float32)
-        ro_tensor = torch.stack(ro).to(direction_device).to(torch.float32)
 
-        inner_product = torch.zeros(1, device=direction_device, dtype=ro_tensor.dtype)
+        inner_product = torch.zeros(1, device=direction_device, dtype=flat_grad.dtype) # Use flat_grad.dtype
         for i in range(num_old):
             sparse_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).coalesce()
             inner_product = sparse_product.values().sum()
-            d = (d.add(old_stps[i].to(direction_device), alpha=al_tensor[i] - inner_product * ro_tensor[i])).coalesce()
+            ro_tensor = ro[i].to(direction_device).to(flat_grad.dtype) # Move ro[i] to device and dtype here
+            d = (d.add(old_stps[i].to(direction_device), alpha=al_tensor[i] - inner_product * ro_tensor))
         del inner_product
         del al_tensor
-        del ro_tensor
         return d
 
     @torch.no_grad()
@@ -731,9 +730,7 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
-              ro_tensor = torch.tensor(ro, device=self.direction_device, dtype=torch.float32)
-              d = self.direction_approximate(old_stps, old_dirs, ro_tensor, flat_grad, H_diag, str(self.direction_device))
-              del ro_tensor
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, str(self.direction_device))
               torch.cuda.empty_cache()
 
               del H_diag  # DEL 6: H_diag is no longer needed
