@@ -39,7 +39,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
             min_pos = x1 - (x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2))
         return min(max(min_pos, xmin_bound), xmax_bound)
     else:
-        return (xmin_bound + xmax_bound) / 2.0
+        return torch.tensor((xmin_bound + xmax_bound) / 2.0)
 
 
 def _strong_wolfe(
@@ -131,7 +131,7 @@ def _strong_wolfe(
         tmp = t
         t = _cubic_interpolate(
             t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
-        )
+        ).item() # get scalar value from tensor
 
         # next step
         t_prev = tmp
@@ -216,11 +216,11 @@ def _strong_wolfe(
                 # evaluate at 1/3 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
-                    t = t - bracket_shove*(t - displacement)
+                    t = torch.tensor(t - bracket_shove*(t - displacement))
                     print("punt", end = " ")
                 else:
                     displacement = min(bracket) + eps
-                    t = t + bracket_shove*(displacement - t)
+                    t = torch.tensor(t + bracket_shove*(displacement - t))
                     print("punt", end = " ")
             else:
                 insuf_progress = True
