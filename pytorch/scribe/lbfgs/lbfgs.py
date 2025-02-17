@@ -519,7 +519,7 @@ class LBFGS(Optimizer):
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
 
         for i in range(num_old - 1, -1, -1):
-            al[i] = (old_dirs[i].to(direction_device) * q).sum().item() * ro[i]
+            al[i] = (old_dirs[i].to(direction_device) * q).sum().item() * ro[i][0]
             q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
 
         d = q.mul(H_diag).to_sparse().coalesce()
