@@ -526,7 +526,7 @@ class LBFGS(Optimizer):
         d = d.to_sparse().coalesce()
 
         al_tensor = torch.stack(al).to(direction_device).to(torch.float32)
-        ro_tensor = torch.tensor(ro, device=direction_device, dtype=torch.float32)
+        ro_tensor = torch.stack(ro).to(direction_device).to(torch.float32)
 
         inner_product = torch.zeros(1, device=direction_device, dtype=ro_tensor.dtype)
         for i in range(num_old):
