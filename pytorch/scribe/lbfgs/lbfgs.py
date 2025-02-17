@@ -466,14 +466,14 @@ class LBFGS(Optimizer):
 
                 # Extract relevant slice from sparse tensor
                 mask = torch.logical_and(sparse_indices[0, :] >= offset, sparse_indices[0, :] < offset + numel)
-                view_indices = (sparse_indices[:, mask] - offset).to(update.device) # Adjust indices to be relative to the view
-                view_values = sparse_values[mask].to(update.device)
-                view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=update.device).coalesce() #TODO: verify via profiling if coalesce is necessary
+                view_indices = (sparse_indices[:, mask] - offset) # Adjust indices to be relative to the view
+                view_values = sparse_values[mask]
+                view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=p.device).coalesce() #TODO: verify via profiling if coalesce is necessary
 
                 p_flat = p.view(-1)
                 if view_values.numel() > 0:  # Check if there are any values to update
                     index = view_indices[0, :].to(p_flat.device)  # Get the indices for index_add_
-                    p_flat.index_add_(0, index, (view_values.to(p_flat.device) * step_size).to(p_flat.device))  # Use index_add_ for vectorized update
+                    p_flat.index_add_(0, index, (view_values * step_size).to(p_flat.device))  # Use index_add_ for vectorized update
 
 
             else: #dense path for non-sparse tensors just in case
