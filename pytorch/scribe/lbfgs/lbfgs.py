@@ -513,28 +513,21 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad, H_diag, direction_device: str):
+    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str) -> Tensor:
         num_old = len(old_dirs)
-        q = flat_grad.neg().to(direction_device)  # Initialize q and move to direction_device
-        al = [torch.zeros(1, device=direction_device, dtype=q.dtype) for _ in range(num_old)]  # Initialize al as list of Tensors
+        q = flat_grad.neg().to(direction_device)
+        al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
 
         for i in range(num_old - 1, -1, -1):
-            al[i] = (old_stps[i].to(direction_device) * ((q) * ro[i])).sum()
+            al[i] = (old_stps[i].to(direction_device) * (q * ro[i])).sum()
             q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
 
-        d = q.mul(H_diag)
-        d = d.to_sparse().coalesce()
+        d = q.mul(H_diag).to_sparse().coalesce()
 
-        al_tensor = torch.stack(al).to(direction_device).to(torch.float32)
-
-        inner_product = torch.zeros(1, device=direction_device, dtype=flat_grad.dtype) # Use flat_grad.dtype
+        inner_product = torch.zeros(1, device=direction_device, dtype=flat_grad.dtype)
         for i in range(num_old):
-            sparse_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).coalesce()
-            inner_product = sparse_product.values().sum()
-            ro_tensor = ro[i].to(direction_device).to(flat_grad.dtype) # Move ro[i] to device and dtype here
-            d = (d.add(old_stps[i].to(direction_device), alpha=(al_tensor[i] - inner_product * ro_tensor).item()))
-        del inner_product
-        del al_tensor
+            inner_product += (old_dirs[i].to(direction_device) * d.to(direction_device)).sum()
+            d.add_(old_stps[i].to(direction_device), alpha=(al[i] - inner_product * ro[i]).item())
         return d
 
     @torch.no_grad()
