@@ -519,6 +519,7 @@ class LBFGS(Optimizer):
             sparse_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).coalesce()
             inner_product = sparse_product.values().sum()
             d = (d.add(old_stps[i].to(direction_device), alpha=al[i] - inner_product * ro[i])).coalesce()
+            del sparse_product
         del inner_product
         return d
 
@@ -752,7 +753,7 @@ class LBFGS(Optimizer):
           valid_indices_mask = direction_values != 0
           valid_indices = indices[:, valid_indices_mask]
 
-          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) # Move d to direction_device #TODO: verify via profiling if coalesce is necessary
+          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) # Move d to direction_device
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
