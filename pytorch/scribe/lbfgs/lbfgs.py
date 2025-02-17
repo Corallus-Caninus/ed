@@ -513,7 +513,7 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro, flat_grad, H_diag, direction_device: str):
+    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad, H_diag, direction_device: str):
         num_old = len(old_dirs)
         q = flat_grad.neg().to(direction_device)  # Initialize q and move to direction_device
         al = [torch.zeros(1, device=direction_device, dtype=q.dtype) for _ in range(num_old)]  # Initialize al as list of Tensors
