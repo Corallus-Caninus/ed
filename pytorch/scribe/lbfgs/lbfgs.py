@@ -468,11 +468,14 @@ class LBFGS(Optimizer):
                 mask = torch.logical_and(sparse_indices[0, :] >= offset, sparse_indices[0, :] < offset + numel)
                 view_indices = (sparse_indices[:, mask] - offset).to(p.device) # Adjust indices to be relative to the view
                 view_values = sparse_values[mask].to(p.device)
+                view_indices = (sparse_indices[:, mask] - offset).to(p.device) # Adjust indices to be relative to the view
+                view_values = sparse_values[mask].to(p.device)
                 view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=p.device).coalesce() #TODO: verify via profiling if coalesce is necessary
 
                 p_flat = p.view(-1)
                 if view_values.numel() > 0:  # Check if there are any values to update
                     index = view_indices[0, :]  # Get the indices for index_add_
+                    print(f"p_flat device: {p_flat.device}, index device: {index.device}, view_values device: {view_values.device}, step_size: {step_size}")
                     p_flat.index_add_(0, index.to(p_flat.device), (view_values * step_size))  # Use index_add_ for vectorized update
 
 
