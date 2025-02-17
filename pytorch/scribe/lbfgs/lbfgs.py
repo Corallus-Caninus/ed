@@ -197,6 +197,7 @@ def _strong_wolfe(
             bracket_f[1],
             bracket_gtd[1], # type: ignore[possibly-undefined]
         )
+        t = torch.as_tensor(t) # Ensure t is a tensor after interpolation
 #        bracket_gtd[1]#,
 #        bracket_gtd[0]#,  # type: ignore[possibly-undefined]
 
@@ -216,10 +217,12 @@ def _strong_wolfe(
                 # evaluate at 1/3 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
+                    t = torch.as_tensor(t) # Ensure t is a tensor before punt adjustment
                     t = torch.tensor(t - bracket_shove*(t - displacement))
                     print("punt", end = " ")
                 else:
                     displacement = min(bracket) + eps
+                    t = torch.as_tensor(t) # Ensure t is a tensor before punt adjustment
                     t = torch.tensor(t + bracket_shove*(displacement - t))
                     print("punt", end = " ")
             else:
