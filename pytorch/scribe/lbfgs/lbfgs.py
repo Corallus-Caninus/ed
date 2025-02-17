@@ -473,7 +473,6 @@ class LBFGS(Optimizer):
                 p_flat = p.view(-1)
                 if view_values.numel() > 0:  # Check if there are any values to update
                     index = view_indices[0, :]  # Get the indices for index_add_
-                    print(f"p_flat device: {p_flat.device}, index device: {index.device}, view_values device: {view_values.device}, step_size: {step_size}")
                     p_flat.index_add_(0, index.to(p_flat.device), (view_values * torch.tensor(step_size).to(p_flat.device)))  # Use index_add_ for vectorized update
 
 
