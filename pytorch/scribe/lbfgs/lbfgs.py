@@ -91,6 +91,8 @@ def _strong_wolfe(
         gtd_tensor = gtd_tensor.to(device)
 #        t = t.to(device)
         f_best = f_best.to(gtd_tensor.device)
+        if not isinstance(f_new, torch.Tensor):
+            f_new = torch.tensor(f_new)
         f_new = f_new.to(gtd_tensor.device)
         f_tensor = f_tensor.to(gtd_tensor.device)
         c1_tensor = c1_tensor.to(gtd_tensor.device)
