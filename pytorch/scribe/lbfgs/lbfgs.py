@@ -241,8 +241,7 @@ def _strong_wolfe(
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
-#            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
-            bracket_g = [g_new]  # type: ignore[possibly-undefined]
+            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
@@ -277,7 +276,7 @@ def _strong_wolfe(
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-#            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
+            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
             bracket_g[low_pos] = g_new
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
