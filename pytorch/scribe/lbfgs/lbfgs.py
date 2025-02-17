@@ -88,9 +88,9 @@ def _strong_wolfe(
         print(f"t type: {type(t)}, device: {'N/A'}")
         print(f"gtd type: {type(gtd)}, device: {'N/A'}")
 
-        c1_tensor = torch.tensor(c1, device=f_new.device)
-        f_tensor = torch.tensor(f, device=f_new.device)
-        gtd_tensor = torch.tensor(gtd, device=f_new.device)
+        c1_tensor = torch.tensor(c1)
+        f_tensor = torch.tensor(f)
+        gtd_tensor = torch.tensor(gtd)
 
         print(f"c1_tensor type: {type(c1_tensor)}, device: {c1_tensor.device}")
         print(f"f_tensor type: {type(f_tensor)}, device: {f_tensor.device}")
