@@ -154,7 +154,7 @@ def _strong_wolfe(
           stall_wolfe = 0
 #          best_c2 = cur_c2
           t_best = t
-          f_best = f_new
+          f_best = torch.tensor(f_new, device=device)
           g_best = g_new
 
     # reached max number of iterations?
@@ -271,7 +271,7 @@ def _strong_wolfe(
               stall_wolfe = 0
 #              best_c2 = cur_c2
               t_best = t
-              f_best = f_new
+              f_best = torch.tensor(f_new, device=device)
               g_best = g_new
 
             # new point becomes new low
