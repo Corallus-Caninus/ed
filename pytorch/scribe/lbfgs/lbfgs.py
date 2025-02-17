@@ -40,7 +40,6 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
         return min(max(min_pos, xmin_bound), xmax_bound)
     else:
         return torch.tensor((xmin_bound + xmax_bound) / 2.0)
-return torch.tensor(min(max(min_pos, xmin_bound), xmax_bound))
 
 
 def _strong_wolfe(
