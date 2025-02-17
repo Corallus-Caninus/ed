@@ -532,7 +532,7 @@ class LBFGS(Optimizer):
             sparse_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).coalesce()
             inner_product = sparse_product.values().sum()
             ro_tensor = ro[i].to(direction_device).to(flat_grad.dtype) # Move ro[i] to device and dtype here
-            d = (d.add(old_stps[i].to(direction_device), alpha=al_tensor[i] - inner_product * ro_tensor))
+            d = (d.add(old_stps[i].to(direction_device), alpha=(al_tensor[i] - inner_product * ro_tensor).item()))
         del inner_product
         del al_tensor
         return d
