@@ -70,7 +70,8 @@ def _strong_wolfe(
     ls_iter = 0
 
     t_best = t 
-    f_best = f
+    device = gtd.device
+    f_best = torch.tensor(f, device=device)
     g_best = g
     best_c1 = 0
     best_c2 = 0
