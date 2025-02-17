@@ -523,9 +523,11 @@ class LBFGS(Optimizer):
             q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
 
         d = q.mul(H_diag).to_sparse().coalesce()
+        be_i = torch.empty_like(d, dtype=q.dtype, device=direction_device) # Preallocate be_i for second loop
 
         for i in range(num_old):
-            d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i].item())
+            be_i.copy_(old_dirs[i].to(direction_device) * d.to(direction_device)) # Use inplace copy and preallocated tensor
+            d.add_(old_stps[i].to(direction_device), alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
         return d
 
     @torch.no_grad()
