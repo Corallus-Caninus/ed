@@ -37,9 +37,9 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
             min_pos = x2 - (x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2))
         else:
             min_pos = x1 - (x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2))
-        return torch.as_tensor(min(max(min_pos, xmin_bound), xmax_bound))
+        return min(max(min_pos, xmin_bound), xmax_bound)
     else:
-        return torch.as_tensor((xmin_bound + xmax_bound) / 2.0)
+        return torch.tensor((xmin_bound + xmax_bound) / 2.0)
 
 
 def _strong_wolfe(
@@ -89,7 +89,7 @@ def _strong_wolfe(
         c1_tensor = c1_tensor.to(device)
         f_tensor = f_tensor.to(device)
         gtd_tensor = gtd_tensor.to(device)
-        t = t.to(device)
+#        t = t.to(device)
         f_best = f_best.to(device)
 
         if (f_new > (f_tensor + c1_tensor * t * gtd_tensor)) or f_new > f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
@@ -129,9 +129,9 @@ def _strong_wolfe(
   
         # interpolate
         tmp = t
-        t = torch.tensor( _cubic_interpolate(
+        t = _cubic_interpolate(
             t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
-        ) )
+        )#.item() # get scalar value from tensor
 
         # next step
         t_prev = tmp
@@ -197,7 +197,6 @@ def _strong_wolfe(
             bracket_f[1],
             bracket_gtd[1], # type: ignore[possibly-undefined]
         )
-        t = torch.as_tensor(t) # Ensure t is a tensor after interpolation
 #        bracket_gtd[1]#,
 #        bracket_gtd[0]#,  # type: ignore[possibly-undefined]
 
@@ -217,12 +216,10 @@ def _strong_wolfe(
                 # evaluate at 1/3 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
-                    t = torch.as_tensor(t) # Ensure t is a tensor before punt adjustment
                     t = torch.tensor(t - bracket_shove*(t - displacement))
                     print("punt", end = " ")
                 else:
                     displacement = min(bracket) + eps
-                    t = torch.as_tensor(t) # Ensure t is a tensor before punt adjustment
                     t = torch.tensor(t + bracket_shove*(displacement - t))
                     print("punt", end = " ")
             else:
@@ -860,7 +857,7 @@ class LBFGS(Optimizer):
           else:
               # no line search, simply move with fixed-step
               first_param = next(self.param_groups[0]['params'].__iter__())
-              t = t.to(first_param.device)
+#              t = t.to(first_param.device)
               d = d.to(first_param.device)
               self._add_grad(t, d)
               if n_iter != max_iter:
