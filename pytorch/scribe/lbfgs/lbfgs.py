@@ -854,7 +854,7 @@ class LBFGS(Optimizer):
 #              flat_grad = flat_grad.to("cuda")
               self.t  = t
               first_param = next(self.param_groups[0]['params'].__iter__())
-              t = t.to(first_param.device)
+              t = torch.tensor(t).to(first_param.device)
               d = d.to(first_param.device)
               self._add_grad(t, d)
               loss_device = d.device
