@@ -86,7 +86,10 @@ def _strong_wolfe(
         print(f"c1 type: {type(c1)}, device: {'N/A'}")
         print(f"t type: {type(t)}, device: {'N/A'}")
         print(f"gtd type: {type(gtd)}, device: {'N/A'}")
-        if  (f_new > (torch.tensor(f).to(f_new.device) + c1 * t * torch.tensor(gtd).to(f_new.device))) or f_new > f_best : #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+        c1_tensor = torch.tensor(c1, device=f_new.device)
+        f_tensor = torch.tensor(f, device=f_new.device)
+        gtd_tensor = torch.tensor(gtd, device=f_new.device)
+        if  (f_new > (f_tensor + c1_tensor * t * gtd_tensor)) or f_new > f_best : #or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
