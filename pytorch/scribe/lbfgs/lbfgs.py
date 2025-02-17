@@ -730,7 +730,7 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device)
               torch.cuda.empty_cache()
 
               del H_diag  # DEL 6: H_diag is no longer needed
