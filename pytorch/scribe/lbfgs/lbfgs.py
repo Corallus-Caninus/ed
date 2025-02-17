@@ -526,8 +526,8 @@ class LBFGS(Optimizer):
 
         inner_product = torch.zeros(1, device=direction_device, dtype=flat_grad.dtype)
         for i in range(num_old):
-            inner_product += (old_dirs[i].to(direction_device) * d.to(direction_device)).sum()
-            d.add_(old_stps[i].to(direction_device), alpha=(al[i] - inner_product * ro[i]).item())
+            inner_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).sum()
+            d.add_(old_stps[i].to(direction_device), alpha=al[i] - inner_product * ro[i].item())
         return d
 
     @torch.no_grad()
