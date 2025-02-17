@@ -467,7 +467,7 @@ class LBFGS(Optimizer):
                 # Extract relevant slice from sparse tensor
                 mask = torch.logical_and(sparse_indices[0, :] >= offset, sparse_indices[0, :] < offset + numel)
                 view_indices = (sparse_indices[:, mask] - offset).to(update.device) # Adjust indices to be relative to the view
-                view_values = view_values[mask].to(update.device)
+                view_values = sparse_values[mask].to(update.device)
                 view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=update.device).coalesce() #TODO: verify via profiling if coalesce is necessary
 
                 p_flat = p.view(-1)
