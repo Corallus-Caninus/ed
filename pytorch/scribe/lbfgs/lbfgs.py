@@ -81,20 +81,9 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-        print(f"f_new type: {type(f_new)}, device: {f_new.device if isinstance(f_new, torch.Tensor) else 'N/A'}")
-        print(f"f_new type: {type(f_new)}, device: {f_new.device if isinstance(f_new, torch.Tensor) else 'N/A'}")
-        print(f"f type: {type(f)}, device: {'N/A'}")
-        print(f"c1 type: {type(c1)}, device: {'N/A'}")
-        print(f"t type: {type(t)}, device: {'N/A'}")
-        print(f"gtd type: {type(gtd)}, device: {'N/A'}")
-
         c1_tensor = torch.tensor(c1)
         f_tensor = torch.tensor(f)
         gtd_tensor = torch.tensor(gtd)
-
-        print(f"c1_tensor type: {type(c1_tensor)}, device: {c1_tensor.device}")
-        print(f"f_tensor type: {type(f_tensor)}, device: {f_tensor.device}")
-        print(f"gtd_tensor type: {type(gtd_tensor)}, device: {gtd_tensor.device}")
 
         if (f_new > (f_tensor + c1_tensor * t * gtd_tensor)) or f_new > f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
