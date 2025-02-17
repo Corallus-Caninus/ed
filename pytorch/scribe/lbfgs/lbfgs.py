@@ -517,9 +517,11 @@ class LBFGS(Optimizer):
         num_old = len(old_dirs)
         q = flat_grad.neg().to(direction_device)
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
+        intermediate_val = torch.empty_like(q, dtype=q.dtype, device=direction_device) # Preallocate intermediate_val tensor
 
         for i in range(num_old - 1, -1, -1):
-            al[i] = (old_dirs[i].to(direction_device) * q).sum().item() * ro[i].item()
+            intermediate_val.copy_(old_dirs[i].to(direction_device) * q) # Use inplace copy to store intermediate result
+            al[i] = intermediate_val.sum().item() * ro[i].item()
             q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
 
         d = q.mul(H_diag).to_sparse().coalesce()
