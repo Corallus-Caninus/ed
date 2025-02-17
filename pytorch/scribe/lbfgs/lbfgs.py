@@ -519,7 +519,6 @@ class LBFGS(Optimizer):
             sparse_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).coalesce()
             inner_product = sparse_product.values().sum()
             d = (d.add(old_stps[i].to(direction_device), alpha=al[i] - inner_product * ro[i])).coalesce()
-        del sparse_product
         del inner_product
         return d
 
