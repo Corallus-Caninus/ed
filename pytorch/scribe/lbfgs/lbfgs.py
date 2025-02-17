@@ -37,7 +37,10 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
             min_pos = x2 - (x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2))
         else:
             min_pos = x1 - (x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2))
-        return min(max(min_pos, xmin_bound), xmax_bound)
+        min_pos_tensor = torch.tensor(min_pos)
+        xmin_bound_tensor = torch.tensor(xmin_bound)
+        xmax_bound_tensor = torch.tensor(xmax_bound)
+        return min(max(min_pos_tensor, xmin_bound_tensor), xmax_bound_tensor)
     else:
         return torch.tensor((xmin_bound + xmax_bound) / 2.0)
 
