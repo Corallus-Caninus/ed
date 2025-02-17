@@ -517,11 +517,11 @@ class LBFGS(Optimizer):
         num_old = len(old_dirs)
         q = flat_grad.neg().to(direction_device)
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
-        intermediate_tensor = torch.empty_like(q, dtype=q.dtype, device=direction_device) # Preallocate intermediate_tensor tensor
+        direction_similarity = torch.empty_like(q, dtype=q.dtype, device=direction_device) # Preallocate direction_similarity tensor
 
         for i in range(num_old - 1, -1, -1):
-            intermediate_tensor.copy_(old_dirs[i].to(direction_device) * q) # Use inplace copy to store intermediate result
-            al[i] = intermediate_tensor.sum().item() * ro[i].item()
+            direction_similarity.copy_(old_dirs[i].to(direction_device) * q) # Use inplace copy to store intermediate result
+            al[i] = direction_similarity.sum().item() * ro[i].item()
             q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
 
         d = q.mul(H_diag).to_sparse().coalesce()
