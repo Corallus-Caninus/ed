@@ -86,7 +86,6 @@ def _strong_wolfe(
         c1_tensor = torch.tensor(c1, device=device)
         f_tensor = torch.tensor(f, device=device)
         gtd_tensor = torch.tensor(gtd, device=device)
-        f_tensor = f_tensor.to(f_new.device)
         c1_tensor = c1_tensor
         t = t
 
