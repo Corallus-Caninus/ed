@@ -81,9 +81,10 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-        c1_tensor = torch.tensor(c1)
-        f_tensor = torch.tensor(f)
-        gtd_tensor = torch.tensor(gtd)
+        device = gtd.device
+        c1_tensor = torch.tensor(c1, device=device)
+        f_tensor = torch.tensor(f, device=device)
+        gtd_tensor = torch.tensor(gtd, device=device)
 
         if (f_new > (f_tensor + c1_tensor * t * gtd_tensor)) or f_new > f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
