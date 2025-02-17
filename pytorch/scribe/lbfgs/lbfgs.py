@@ -624,7 +624,8 @@ class LBFGS(Optimizer):
 
       n_iter = 0
       d = flat_grad.neg().to(self.direction_device) # Initialize d on direction_device
-      t = 1
+      first_param = next(self.param_groups[0]['params'].__iter__())
+      t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)
       # optimize for a max of max_iter iterations
       while n_iter < max_iter:
           # keep track of nb of iterations
