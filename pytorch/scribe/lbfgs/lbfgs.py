@@ -931,18 +931,15 @@ class LBFGS(Optimizer):
             device = self.direction_device # Get the device of the model parameters
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
-            state["old_dirs"] = history.get("old_dirs", []) # Load history without moving to CPU
-            state["old_stps"] = history.get("old_stps", []) # Load history without moving to CPU
-            state["ro"] = history.get("ro", []) # Load history without moving to CPU
-            state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history without moving to CPU
+            state["old_dirs"] = [tensor.to(device) for tensor in history.get("old_dirs", [])] # Load history and move to direction_device
+            state["old_stps"] = [tensor.to(device) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
+            state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Load history and move to direction_device
+            state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
             self.t = history.get("t", 1) # Load step size t, default to 1 if not found
             state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
 
             if state["prev_flat_grad"] is not None:
                 state["prev_flat_grad"] = state["prev_flat_grad"].to(device) # Move prev_flat_grad to direction_device if it exists
-            state["old_dirs"] = [tensor.to(device) for tensor in state.get("old_dirs", [])] # Move loaded tensors to the correct device
-            state["old_stps"] = [tensor.to(device) for tensor in state.get("old_stps", [])] # Move loaded tensors to the correct device
-            state["ro"] = [tensor.to(device) for tensor in state.get("ro", [])] # Move loaded tensors to the correct device
             print(f"LBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
