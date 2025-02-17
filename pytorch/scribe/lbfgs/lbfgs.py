@@ -203,6 +203,7 @@ def _strong_wolfe(
             bracket_f[1],
             bracket_gtd[1], # type: ignore[possibly-undefined]
         )
+        t = torch.tensor(t)
 #        bracket_gtd[1]#,
 #        bracket_gtd[0]#,  # type: ignore[possibly-undefined]
 
