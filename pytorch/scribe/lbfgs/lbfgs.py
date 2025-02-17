@@ -525,8 +525,7 @@ class LBFGS(Optimizer):
         d = q.mul(H_diag).to_sparse().coalesce()
 
         for i in range(num_old):
-            inner_product_val = (old_dirs[i].to(direction_device) * d.to(direction_device)).sum()
-            d.add_(old_stps[i].to(direction_device), alpha=al[i] - inner_product_val * ro[i].item())
+            d.add_(old_stps[i].to(direction_device), alpha=al[i] - (old_dirs[i].to(direction_device) * d.to(direction_device)).sum() * ro[i].item())
         return d
 
     @torch.no_grad()
