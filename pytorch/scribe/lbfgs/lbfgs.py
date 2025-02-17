@@ -472,8 +472,8 @@ class LBFGS(Optimizer):
 
                 p_flat = p.view(-1)
                 if view_values.numel() > 0:  # Check if there are any values to update
-                    index = view_indices[0, :].to(p_flat.device)  # Get the indices for index_add_
-                    p_flat.index_add_(0, index, (view_values * step_size))  # Use index_add_ for vectorized update
+                    index = view_indices[0, :]  # Get the indices for index_add_
+                    p_flat.index_add_(0, index.to(p_flat.device), (view_values * step_size))  # Use index_add_ for vectorized update
 
 
             else: #dense path for non-sparse tensors just in case
