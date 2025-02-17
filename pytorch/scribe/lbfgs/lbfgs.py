@@ -513,24 +513,29 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def jit_loop1(old_stps: list[Tensor], old_dirs: list[Tensor], ro, q, direction_device: str):
+    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro, flat_grad, H_diag, direction_device: str):
         num_old = len(old_dirs)
+        q = flat_grad.neg().to(direction_device)  # Initialize q and move to direction_device
         al = [torch.zeros(1, device=direction_device, dtype=q.dtype) for _ in range(num_old)]  # Initialize al as list of Tensors
 
         for i in range(num_old - 1, -1, -1):
             al[i] = (old_stps[i].to(direction_device) * ((q) * ro[i])).sum()
             q.add_(old_dirs[i].to(direction_device), alpha=-al[i])
-        return q, al
 
-    @torch.jit.script
-    def jit_loop2(old_stps: list[Tensor], old_dirs: list[Tensor], ro: Tensor, d: Tensor, al: Tensor, direction_device: str):
-        num_old = len(old_dirs)
-        inner_product = torch.zeros(1, device=direction_device, dtype=ro.dtype)
+        d = q.mul(H_diag)
+        d = d.to_sparse().coalesce()
+
+        al_tensor = torch.tensor(al, device=direction_device, dtype=torch.float32)
+        ro_tensor = torch.tensor(ro, device=direction_device, dtype=torch.float32)
+
+        inner_product = torch.zeros(1, device=direction_device, dtype=ro_tensor.dtype)
         for i in range(num_old):
             sparse_product = (old_dirs[i].to(direction_device) * d.to(direction_device)).coalesce()
             inner_product = sparse_product.values().sum()
-            d = (d.add(old_stps[i].to(direction_device), alpha=al[i] - inner_product * ro[i])).coalesce()
+            d = (d.add(old_stps[i].to(direction_device), alpha=al_tensor[i] - inner_product * ro_tensor[i])).coalesce()
         del inner_product
+        del al_tensor
+        del ro_tensor
         return d
 
     @torch.no_grad()
@@ -727,13 +732,9 @@ class LBFGS(Optimizer):
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
               ro_tensor = torch.tensor(ro, device=self.direction_device, dtype=torch.float32)
-              q, al = self.jit_loop1(old_stps, old_dirs, ro_tensor, q, str(self.direction_device))
-              al_tensor = torch.tensor(al, device=self.direction_device, dtype=torch.float32)
-              d = q.mul(H_diag)
-              d = d.to_sparse().coalesce()
-              d = self.jit_loop2(old_stps, old_dirs, ro_tensor, d, al_tensor, str(self.direction_device))
+              ro_tensor = torch.tensor(ro, device=self.direction_device, dtype=torch.float32)
+              d = self.direction_approximate(old_stps, old_dirs, ro_tensor, flat_grad, H_diag, str(self.direction_device))
               del ro_tensor
-              del al_tensor
               torch.cuda.empty_cache()
 
               del H_diag  # DEL 6: H_diag is no longer needed
