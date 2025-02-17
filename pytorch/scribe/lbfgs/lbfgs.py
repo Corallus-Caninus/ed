@@ -932,7 +932,6 @@ class LBFGS(Optimizer):
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
             state = self.state[self._params[0]]
-            device = self.direction_device # Get the device of the model parameters
             state["old_dirs"] = history.get("old_dirs", []) # Load history without moving to CPU
             state["old_stps"] = history.get("old_stps", []) # Load history without moving to CPU
             state["ro"] = history.get("ro", []) # Load history without moving to CPU
