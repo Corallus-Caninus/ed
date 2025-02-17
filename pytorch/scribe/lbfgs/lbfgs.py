@@ -473,7 +473,7 @@ class LBFGS(Optimizer):
                 p_flat = p.view(-1)
                 if view_values.numel() > 0:  # Check if there are any values to update
                     index = view_indices[0, :].to(p_flat.device)  # Get the indices for index_add_
-                    p_flat.index_add_(0, index, (view_values.to(p_flat.device) * torch.tensor(step_size).to(p_flat.device)))  # Use index_add_ for vectorized update
+                    p_flat.index_add_(0, index, (view_values * step_size))  # Use index_add_ for vectorized update
 
 
             else: #dense path for non-sparse tensors just in case
@@ -814,11 +814,10 @@ class LBFGS(Optimizer):
                   x_init = self._clone_param()
 
                   def obj_func(x, t, d):
-			#TODO: implement gradient clipping here
                       return self._directional_evaluate(closure, x, t, d)
 
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
+                      obj_func, x_init, t.to(self.direction_device), d.to(self.direction_device), loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               if not success: #TODO: we chase misprinted lines
@@ -839,7 +838,7 @@ class LBFGS(Optimizer):
 #                state["n_iter"] = 0 
 #              flat_grad = flat_grad.to("cuda")
               self.t  = t
-              self._add_grad(t, d)
+              self._add_grad(t.to(self.direction_device), d.to(self.direction_device))
               loss_device = d.device
               print(f"got stepsize: {t} and loss: {loss} on device: {loss_device}")
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
@@ -847,7 +846,7 @@ class LBFGS(Optimizer):
               opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
           else:
               # no line search, simply move with fixed-step
-              self._add_grad(t, d)
+              self._add_grad(t.to(self.direction_device), d.to(self.direction_device))
               if n_iter != max_iter:
                   # re-evaluate function only if not in last iteration
                   # the reason we do this: in a stochastic setting,
