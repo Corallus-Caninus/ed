@@ -355,6 +355,7 @@ class LBFGS(Optimizer):
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
+        self.direction_approximate = torch.compile(self.direction_approximate, backend="inductor")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if max_eval is None:
@@ -512,7 +513,6 @@ class LBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
-    @torch.compile(backend="inductor")
     def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad, H_diag, direction_device: str):
         num_old = len(old_dirs)
         q = flat_grad.neg().to(direction_device)  # Initialize q and move to direction_device
