@@ -861,7 +861,7 @@ class LBFGS(Optimizer):
               d = d.to(first_param.device)
               self._add_grad(t, d)
               loss_device = d.device
-              print(f" \n -----------got stepsize: {t} and loss: {loss} on device: {loss_device}-----------")
+              print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
 #              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
               opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
