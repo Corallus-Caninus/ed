@@ -470,6 +470,8 @@ class LBFGS(Optimizer):
           views[torch.logical_and(views > -self.gradient_clop,views < self.gradient_clop)] = 0
           print("gradient elements: " + str((views != 0).sum()) + " total: " + str(views.numel()), end=' ')
 #          views[torch.logical_and(views > -1e-8,views < 1e-8)] = 0
+          l2_norm = torch.linalg.vector_norm(views, 2)
+          views.div_(l2_norm)
           views = views.to_sparse()
 #NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 viewsient if it occurs.
         return views #.to("cpu")
