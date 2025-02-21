@@ -758,13 +758,19 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
-              old_dirs.to("cuda")
-              old_stps.to("cuda")
-              ro.to("cuda")
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device)
-              old_dirs.to("cpu")
-              old_stps.to("cpu")
-              ro.to("cpu")
+
+              # Move history to direction_device
+              old_dirs_cuda = [tensor.to(self.direction_device) for tensor in old_dirs]
+              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
+              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
+
+              d = self.direction_approximate(old_stps_cuda, old_dirs_cuda, ro_cuda, flat_grad, H_diag, direction_device=self.direction_device)
+
+              # Move history back to CPU
+              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
+              old_stps = [tensor.to('cpu') for tensor in old_stps_cuda]
+              ro = [tensor.to('cpu') for tensor in ro_cuda]
+
               torch.cuda.empty_cache()
 
               del H_diag  # DEL 6: H_diag is no longer needed
