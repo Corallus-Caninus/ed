@@ -188,8 +188,22 @@ def _strong_wolfe(
     # find high and low points in bracket
     low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
 #    while not done and ls_iter < max_ls:
+    # zoom phase: we now have a point satisfying the criteria, or
+    # a bracket around it. We refine the bracket until we find the
+    # exact point satisfying the criteria
+    # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
+
+    insuf_progress = False
+    # find high and low points in bracket
+    low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
     #NOTE: we wait for bracket to collapse, we dont use max linesearch here, if it takes too long turn the bracket hyperparameters up.
     while not done  or ls_iter < max_ls:
+        if len(bracket) < 2: # Check if bracket has at least 2 elements
+            print("WOLFE PACK")
+            return success, f_best, g_best, t_best, ls_func_evals
+
+        # line-search bracket is so small
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
         # line-search bracket is so small
 #TODO: extract stall_wolfe hyperparameter
 #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
