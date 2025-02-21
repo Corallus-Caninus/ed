@@ -295,6 +295,9 @@ def _strong_wolfe(
         stall_wolfe += 1
         if stall_wolfe >= 3:
           print("STALL WOLFE")
+        if ls_iter >= max_ls: # Return Wolfe pack if max ls reached in zoom phase
+          print("WOLFE PACK MAX LS")
+          return success, f_best, g_best, t_best, ls_func_evals
 
 
     # return stuff
