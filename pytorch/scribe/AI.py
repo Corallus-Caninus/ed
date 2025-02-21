@@ -51,7 +51,7 @@ pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
 #optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
-optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-8, direction_clop=1e-6, c1=1e-4, c2=0.9)
+optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=1e-6, c1=1e-4, c2=0.9)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -107,11 +107,15 @@ def closure():
     cur_attention_mask = attention_mask[:, i:end_idx]
 
     if cache is not None:
+#      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
+#      outputs.loss.backward()
       with torch.no_grad(): # Keep no_grad context for forward passes in the loop
         outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
     else:
+#      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
       with torch.no_grad(): # Keep no_grad context for forward passes in the loop
         outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
+#      outputs.loss.backward()
     cache = outputs.cache_params
     num_steps += 1
     current_loss = outputs.loss.item()

@@ -193,25 +193,20 @@ def _strong_wolfe(
     # exact point satisfying the criteria
     # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
 
-    insuf_progress = False
-    # find high and low points in bracket
-    low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
     #NOTE: we wait for bracket to collapse, we dont use max linesearch here, if it takes too long turn the bracket hyperparameters up.
-    while not done  or ls_iter < max_ls:
-        if len(bracket) < 2: # Check if bracket has at least 2 elements
-            print("WOLFE PACK")
-            return success, f_best, g_best, t_best, ls_func_evals
+    while not done  and ls_iter < max_ls:
+#        if len(bracket) < 2: # Check if bracket has at least 2 elements
+#            print("WOLFE PACK")
+#            return success, f_best, g_best, t_best, ls_func_evals
 
-        # line-search bracket is so small
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
             # line-search bracket is so small
             #TODO: extract stall_wolfe hyperparameter
             #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-            if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
-                print("WOLFE PACK")
-                return success, f_best, g_best, t_best, ls_func_evals
-            		#TODO: return the wolfe pack here
-            #            break
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
+           print("WOLFE PACK")
+           return success, f_best, g_best, t_best, ls_func_evals
+       		#TODO: return the wolfe pack here
+       #            break
 
         # compute new trial value
         t = _cubic_interpolate(
@@ -760,16 +755,16 @@ class LBFGS(Optimizer):
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
 
               # Move history to direction_device
-              old_dirs_cuda = [tensor.to(self.direction_device) for tensor in old_dirs]
-              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
-              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
+#              old_dirs_cuda = [tensor.to(self.direction_device) for tensor in old_dirs]
+#              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
+#              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
 
-              d = self.direction_approximate(old_stps_cuda, old_dirs_cuda, ro_cuda, flat_grad, H_diag, direction_device=self.direction_device)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device)
 
               # Move history back to CPU
-              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
-              old_stps = [tensor.to('cpu') for tensor in old_stps_cuda]
-              ro = [tensor.to('cpu') for tensor in ro_cuda]
+#              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
+#              old_stps = [tensor.to('cpu') for tensor in old_stps_cuda]
+#              ro = [tensor.to('cpu') for tensor in ro_cuda]
 
               torch.cuda.empty_cache()
 
