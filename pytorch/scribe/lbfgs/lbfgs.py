@@ -668,8 +668,8 @@ class LBFGS(Optimizer):
           ############################################################
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
 #TODO: or if history is empty. Better if we do this by history in case we reset the approximation.
-          if prev_flat_grad is None:
-#          if n_iter == 1:
+#          if prev_flat_grad is None:
+          if n_iter == 1:
               print("RESET")
 #              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
               d = flat_grad.neg()
@@ -698,7 +698,7 @@ class LBFGS(Optimizer):
 #TODO: with normalization, armijo should be able to solve s.t. c1 <= 1 since loss reduction is 1:1 if the direction approx is 100% accurate since direction is normalized. We also can expect flat_grad.dot(d) to be 0 if approx is 100% accurate since we set number of iterations based on c2 condition convergence minima. e.g.: c2 = 0.9 we do 10 iterations for 100% reduction.
 		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
 #              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
-              if ys > 1e-8:
+              if ys > 1e-32:
                 # updating memory
 #                if len(old_dirs) <= history_size:
                 if self.direction_device == 'cuda' and torch.cuda.is_available():
@@ -758,7 +758,13 @@ class LBFGS(Optimizer):
 
               # iteration in L-BFGS loop collapsed to use just one buffer
               q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
+              old_dirs.to("cuda")
+              old_stps.to("cuda")
+              ro.to("cuda")
               d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device)
+              old_dirs.to("cpu")
+              old_stps.to("cpu")
+              ro.to("cpu")
               torch.cuda.empty_cache()
 
               del H_diag  # DEL 6: H_diag is no longer needed
