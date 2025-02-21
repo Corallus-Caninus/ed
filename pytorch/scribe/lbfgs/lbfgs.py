@@ -698,7 +698,7 @@ class LBFGS(Optimizer):
 #TODO: with normalization, armijo should be able to solve s.t. c1 <= 1 since loss reduction is 1:1 if the direction approx is 100% accurate since direction is normalized. We also can expect flat_grad.dot(d) to be 0 if approx is 100% accurate since we set number of iterations based on c2 condition convergence minima. e.g.: c2 = 0.9 we do 10 iterations for 100% reduction.
 		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
 #              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
-              if ys > 0.0:
+              if ys > 1e-8:
                 # updating memory
 #                if len(old_dirs) <= history_size:
                 if self.direction_device == 'cuda' and torch.cuda.is_available():
