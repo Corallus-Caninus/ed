@@ -48,7 +48,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-5, c2=0.9, tolerance_change=1e-16, max_ls=25, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1., capture_max_step=100
+    obj_func, x, t, d, f, g, gtd, c1=1e-5, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1., capture_max_step=100
 ):
 #TODO: this irks the mathematician in me.
     if c2 == 0:
@@ -189,7 +189,7 @@ def _strong_wolfe(
     low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
 #    while not done and ls_iter < max_ls:
     #NOTE: we wait for bracket to collapse, we dont use max linesearch here, if it takes too long turn the bracket hyperparameters up.
-    while not done :
+    while not done  or ls_iter < max_ls:
         # line-search bracket is so small
 #TODO: extract stall_wolfe hyperparameter
 #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
