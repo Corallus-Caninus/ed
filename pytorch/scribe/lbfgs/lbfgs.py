@@ -813,7 +813,7 @@ class LBFGS(Optimizer):
 #          else:
 #            avg = flat_grad.to("cuda").abs().mean()
 #            #TODO: we should also consider if the direction is vanishing, whichk apparantly can happen such that this t doesnt move more than epsilon and we never zoom phase(?)
-#            print("got avg: " + str(avg)) 
+#            print("got avg: " + str(avg))
 #            t = min(5e5, 5e-5/ avg)
 #            print("got t: " + str(t))
 #          else:
@@ -879,7 +879,7 @@ class LBFGS(Optimizer):
 #                old_dirs = []
 #                old_stps = []
 #                ro = []
-#                state["n_iter"] = 0 
+#                state["n_iter"] = 0
 #              flat_grad = flat_grad.to("cuda")
               self.t  = t
               first_param = next(self.param_groups[0]['params'].__iter__())
@@ -983,3 +983,79 @@ class LBFGS(Optimizer):
             print(f"History file {filename} not found. Starting from scratch.")
         except Exception as e:
             print(f"Error loading LBFGS history from {filename}: {e}. Starting from scratch.")
+
+    def _compute_direction(self, n_iter, flat_grad, prev_flat_grad, d, t, old_dirs, old_stps, ro, loss, state):
+        """Compute the L-BFGS search direction."""
+        if n_iter == 1:
+            print("RESET")
+            d = flat_grad.neg()
+            H_diag = 1
+            t = 1
+            gc.collect()
+        else:
+            torch.cuda.empty_cache()
+            flat_grad = flat_grad.to(self.direction_device)
+            if prev_flat_grad is not None:
+                prev_flat_grad = prev_flat_grad.to(self.direction_device)
+            y = flat_grad.sub(prev_flat_grad)
+            s = (d.mul(t)).to(self.direction_device)
+            ys = (y * s).sum()
+
+            if ys > 1e-32:
+                if self.direction_device == 'cuda' and torch.cuda.is_available():
+                    try:
+                        cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
+                        print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {self.history_size} GB")
+                        while cuda_memory_allocated >= self.history_size:
+                            cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
+                            old_dirs.pop(0)
+                            old_stps.pop(0)
+                            ro.pop(0)
+                    except Exception as e:
+                        print(f"CUDA memory check failed: {e}. Falling back to psutil.")
+                elif self.direction_device == 'cpu':
+                    try:
+                        cpu_ram_available = psutil.virtual_memory().available / (1024**3)
+                        print(f"CPU RAM available: {cpu_ram_available} GB, history_size: {self.history_size} GB")
+                        while cpu_ram_available <= self.history_size:
+                            cpu_ram_available = psutil.virtual_memory().available / (1024**3)
+                            old_dirs.pop(0)
+                            old_stps.pop(0)
+                            ro.pop(0)
+                    except Exception as e:
+                        print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
+                print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
+                torch.cuda.empty_cache()
+
+                y_sparse = y.to_sparse().to(self.direction_device)
+                old_dirs.append(y_sparse.coalesce())
+                s_sparse = s.to_sparse().to(self.direction_device)
+                old_stps.append(s_sparse.coalesce())
+                ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device))
+
+                y_squared = (y * y).sum()
+                H_diag = ys / y_squared
+                del y_squared
+
+            d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device)
+            torch.cuda.empty_cache()
+            del H_diag
+
+        if prev_flat_grad is None:
+            prev_flat_grad = flat_grad
+        else:
+            prev_flat_grad = flat_grad
+
+        total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device)
+        d.div_(total_norm)
+
+        direction_values = d.coalesce().values()
+        mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop)
+        direction_values[mask] = 0
+        print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
+        indices = d.coalesce().indices()
+        valid_indices_mask = direction_values != 0
+        valid_indices = indices[:, valid_indices_mask]
+        d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device)
+
+        return d, t, H_diag, old_dirs, old_stps, ro, prev_flat_grad, prev_loss
