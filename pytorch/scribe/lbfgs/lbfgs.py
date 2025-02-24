@@ -438,7 +438,7 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         grad = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(grad, 1.11)
+        norm = torch.linalg.vector_norm(grad, ord=1.11)
         grad = grad/norm
 #        return torch.cat(views, 0).to(self.direction_device)
         return grad.to(self.direction_device)
