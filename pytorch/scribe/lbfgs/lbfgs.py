@@ -663,8 +663,8 @@ class LBFGS(Optimizer):
           ############################################################
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
 #TODO: or if history is empty. Better if we do this by history in case we reset the approximation.
-#          if prev_flat_grad is None:
-          if n_iter == 1:
+          if prev_flat_grad is None:
+#          if n_iter == 1:
               print("RESET")
 #              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
               d = flat_grad.neg()
