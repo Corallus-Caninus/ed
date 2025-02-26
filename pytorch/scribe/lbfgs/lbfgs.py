@@ -202,7 +202,7 @@ def _strong_wolfe(
             # line-search bracket is so small
             #TODO: extract stall_wolfe hyperparameter
             #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 1:   # type: ignore[possibly-undefined]
            print("WOLFE PACK")
            return success, f_best, g_best, t_best, ls_func_evals
        		#TODO: return the wolfe pack here
@@ -302,7 +302,7 @@ def _strong_wolfe(
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
         stall_wolfe += 1
-        if stall_wolfe >= 3:
+        if stall_wolfe >= 1:
           print("STALL WOLFE")
         if ls_iter >= max_ls: # Return Wolfe pack if max ls reached in zoom phase
           print("WOLFE PACK MAX LS")
