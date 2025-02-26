@@ -438,7 +438,7 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         grad = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(grad, ord=1.11)
+        norm = torch.linalg.vector_norm(grad, ord=1)
         grad = grad/norm
 #        return torch.cat(views, 0).to(self.direction_device)
         return grad.to(self.direction_device)
@@ -461,7 +461,7 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         views = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(views, 1.333)
+        norm = torch.linalg.vector_norm(views, 1.25)
 #        norm = views.max()
         views.div_(norm)
 #TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
@@ -782,7 +782,7 @@ class LBFGS(Optimizer):
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
 #          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
-          total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.11).to(self.direction_device) # Move total_norm to direction_device
+          total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.2).to(self.direction_device) # Move total_norm to direction_device
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d = d.div_(total_norm)
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
