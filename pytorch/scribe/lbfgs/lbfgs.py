@@ -869,6 +869,19 @@ class LBFGS(Optimizer):
                 t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
 #TODO: apply the norm used for direction to the grad here instead of the direction seeking gradient
                 d = flat_grad.neg().to(self.direction_device)
+
+                total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.2).to(self.direction_device) # Move total_norm to direction_device
+                d = d.div_(total_norm)
+                direction_values = d.coalesce().values()
+                mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
+                direction_values[mask] = 0
+                print("direction elements post-reset: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
+                indices = d.coalesce().indices()
+                valid_indices_mask = direction_values != 0
+                valid_indices = indices[:, valid_indices_mask]
+                d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device)
+
+
 #                flat_grad = None
                 print("Linesearch failure, resetting..")
                 loss, flat_grad = obj_func(x_init, t, d)
