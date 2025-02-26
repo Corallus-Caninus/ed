@@ -868,7 +868,7 @@ class LBFGS(Optimizer):
                 first_param = next(self.param_groups[0]['params'].__iter__())
                 t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
 #TODO: apply the norm used for direction to the grad here instead of the direction seeking gradient
-                d = flat_grad.neg().to(self.direction_device)
+                d = prev_flat_grad.neg().to(self.direction_device)
 
                 total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.2).to(self.direction_device) # Move total_norm to direction_device
                 d = d.div_(total_norm)
