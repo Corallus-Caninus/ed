@@ -889,8 +889,9 @@ class LBFGS(Optimizer):
 #                flat_grad = None
                 print("Linesearch failure, resetting..")
 #                flat_grad = None
-                flat_grad = self._gather_norm_flat_grad(1, True)
+#                flat_grad = self._gather_norm_flat_grad(1, True)
 #                loss, flat_grad = obj_func(x_init, t, d)
+                loss, flat_grad = obj_func(x_init, t, d)
 
 #TODO: I dont like having to do this but we want l2 for the direction selection.
 #TODO: dont reset the Hessian if we are using prev step size since one iteration may be insufficient to bracket down
@@ -904,14 +905,15 @@ class LBFGS(Optimizer):
 #                ro = []
 #                state["n_iter"] = 0
 #              flat_grad = flat_grad.to("cuda")
-              else:
-                self.t  = t
-                first_param = next(self.param_groups[0]['params'].__iter__())
-                t = torch.tensor(t).to(first_param.device)
-                d = d.to(first_param.device)
-                self._add_grad(t, d)
-                loss_device = d.device
-                print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
+#              else:
+              self.t  = t
+              first_param = next(self.param_groups[0]['params'].__iter__())
+              t = torch.tensor(t).to(first_param.device)
+              d = d.to(first_param.device)
+              self._add_grad(t, d)
+              loss_device = d.device
+              print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
+
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
 #              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
               opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
