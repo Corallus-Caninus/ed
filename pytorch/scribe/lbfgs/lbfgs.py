@@ -912,6 +912,7 @@ class LBFGS(Optimizer):
 #                state["n_iter"] = 0
 #              flat_grad = flat_grad.to("cuda")
               if  ls_failed: #TODO: we chase misprinted lines
+                flat_grad = prev_flat_grad
                 prev_flat_grad = None
               else:
                 self.t  = t
