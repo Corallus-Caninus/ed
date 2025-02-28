@@ -891,7 +891,7 @@ class LBFGS(Optimizer):
 
 
 #                flat_grad = None
-                print("Linesearch failure, resetting..")
+                print("\033[91mLinesearch failure, resetting..\033[0m")
                 ls_failed = True
               else:
                 ls_failed = False
