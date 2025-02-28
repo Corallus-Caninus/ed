@@ -651,6 +651,7 @@ class LBFGS(Optimizer):
       d = flat_grad.neg().to(self.direction_device) # Initialize d on direction_device
       first_param = next(self.param_groups[0]['params'].__iter__())
       t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)
+      ls_failed = False
       # optimize for a max of max_iter iterations
       while n_iter < max_iter:
           # keep track of nb of iterations
@@ -663,8 +664,9 @@ class LBFGS(Optimizer):
           ############################################################
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
 #TODO: or if history is empty. Better if we do this by history in case we reset the approximation.
-          if prev_flat_grad is None:
+          if prev_flat_grad is None :
 #          if n_iter == 1:
+              restart = False
               print("RESET")
 #              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
               d = flat_grad.neg()
@@ -865,10 +867,13 @@ class LBFGS(Optimizer):
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               if not success: #TODO: we chase misprinted lines
-                first_param = next(self.param_groups[0]['params'].__iter__())
-                t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
-#TODO: apply the norm used for direction to the grad here instead of the direction seeking gradient
-                d = prev_flat_grad.neg().to(self.direction_device)
+                if  ls_failed: #TODO: we chase misprinted lines
+                  print("unit-iteration..")
+                  first_param = next(self.param_groups[0]['params'].__iter__())
+                  t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
+  #TODO: apply the norm used for direction to the grad here instead of the direction seeking gradient
+                  d = prev_flat_grad.neg().to(self.direction_device)
+                  loss, flat_grad = obj_func(x_init, t, d)
 
 #                total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.2).to(self.direction_device) # Move total_norm to direction_device
 #                d = d.div_(total_norm)
@@ -883,15 +888,16 @@ class LBFGS(Optimizer):
 #                old_dirs.clear()
 #                old_stps.clear()
 #                ro.clear()
-                prev_flat_grad = None
 
 
 #                flat_grad = None
                 print("Linesearch failure, resetting..")
+                ls_failed = True
+              else:
+                ls_failed = False
 #                flat_grad = None
 #                flat_grad = self._gather_norm_flat_grad(1, True)
 #                loss, flat_grad = obj_func(x_init, t, d)
-                loss, flat_grad = obj_func(x_init, t, d)
 
 #TODO: I dont like having to do this but we want l2 for the direction selection.
 #TODO: dont reset the Hessian if we are using prev step size since one iteration may be insufficient to bracket down
@@ -905,14 +911,16 @@ class LBFGS(Optimizer):
 #                ro = []
 #                state["n_iter"] = 0
 #              flat_grad = flat_grad.to("cuda")
-#              else:
-              self.t  = t
-              first_param = next(self.param_groups[0]['params'].__iter__())
-              t = torch.tensor(t).to(first_param.device)
-              d = d.to(first_param.device)
-              self._add_grad(t, d)
-              loss_device = d.device
-              print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
+              if  ls_failed: #TODO: we chase misprinted lines
+                prev_flat_grad = None
+              else:
+                self.t  = t
+                first_param = next(self.param_groups[0]['params'].__iter__())
+                t = torch.tensor(t).to(first_param.device)
+                d = d.to(first_param.device)
+                self._add_grad(t, d)
+                loss_device = d.device
+                print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
 
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
 #              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
