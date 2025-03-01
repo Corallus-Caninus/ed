@@ -912,7 +912,7 @@ class LBFGS(Optimizer):
 #                  valid_indices = indices[:, valid_indices_mask] # Indices are not relevant after topk
 
                   # d is already sparse from earlier conversion
-                  d = torch.sparse_coo_tensor(topk_result.indices, topk_values, d.size()).coalesce() # No need to convert to sparse again, d is already sparse
+                  d = torch.sparse_coo_tensor(topk_result.indices.unsqueeze(0), topk_values, d.size()).coalesce() # No need to convert to sparse again, d is already sparse
                   self._add_grad(t, d)
 #TODO: we should maybe put the needle in the hessian so that we dont have any discontinuity in the gradients
                   loss_device = d.device
