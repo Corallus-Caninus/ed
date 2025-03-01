@@ -45,6 +45,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
         return torch.tensor((xmin_bound + xmax_bound) / 2.0)
 
 
+#TODO: if gtd converges, return failure
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
@@ -540,6 +541,7 @@ class LBFGS(Optimizer):
     @torch.jit.script
     def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str) -> Tensor:
         num_old = len(old_dirs)
+        hit_miss = str("")
         q = flat_grad.neg()
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
         direction_similarity = torch.empty_like(q, dtype=q.dtype, device=direction_device) # Preallocate direction_similarity tensor
@@ -548,9 +550,13 @@ class LBFGS(Optimizer):
             direction_similarity.copy_(old_dirs[i] * q) # Use inplace copy to store intermediate result
             al[i] = direction_similarity.sum().item() * ro[i].item()
 #TODO: if direction similarity is too low we should probably ignore. I think some epsilon components are adding up and skewing the direction away from the gradient too much.
+#TODO: direction similarity drifts for very large hessian approx sizes. This is correct but maybe we should consider the original gradient in the similarity or scale up the direction_alignment by the number of entries. This drift is part of the algorithm though and gives it a lot of its important properties.
             if al[i] >= 1e-8:
+              hit_miss = hit_miss + str("| ")
               q.add_(old_dirs[i], alpha=-al[i])
               q = q.coalesce()
+            else:
+              hit_miss = hit_miss + str("_ ")
 
         d = q.mul(H_diag).to_sparse().coalesce()
         be_i = torch.empty_like(d, dtype=q.dtype, device=direction_device) # Preallocate be_i for second loop
@@ -560,6 +566,7 @@ class LBFGS(Optimizer):
               be_i.copy_(old_dirs[i] * d) # Use inplace copy and preallocated tensor
               d.add_(old_stps[i], alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
               d = d.coalesce()
+        print(hit_miss)
         return d
 
     @torch.no_grad()
@@ -698,7 +705,7 @@ class LBFGS(Optimizer):
 #TODO: with normalization, armijo should be able to solve s.t. c1 <= 1 since loss reduction is 1:1 if the direction approx is 100% accurate since direction is normalized. We also can expect flat_grad.dot(d) to be 0 if approx is 100% accurate since we set number of iterations based on c2 condition convergence minima. e.g.: c2 = 0.9 we do 10 iterations for 100% reduction.
 		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
 #              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
-              if ys > 1e-32:
+              if ys > 1e-8:
                 # updating memory
 #                if len(old_dirs) <= history_size:
                 if self.direction_device == 'cuda' and torch.cuda.is_available():
@@ -869,9 +876,13 @@ class LBFGS(Optimizer):
                       obj_func, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
-              if not success: #TODO: we chase misprinted lines
+              Needle = False
+#TODO: consider on grad convergence fail linesearch to speed up near convergence points
+#TODO: using t here for convergence test is wrong. Check the new gtd or abs.max of flat_grads. We can get away with this for now due to normalization.
+              if not success or t < 1: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   print("saddle-search subroutine..")
+                  Needle = True
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
 #TODO: this may OOM, analyze worse-case allocation. We can perform this in gather routine if for some reason that creates less tensors
@@ -884,13 +895,15 @@ class LBFGS(Optimizer):
                   d = d.to(first_param.device)
 
 #TODO: this should always be 1 or possibly less than 1. We cannot scale up the norm. Also consider l1 on raw grads
-                  total_norm = torch.linalg.vector_norm(d, ord=0.5).to(self.direction_device) # Move total_norm to direction_device
+                  total_norm = torch.linalg.vector_norm(d, ord=0.3330).to(self.direction_device) # Move total_norm to direction_device
                   d = d.div_(total_norm)
 #                  direction_values = d.coalesce().values()
                   direction_values = d
 #TODO: we probably need a third (and LAST) hyperparam tuple here for clop and norm in saddle-search e.g. saddle_clop saddle_norm
-                  mask = torch.logical_and(direction_values > -1e-9, direction_values < 1e-9) #TODO: extract to sub_variance hyperparameter
-                  direction_values[mask] = 0
+#                  mask = torch.logical_and(direction_values > -1e-16, direction_values < 1e-16) #TODO: extract to sub_variance hyperparameter
+#                  mask = torch.logical_and(direction_values == 0)
+#                  direction_values[mask] = 0
+                  d = torch.topk(d, k=250000)
                   print("saddle-needle elements post-reset: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
 #                  indices = d.coalesce().indices()
 #                  valid_indices_mask = direction_values != 0
@@ -899,6 +912,7 @@ class LBFGS(Optimizer):
 
                   d = direction_values.to_sparse()
                   self._add_grad(t, d)
+#TODO: we should maybe put the needle in the hessian so that we dont have any discontinuity in the gradients
                   loss_device = d.device
                   print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
 
@@ -911,9 +925,6 @@ class LBFGS(Optimizer):
 #                ro.clear()
               else:
                 ls_failed = False
-#                flat_grad = None
-#                flat_grad = self._gather_norm_flat_grad(1, True)
-#                loss, flat_grad = obj_func(x_init, t, d)
 
 #TODO: I dont like having to do this but we want l2 for the direction selection.
 #TODO: dont reset the Hessian if we are using prev step size since one iteration may be insufficient to bracket down
@@ -927,7 +938,7 @@ class LBFGS(Optimizer):
 #                ro = []
 #                state["n_iter"] = 0
 #              flat_grad = flat_grad.to("cuda")
-              if  ls_failed: #TODO: we chase misprinted lines
+              if  ls_failed and Needle == False: #TODO: we chase misprinted lines
                 flat_grad = prev_flat_grad
                 prev_flat_grad = None
               else:
