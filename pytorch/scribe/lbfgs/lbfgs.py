@@ -903,14 +903,14 @@ class LBFGS(Optimizer):
 #                  mask = torch.logical_and(direction_values > -1e-16, direction_values < 1e-16) #TODO: extract to sub_variance hyperparameter
 #                  mask = torch.logical_and(direction_values == 0)
 #                  direction_values[mask] = 0
-                  d = torch.topk(d, k=250000)
-                  print("saddle-needle elements post-reset: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
-#                  indices = d.coalesce().indices()
-#                  valid_indices_mask = direction_values != 0
-#                  valid_indices = indices[:, valid_indices_mask]
-#                  d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device)
+                  topk_result = torch.topk(d, k=250000)
+                  topk_values = topk_result.values
+                  print("saddle-needle elements post-reset: " + str((topk_values != 0).sum()) + " total: " + str(topk_values.numel()), end=' ')
+#                  indices = d.coalesce().indices() # Indices are not relevant after topk since it reorders the tensor
+#                  valid_indices_mask = topk_values != 0 # Use topk_values for mask
+#                  valid_indices = indices[:, valid_indices_mask] # Indices are not relevant after topk
 
-                  d = direction_values.to_sparse()
+                  d = topk_values.to_sparse() # Use topk_values to create sparse tensor
                   self._add_grad(t, d)
 #TODO: we should maybe put the needle in the hessian so that we dont have any discontinuity in the gradients
                   loss_device = d.device
