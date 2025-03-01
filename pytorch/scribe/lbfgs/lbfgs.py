@@ -202,7 +202,7 @@ def _strong_wolfe(
             # line-search bracket is so small
             #TODO: extract stall_wolfe hyperparameter
             #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 1:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 5:   # type: ignore[possibly-undefined]
            print("WOLFE PACK")
            return success, f_best, g_best, t_best, ls_func_evals
        		#TODO: return the wolfe pack here
@@ -302,7 +302,7 @@ def _strong_wolfe(
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
         stall_wolfe += 1
-        if stall_wolfe >= 1:
+        if stall_wolfe >= 5:
           print("STALL WOLFE")
         if ls_iter >= max_ls: # Return Wolfe pack if max ls reached in zoom phase
           print("WOLFE PACK MAX LS")
@@ -547,16 +547,19 @@ class LBFGS(Optimizer):
         for i in range(num_old - 1, -1, -1):
             direction_similarity.copy_(old_dirs[i] * q) # Use inplace copy to store intermediate result
             al[i] = direction_similarity.sum().item() * ro[i].item()
-            q.add_(old_dirs[i], alpha=-al[i])
-            q = q.coalesce()
+#TODO: if direction similarity is too low we should probably ignore. I think some epsilon components are adding up and skewing the direction away from the gradient too much.
+            if al[i] >= 1e-8:
+              q.add_(old_dirs[i], alpha=-al[i])
+              q = q.coalesce()
 
         d = q.mul(H_diag).to_sparse().coalesce()
         be_i = torch.empty_like(d, dtype=q.dtype, device=direction_device) # Preallocate be_i for second loop
 
         for i in range(num_old):
-            be_i.copy_(old_dirs[i] * d) # Use inplace copy and preallocated tensor
-            d.add_(old_stps[i], alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
-            d = d.coalesce()
+            if al[i] >= 1e-8:
+              be_i.copy_(old_dirs[i] * d) # Use inplace copy and preallocated tensor
+              d.add_(old_stps[i], alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
+              d = d.coalesce()
         return d
 
     @torch.no_grad()
@@ -784,7 +787,7 @@ class LBFGS(Optimizer):
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
 #          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
-          total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.2).to(self.direction_device) # Move total_norm to direction_device
+          total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.).to(self.direction_device) # Move total_norm to direction_device
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d = d.div_(total_norm)
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
@@ -868,31 +871,44 @@ class LBFGS(Optimizer):
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
-                  print("unit-iteration..")
+                  print("saddle-search subroutine..")
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
-  #TODO: apply the norm used for direction to the grad here instead of the direction seeking gradient
-                  d = prev_flat_grad.neg().to(self.direction_device)
+#TODO: this may OOM, analyze worse-case allocation. We can perform this in gather routine if for some reason that creates less tensors
+#                  d = prev_flat_grad.neg().to(self.direction_device)
+                  d = self._gather_flat_grad().neg().to(self.direction_device)
                   loss, flat_grad = obj_func(x_init, t, d)
+                  self.t  = t
+                  first_param = next(self.param_groups[0]['params'].__iter__())
+                  t = torch.tensor(t).to(first_param.device)
+                  d = d.to(first_param.device)
 
-#                total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.2).to(self.direction_device) # Move total_norm to direction_device
-#                d = d.div_(total_norm)
-#                direction_values = d.coalesce().values()
-#                mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
-#                direction_values[mask] = 0
-#                print("direction elements post-reset: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
-#                indices = d.coalesce().indices()
-#                valid_indices_mask = direction_values != 0
-#                valid_indices = indices[:, valid_indices_mask]
-#                d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device)
-#                old_dirs.clear()
-#                old_stps.clear()
-#                ro.clear()
+#TODO: this should always be 1 or possibly less than 1. We cannot scale up the norm. Also consider l1 on raw grads
+                  total_norm = torch.linalg.vector_norm(d, ord=0.5).to(self.direction_device) # Move total_norm to direction_device
+                  d = d.div_(total_norm)
+#                  direction_values = d.coalesce().values()
+                  direction_values = d
+#TODO: we probably need a third (and LAST) hyperparam tuple here for clop and norm in saddle-search e.g. saddle_clop saddle_norm
+                  mask = torch.logical_and(direction_values > -1e-9, direction_values < 1e-9) #TODO: extract to sub_variance hyperparameter
+                  direction_values[mask] = 0
+                  print("saddle-needle elements post-reset: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
+#                  indices = d.coalesce().indices()
+#                  valid_indices_mask = direction_values != 0
+#                  valid_indices = indices[:, valid_indices_mask]
+#                  d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device)
+
+                  d = direction_values.to_sparse()
+                  self._add_grad(t, d)
+                  loss_device = d.device
+                  print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
 
 
 #                flat_grad = None
                 print("\033[91mLinesearch failure, resetting..\033[0m")
                 ls_failed = True
+#                old_dirs.clear()
+#                old_stps.clear()
+#                ro.clear()
               else:
                 ls_failed = False
 #                flat_grad = None
