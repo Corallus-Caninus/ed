@@ -551,7 +551,7 @@ class LBFGS(Optimizer):
             al[i] = direction_similarity.sum().item() * ro[i].item()
 #TODO: if direction similarity is too low we should probably ignore. I think some epsilon components are adding up and skewing the direction away from the gradient too much.
 #TODO: direction similarity drifts for very large hessian approx sizes. This is correct but maybe we should consider the original gradient in the similarity or scale up the direction_alignment by the number of entries. This drift is part of the algorithm though and gives it a lot of its important properties.
-            if al[i] >= 1e-8:
+            if al[i] >= num_old*1e-8:
               hit_miss = hit_miss + str("| ")
               q.add_(old_dirs[i], alpha=-al[i])
               q = q.coalesce()
@@ -562,7 +562,7 @@ class LBFGS(Optimizer):
         be_i = torch.empty_like(d, dtype=q.dtype, device=direction_device) # Preallocate be_i for second loop
 
         for i in range(num_old):
-            if al[i] >= 1e-8:
+            if al[i] >= num_old*1e-8:
               be_i.copy_(old_dirs[i] * d) # Use inplace copy and preallocated tensor
               d.add_(old_stps[i], alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
               d = d.coalesce()
@@ -896,7 +896,7 @@ class LBFGS(Optimizer):
                   d = d.to(first_param.device)
 
 #TODO: this should always be 1 or possibly less than 1. We cannot scale up the norm. Also consider l1 on raw grads
-                  total_norm = torch.linalg.vector_norm(d, ord=0.3330).to(self.direction_device) # Move total_norm to direction_device
+                  total_norm = torch.linalg.vector_norm(d, ord=1.).to(self.direction_device) # Move total_norm to direction_device
                   d = d.div_(total_norm)
 #                  direction_values = d.coalesce().values()
                   direction_values = d
@@ -912,7 +912,7 @@ class LBFGS(Optimizer):
 #                  valid_indices = indices[:, valid_indices_mask] # Indices are not relevant after topk
 
                   # d is already sparse from earlier conversion
-                  d = torch.sparse_coo_tensor(topk_result.indices.unsqueeze(0), topk_values, d.size()).coalesce() # No need to convert to sparse again, d is already sparse
+                  d = torch.sparse_coo_tensor(topk_result.indices, topk_values, d.size()).coalesce() # No need to convert to sparse again, d is already sparse
                   self._add_grad(t, d)
 #TODO: we should maybe put the needle in the hessian so that we dont have any discontinuity in the gradients
                   loss_device = d.device
