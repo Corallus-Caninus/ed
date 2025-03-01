@@ -811,6 +811,7 @@ class LBFGS(Optimizer):
           d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) # Move d to direction_device
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
+          d = d.to_sparse() # Convert to sparse here, before topk
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
           ############################################################
@@ -910,7 +911,8 @@ class LBFGS(Optimizer):
 #                  valid_indices_mask = topk_values != 0 # Use topk_values for mask
 #                  valid_indices = indices[:, valid_indices_mask] # Indices are not relevant after topk
 
-                  d = topk_values.to_sparse() # Use topk_values to create sparse tensor
+                  # d is already sparse from earlier conversion
+                  # d = topk_values.to_sparse() # No need to convert to sparse again, d is already sparse
                   self._add_grad(t, d)
 #TODO: we should maybe put the needle in the hessian so that we dont have any discontinuity in the gradients
                   loss_device = d.device
