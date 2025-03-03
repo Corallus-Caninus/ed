@@ -550,7 +550,7 @@ class LBFGS(Optimizer):
 
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i] * q).sum().item() # Use inplace copy to store intermediate result
-            aligned = direction_similarity >= 1e-4 or direction_similarity <= -1e-4
+            aligned = direction_similarity >= 1e-4 
             direction_alignment_mask[i] = aligned
 #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
             if direction_alignment_mask[i]:
