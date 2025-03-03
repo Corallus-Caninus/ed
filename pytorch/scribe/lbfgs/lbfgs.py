@@ -550,8 +550,7 @@ class LBFGS(Optimizer):
 
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i] * q).sum().item() # Use inplace copy to store intermediate result
-#            direction_similarity.copy_((old_dirs[i] * q).sum().item()) # Use inplace copy to store intermediate result
-            aligned = direction_similarity >= 1e-5
+            aligned = direction_similarity >= 1e-4 or direction_similarity <= -1e-4
             direction_alignment_mask[i] = aligned
 #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
             if direction_alignment_mask[i]:
@@ -721,7 +720,7 @@ class LBFGS(Optimizer):
 #TODO: with normalization, armijo should be able to solve s.t. c1 <= 1 since loss reduction is 1:1 if the direction approx is 100% accurate since direction is normalized. We also can expect flat_grad.dot(d) to be 0 if approx is 100% accurate since we set number of iterations based on c2 condition convergence minima. e.g.: c2 = 0.9 we do 10 iterations for 100% reduction.
 		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
 #              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
-              if ys > 1e-8:
+              if ys > 1e-16:
                 # updating memory
 #                if len(old_dirs) <= history_size:
                 if self.direction_device == 'cuda' and torch.cuda.is_available():
@@ -893,13 +892,13 @@ class LBFGS(Optimizer):
                       obj_func, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
-              Needle = False
+#              Needle = False
 #TODO: consider on grad convergence fail linesearch to speed up near convergence points
 #TODO: using t here for convergence test is wrong. Check the new gtd or abs.max/mean of flat_grads. We can get away with this for now due to normalization.
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   print("saddle-search subroutine..")
-                  Needle = True
+#                  Needle = True
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
 #TODO: this may OOM, analyze worse-case allocation. We can perform this in gather routine if for some reason that creates less tensors
@@ -959,7 +958,7 @@ class LBFGS(Optimizer):
 #                ro = []
 #                state["n_iter"] = 0
 #              flat_grad = flat_grad.to("cuda")
-              if  ls_failed and Needle == False: #TODO: we chase misprinted lines
+              if  ls_failed : #and Needle == False: 
                 flat_grad = prev_flat_grad
                 prev_flat_grad = None
               else:
