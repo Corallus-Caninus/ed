@@ -203,7 +203,7 @@ def _strong_wolfe(
             # line-search bracket is so small
             #TODO: extract stall_wolfe hyperparameter
             #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 5:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
            print("WOLFE PACK")
            return success, f_best, g_best, t_best, ls_func_evals
        		#TODO: return the wolfe pack here
@@ -303,7 +303,7 @@ def _strong_wolfe(
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
         stall_wolfe += 1
-        if stall_wolfe >= 5:
+        if stall_wolfe >= 3:
           print("STALL WOLFE")
         if ls_iter >= max_ls: # Return Wolfe pack if max ls reached in zoom phase
           print("WOLFE PACK MAX LS")
@@ -462,7 +462,7 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         views = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(views, 1.25)
+        norm = torch.linalg.vector_norm(views, 2.)
 #        norm = views.max()
         views.div_(norm)
 #TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
@@ -544,14 +544,19 @@ class LBFGS(Optimizer):
         hit_miss = str("")
         q = flat_grad.neg()
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
-        direction_similarity = torch.empty_like(q, dtype=q.dtype, device=direction_device) # Preallocate direction_similarity tensor
+#TODO: dont type like this, use the precision of the architecture. If we do use an accumulation higher precision type standardize throughout the algorithm and expose as a singular hyperparameter
+#        direction_similarity = torch.empty_like(q, dtype=torch.float32, device=direction_device) # Preallocate direction_similarity tensor
+        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
         for i in range(num_old - 1, -1, -1):
-            direction_similarity.copy_(old_dirs[i] * q) # Use inplace copy to store intermediate result
-            al[i] = direction_similarity.sum().item() * ro[i].item()
-#TODO: if direction similarity is too low we should probably ignore. I think some epsilon components are adding up and skewing the direction away from the gradient too much.
-#TODO: direction similarity drifts for very large hessian approx sizes. This is correct but maybe we should consider the original gradient in the similarity or scale up the direction_alignment by the number of entries. This drift is part of the algorithm though and gives it a lot of its important properties.
-            if al[i] >= num_old*1e-8:
+            direction_similarity = (old_dirs[i] * q).sum().item() # Use inplace copy to store intermediate result
+#            direction_similarity.copy_((old_dirs[i] * q).sum().item()) # Use inplace copy to store intermediate result
+            aligned = direction_similarity >= 10
+
+            direction_alignment_mask[i] = aligned
+            al[i] = direction_similarity * ro[i].item()
+#TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
+            if direction_alignment_mask[i]:
               hit_miss = hit_miss + str("| ")
               q.add_(old_dirs[i], alpha=-al[i])
               q = q.coalesce()
@@ -562,7 +567,7 @@ class LBFGS(Optimizer):
         be_i = torch.empty_like(d, dtype=q.dtype, device=direction_device) # Preallocate be_i for second loop
 
         for i in range(num_old):
-            if al[i] >= num_old*1e-8:
+            if direction_alignment_mask[i]:
               be_i.copy_(old_dirs[i] * d) # Use inplace copy and preallocated tensor
               d.add_(old_stps[i], alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
               d = d.coalesce()
@@ -879,8 +884,8 @@ class LBFGS(Optimizer):
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               Needle = False
 #TODO: consider on grad convergence fail linesearch to speed up near convergence points
-#TODO: using t here for convergence test is wrong. Check the new gtd or abs.max of flat_grads. We can get away with this for now due to normalization.
-              if not success or t < 1: #TODO: we chase misprinted lines
+#TODO: using t here for convergence test is wrong. Check the new gtd or abs.max/mean of flat_grads. We can get away with this for now due to normalization.
+              if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   print("saddle-search subroutine..")
                   Needle = True
@@ -896,7 +901,7 @@ class LBFGS(Optimizer):
                   d = d.to(first_param.device)
 
 #TODO: this should always be 1 or possibly less than 1. We cannot scale up the norm. Also consider l1 on raw grads
-                  total_norm = torch.linalg.vector_norm(d, ord=1.).to(self.direction_device) # Move total_norm to direction_device
+                  total_norm = torch.linalg.vector_norm(d, ord=0.75).to(self.direction_device) # Move total_norm to direction_device
                   d = d.div_(total_norm)
 #                  direction_values = d.coalesce().values()
                   direction_values = d
