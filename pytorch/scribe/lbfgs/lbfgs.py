@@ -551,25 +551,36 @@ class LBFGS(Optimizer):
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i] * q).sum().item() # Use inplace copy to store intermediate result
 #            direction_similarity.copy_((old_dirs[i] * q).sum().item()) # Use inplace copy to store intermediate result
-            aligned = direction_similarity >= 10
-
+            aligned = direction_similarity >= 1e-5
             direction_alignment_mask[i] = aligned
-            al[i] = direction_similarity * ro[i].item()
 #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
             if direction_alignment_mask[i]:
+              al[i] = direction_similarity * ro[i].item()
               hit_miss = hit_miss + str("| ")
               q.add_(old_dirs[i], alpha=-al[i])
+#TODO: TEST
+#TODO: this may not work since we store d*t in the history so each iteration sees an unscaled/disproportionate amount of the history. The dot product may fix this though
+              total_norm = torch.linalg.vector_norm(q.coalesce().values(), ord=float("inf"))
+              q = q/total_norm
               q = q.coalesce()
+#TODO: TEST
+
             else:
               hit_miss = hit_miss + str("_ ")
 
         d = q.mul(H_diag).to_sparse().coalesce()
         be_i = torch.empty_like(d, dtype=q.dtype, device=direction_device) # Preallocate be_i for second loop
 
+#TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
             if direction_alignment_mask[i]:
               be_i.copy_(old_dirs[i] * d) # Use inplace copy and preallocated tensor
               d.add_(old_stps[i], alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
+#TODO: TEST
+              total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=float("inf"))
+              d = d/total_norm
+
+#TODO: TEST
               d = d.coalesce()
         print(hit_miss)
         return d
