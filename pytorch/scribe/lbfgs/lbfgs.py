@@ -550,7 +550,8 @@ class LBFGS(Optimizer):
 
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i] * q).sum().item() # Use inplace copy to store intermediate result
-            aligned = direction_similarity >= 0.5  or direction_similarity <= -0.5
+#            direction_og_similarity = (old_dirs[i] * flat_grad.neg()).sum().item() # Use inplace copy to store intermediate result
+            aligned = direction_similarity >= 1.  or direction_similarity <= -1.
             direction_alignment_mask[i] = aligned
 #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
             if direction_alignment_mask[i]:
@@ -720,7 +721,8 @@ class LBFGS(Optimizer):
 #TODO: with normalization, armijo should be able to solve s.t. c1 <= 1 since loss reduction is 1:1 if the direction approx is 100% accurate since direction is normalized. We also can expect flat_grad.dot(d) to be 0 if approx is 100% accurate since we set number of iterations based on c2 condition convergence minima. e.g.: c2 = 0.9 we do 10 iterations for 100% reduction.
 		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
 #              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
-              if ys > 1e-16:
+#              if ys > 1e-16:
+              if  ys >= 1e-8 or ys <= -1e-8:
                 # updating memory
 #                if len(old_dirs) <= history_size:
                 if self.direction_device == 'cuda' and torch.cuda.is_available():
@@ -809,7 +811,7 @@ class LBFGS(Optimizer):
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
 #          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
-          total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=1.).to(self.direction_device) # Move total_norm to direction_device
+          total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=2.).to(self.direction_device) # Move total_norm to direction_device
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d = d.div_(total_norm)
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
