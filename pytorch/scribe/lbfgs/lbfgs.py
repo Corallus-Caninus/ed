@@ -1059,21 +1059,21 @@ class LBFGS(Optimizer):
         """Compute the L-BFGS search direction."""
         if n_iter == 1:
             print("RESET")
-            d = flat_grad.neg()
-            H_diag = 1
+            d = flat_grad.neg().to("cuda") # Move to calculation device
+            H_diag = torch.tensor(1.0).to("cuda") # Move to calculation device
             t = 1
             gc.collect()
         else:
             torch.cuda.empty_cache()
-            flat_grad = flat_grad.to(self.direction_device)
+            flat_grad = flat_grad.to("cuda") # Move flat_grad to calculation device
             if prev_flat_grad is not None:
-                prev_flat_grad = prev_flat_grad.to(self.direction_device)
+                prev_flat_grad = prev_flat_grad.to("cuda") # Move prev_flat_grad to calculation device
             y = flat_grad.sub(prev_flat_grad)
-            s = (d.mul(t)).to(self.direction_device)
+            s = (d.mul(t)).to("cuda") # Move s to calculation device
             ys = (y * s).sum()
 
             if ys > 1e-32:
-                if self.direction_device == 'cuda' and torch.cuda.is_available():
+                if torch.device("cuda").type == 'cuda' and torch.cuda.is_available(): # Use torch.device("cuda").type
                     try:
                         cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
                         print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {self.history_size} GB")
@@ -1084,7 +1084,7 @@ class LBFGS(Optimizer):
                             ro.pop(0)
                     except Exception as e:
                         print(f"CUDA memory check failed: {e}. Falling back to psutil.")
-                elif self.direction_device == 'cpu':
+                elif torch.device("cuda").type == 'cpu': # Use torch.device("cuda").type
                     try:
                         cpu_ram_available = psutil.virtual_memory().available / (1024**3)
                         print(f"CPU RAM available: {cpu_ram_available} GB, history_size: {self.history_size} GB")
@@ -1098,17 +1098,28 @@ class LBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache()
 
-                y_sparse = y.to_sparse().to(self.direction_device)
-                old_dirs.append(y_sparse.coalesce())
-                s_sparse = s.to_sparse().to(self.direction_device)
-                old_stps.append(s_sparse.coalesce())
-                ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device))
+                y_sparse = y.to_sparse().to(self.direction_device) # Store on direction_device (CPU if direction_device='cpu')
+                old_dirs.append(y_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
+                s_sparse = s.to_sparse().to(self.direction_device) # Store on direction_device (CPU if direction_device='cpu')
+                old_stps.append(s_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
+                ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # Store on direction_device (CPU if direction_device='cpu')
 
                 y_squared = (y * y).sum()
                 H_diag = ys / y_squared
                 del y_squared
+            else:
+                H_diag = torch.tensor(1.0).to("cuda") # Default H_diag if ys is too small
 
-            d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device)
+
+            # Prepare history tensors for direction_approximate calculation on calculation device
+            old_dirs_calc_device = [h.to("cuda") for h in old_dirs]
+            old_stps_calc_device = [s.to("cuda") for s in old_stps]
+            ro_calc_device = [r.to("cuda") for r in ro]
+            flat_grad_calc_device = flat_grad.to("cuda")
+            H_diag_calc_device = H_diag.to("cuda")
+
+
+            d = self.direction_approximate(old_stps_calc_device, old_dirs_calc_device, ro_calc_device, flat_grad_calc_device, H_diag_calc_device, direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
             torch.cuda.empty_cache()
             del H_diag
 
@@ -1117,7 +1128,7 @@ class LBFGS(Optimizer):
         else:
             prev_flat_grad = flat_grad
 
-        total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device)
+        total_norm = torch.abs(d.coalesce().values()).sum().to("cuda") # Norm on calculation device
         d.div_(total_norm)
 
         direction_values = d.coalesce().values()
@@ -1127,6 +1138,6 @@ class LBFGS(Optimizer):
         indices = d.coalesce().indices()
         valid_indices_mask = direction_values != 0
         valid_indices = indices[:, valid_indices_mask]
-        d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device)
+        d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(first_param.device) # Move d back to parameter device
 
         return d, t, H_diag, old_dirs, old_stps, ro, prev_flat_grad, prev_loss
