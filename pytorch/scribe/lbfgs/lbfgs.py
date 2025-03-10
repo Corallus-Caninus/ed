@@ -442,7 +442,7 @@ class LBFGS(Optimizer):
         norm = torch.linalg.vector_norm(grad, ord=1)
         grad = grad/norm
 #        return torch.cat(views, 0).to(self.direction_device)
-        return grad.to(self.direction_device)
+        return grad
 #TODO: clip out NaN based on dtype max value
 #        return grad_raw #.to(self.direction_device)
 
@@ -531,10 +531,10 @@ class LBFGS(Optimizer):
         q = flat_grad.neg()
         q[torch.logical_and(q > -gradient_clop,q < gradient_clop)] = 0
         q = q.to_sparse()
-        al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
+        al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
 #TODO: dont type like this, use the precision of the architecture. If we do use an accumulation higher precision type standardize throughout the algorithm and expose as a singular hyperparameter
 #        direction_similarity = torch.empty_like(q, dtype=torch.float32, device=direction_device) # Preallocate direction_similarity tensor
-        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
+        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device="cuda") # Initialize al as tensor
 
 #TODO: both these loops are entirely parallelizable wrt q and d. Look into stacking this or something and getting a vectorized tensor op.
         for i in range(num_old - 1, -1, -1):
@@ -558,7 +558,7 @@ class LBFGS(Optimizer):
               hit_miss = hit_miss + str("_ ")
 
         d = q.mul(H_diag).to_sparse().coalesce()
-        be_i = torch.empty_like(d, dtype=q.dtype, device=direction_device) # Preallocate be_i for second loop
+        be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
 
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
@@ -572,7 +572,7 @@ class LBFGS(Optimizer):
 #TODO: TEST
               d = d.coalesce()
         print(hit_miss)
-        total_norm = torch.linalg.vector_norm(d.values(), ord=1.).to(direction_device) # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(d.values(), ord=1.).to("cuda") # Move total_norm to direction_device
         d = d.div_(total_norm)
         direction_values = d
         mask = torch.logical_and(direction_values > -direction_clop, direction_values < direction_clop) #TODO: extract to sub_variance hyperparameter
@@ -707,17 +707,16 @@ class LBFGS(Optimizer):
               gc.collect()
           else:
               torch.cuda.empty_cache() # Clear cache before direction calculation
-              flat_grad = flat_grad.to(self.direction_device) # Move flat_grad to direction_device
               if prev_flat_grad is not None:
-                  prev_flat_grad = prev_flat_grad.to(self.direction_device) # Move prev_flat_grad to direction_device
+                  prev_flat_grad = prev_flat_grad # Move prev_flat_grad to direction_device
               y = flat_grad.sub(prev_flat_grad)
 #Clop
-              total_norm = torch.linalg.vector_norm(y, ord=1.).to(self.direction_device) # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(y, ord=1.) # Move total_norm to direction_device
               y = y/total_norm
               y[torch.logical_and(y > -self.gradient_clop,y < self.gradient_clop)] = 0
               y = y.to_sparse()
               print("y-delta elements: " + str((y.values() != 0).sum()) + " total: " + str(y.numel()), end=' ')
-              s = (d.mul(t)).to(self.direction_device) # Move s to direction_device
+              s = (d.mul(t)) # Move s to direction_device
               ys_sparse_product = y * s
               ys = ys_sparse_product.sum()#y*s
               del ys_sparse_product
@@ -757,9 +756,9 @@ class LBFGS(Optimizer):
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
                 y_sparse = y.to_sparse().to(self.direction_device) # Store y_sparse on direction_device
-                old_dirs.append(y_sparse.coalesce()) # NOTE: was cpu
-                s_sparse = s.to_sparse().to(self.direction_device) # Store s_sparse on direction_device
-                old_stps.append(s_sparse.coalesce()) # NOTE: was cpu
+                old_dirs.append(y_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
+                s_sparse = s.to_sparse().to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
+                old_stps.append(s_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
@@ -792,7 +791,7 @@ class LBFGS(Optimizer):
 #              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
 #              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
 
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
 
               # Move history back to CPU
 #              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
@@ -892,7 +891,7 @@ class LBFGS(Optimizer):
                   t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
 #TODO: this may OOM, analyze worse-case allocation. We can perform this in gather routine if for some reason that creates less tensors
 #                  d = prev_flat_grad.neg().to(self.direction_device)
-                  d = self._gather_flat_grad().neg().to(self.direction_device)
+                  d = self._gather_flat_grad().neg().to("cpu")
                   loss, flat_grad = obj_func(x_init, t, d)
                   self.t  = t
                   first_param = next(self.param_groups[0]['params'].__iter__())
@@ -900,7 +899,7 @@ class LBFGS(Optimizer):
                   d = d.to(first_param.device)
 
 #TODO: this should always be 1 or possibly less than 1. We cannot scale up the norm. Also consider l1 on raw grads
-                  total_norm = torch.linalg.vector_norm(d, ord=0.75).to(self.direction_device) # Move total_norm to direction_device
+                  total_norm = torch.linalg.vector_norm(d, ord=0.75) # Move total_norm to direction_device
                   d = d.div_(total_norm)
 #                  direction_values = d.coalesce().values()
                   direction_values = d
