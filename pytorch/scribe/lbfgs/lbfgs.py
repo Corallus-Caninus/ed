@@ -525,7 +525,7 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str, gradient_clop: float) -> Tensor:
+    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str, direction_clop: float, gradient_clop: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
         q = flat_grad.neg()
@@ -790,7 +790,7 @@ class LBFGS(Optimizer):
 #              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
 #              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
 
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_clop=self.gradient_clop, direction_device=self.direction_device)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
 
               # Move history back to CPU
 #              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
