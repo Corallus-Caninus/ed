@@ -538,7 +538,7 @@ class LBFGS(Optimizer):
 
 #TODO: both these loops are entirely parallelizable wrt q and d. Look into stacking this or something and getting a vectorized tensor op.
         for i in range(num_old - 1, -1, -1):
-            direction_similarity = (old_dirs[i] * q).sum().item() # Use inplace copy to store intermediate result
+            direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
 #            direction_og_similarity = (old_dirs[i] * flat_grad.neg()).sum().item() # Use inplace copy to store intermediate result
             aligned = direction_similarity >= 1e-7  or direction_similarity <= -1e-7
             direction_alignment_mask[i] = aligned
@@ -546,7 +546,7 @@ class LBFGS(Optimizer):
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item()
               hit_miss = hit_miss + str("| ")
-              q.add_(old_dirs[i], alpha=-al[i])
+              q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
 #TODO: TEST
 #TODO: this may not work since we store d*t in the history so each iteration sees an unscaled/disproportionate amount of the history. The dot product may fix this though
               total_norm = torch.linalg.vector_norm(q.coalesce().values(), ord=float("inf"))
@@ -563,8 +563,8 @@ class LBFGS(Optimizer):
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
             if direction_alignment_mask[i]:
-              be_i.copy_(old_dirs[i] * d) # Use inplace copy and preallocated tensor
-              d.add_(old_stps[i], alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
+              be_i.copy_(old_dirs[i].to("cuda") * d) # Use inplace copy and preallocated tensor
+              d.add_(old_stps[i].to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
 #TODO: TEST
               total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=float("inf"))
               d = d/total_norm
