@@ -525,11 +525,11 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str) -> Tensor:
+    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str, gradient_clop: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
         q = flat_grad.neg()
-        q[torch.logical_and(q > -self.gradient_clop,q < self.gradient_clop)] = 0
+        q[torch.logical_and(q > -gradient_clop,q < gradient_clop)] = 0
         q = q.to_sparse()
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
 #TODO: dont type like this, use the precision of the architecture. If we do use an accumulation higher precision type standardize throughout the algorithm and expose as a singular hyperparameter
