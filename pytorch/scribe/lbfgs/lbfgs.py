@@ -790,7 +790,7 @@ class LBFGS(Optimizer):
 #              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
 #              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
 
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, gradient_clop = self.gradient_clop)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_clop=self.gradient_clop, direction_device=self.direction_device)
 
               # Move history back to CPU
 #              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
