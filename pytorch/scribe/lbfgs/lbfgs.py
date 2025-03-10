@@ -712,7 +712,7 @@ class LBFGS(Optimizer):
                   prev_flat_grad = prev_flat_grad.to(self.direction_device) # Move prev_flat_grad to direction_device
               y = flat_grad.sub(prev_flat_grad)
 #Clop
-              total_norm = torch.linalg.vector_norm(y, ord=1.).to(direction_device) # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(y, ord=1.).to(self.direction_device) # Move total_norm to direction_device
               y = y/total_norm
               y[torch.logical_and(y > -self.gradient_clop,y < self.gradient_clop)] = 0
               y = y.to_sparse()
