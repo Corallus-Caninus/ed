@@ -529,12 +529,12 @@ class LBFGS(Optimizer):
         num_old = len(old_dirs)
         hit_miss = str("")
         q = flat_grad.neg()
-        q[torch.logical_and(q > -gradient_clop,q < gradient_clop)] = 0
-        q = q.to_sparse()
-        al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
+#        q[torch.logical_and(q > -gradient_clop,q < gradient_clop)] = 0
+#        q = q.to_sparse()
+        al = torch.empty(num_old, dtype=q.dtype, device="cpu") # Initialize al as tensor
 #TODO: dont type like this, use the precision of the architecture. If we do use an accumulation higher precision type standardize throughout the algorithm and expose as a singular hyperparameter
 #        direction_similarity = torch.empty_like(q, dtype=torch.float32, device=direction_device) # Preallocate direction_similarity tensor
-        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device="cuda") # Initialize al as tensor
+        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
 #TODO: both these loops are entirely parallelizable wrt q and d. Look into stacking this or something and getting a vectorized tensor op.
         for i in range(num_old - 1, -1, -1):
@@ -547,38 +547,40 @@ class LBFGS(Optimizer):
               al[i] = direction_similarity * ro[i].item()
               hit_miss = hit_miss + str("| ")
               q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
+              al[i].to(direction_device)
 #TODO: TEST
 #TODO: this may not work since we store d*t in the history so each iteration sees an unscaled/disproportionate amount of the history. The dot product may fix this though
-              total_norm = torch.linalg.vector_norm(q.coalesce().values(), ord=float("inf"))
+              total_norm = torch.linalg.vector_norm(q, ord=float("inf"))
               q = q/total_norm
-              q = q.coalesce()
+#              q = q.coalesce()
 #TODO: TEST
 
             else:
               hit_miss = hit_miss + str("_ ")
 
-        d = q.mul(H_diag).to_sparse().coalesce()
+        d = q.mul(H_diag)
         be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
+        del q
 
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
             if direction_alignment_mask[i]:
-              be_i.copy_(old_dirs[i].to("cuda") * d) # Use inplace copy and preallocated tensor
-              d.add_(old_stps[i].to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
+              be_i.copy_((old_dirs[i].to("cuda") * d).to_dense()) # Use inplace copy and preallocated tensor
+              d.add_(old_stps[i].to("cuda"), alpha=al[i].to(direction_device) - be_i.sum() * ro[i].item()) # Use be_i in calculation
 #TODO: TEST
-              total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=float("inf"))
+              total_norm = torch.linalg.vector_norm(d, ord=float("inf"))
               d = d/total_norm
 
 #TODO: TEST
-              d = d.coalesce()
+#              d = d.coalesce()
         print(hit_miss)
-        total_norm = torch.linalg.vector_norm(d.values(), ord=1.).to("cuda") # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(d, ord=1.).to("cuda") # Move total_norm to direction_device
         d = d.div_(total_norm)
         direction_values = d
         mask = torch.logical_and(direction_values > -direction_clop, direction_values < direction_clop) #TODO: extract to sub_variance hyperparameter
         direction_values[mask] = 0
         print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()))
-        d = direction_values.coalesce()
+        d = direction_values.to_sparse()
         del mask # DEL 9: mask is no longer needed
         del direction_values # DEL 10: direction_values is no longer needed
         return d
@@ -672,7 +674,7 @@ class LBFGS(Optimizer):
         prev_flat_grad = None
 
       n_iter = 0
-      d = flat_grad.neg().to(self.direction_device) # Initialize d on direction_device
+      d = flat_grad.neg() # Initialize d on direction_device
       first_param = next(self.param_groups[0]['params'].__iter__())
       t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)
       ls_failed = False
@@ -784,13 +786,14 @@ class LBFGS(Optimizer):
 #              al = state["al"]
 
               # iteration in L-BFGS loop collapsed to use just one buffer
-              q = flat_grad.neg().to(self.direction_device)  # Move q to direction_device
+#              q = flat_grad.neg()  # Move q to direction_device
 
               # Move history to direction_device
 #              old_dirs_cuda = [tensor.to(self.direction_device) for tensor in old_dirs]
 #              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
 #              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
 
+              gc.collect()
               d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
 
               # Move history back to CPU
@@ -810,6 +813,7 @@ class LBFGS(Optimizer):
           else:
 #              prev_flat_grad.copy_(flat_grad)#NOTE: was self.direction_device
               prev_flat_grad = flat_grad#NOTE: was self.direction_device
+          prev_flat_grad.to(self.direction_device)
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
@@ -821,22 +825,6 @@ class LBFGS(Optimizer):
           # compute step length
           ############################################################
           # reset initial guess for step size
-#TODO:  numerator is a momentum like term that balances the search start point based on if the gradient is vanishing
-#TODO:   extract this to a hyperparameter for tolerance_momentum
-#          if state["n_iter"] == 1:
-#            t = min(1., 1. / flat_grad.to("cuda").abs().sum()) #* lr
-#  #          avg = avg / torch.tensor(flat_grad.size(1)).to("cuda")
-#  #.div(torch.tensor(flat_grad.size()).to("cuda"))
-#          else:
-#            avg = flat_grad.to("cuda").abs().mean()
-#            #TODO: we should also consider if the direction is vanishing, whichk apparantly can happen such that this t doesnt move more than epsilon and we never zoom phase(?)
-#            print("got avg: " + str(avg))
-#            t = min(5e5, 5e-5/ avg)
-#            print("got t: " + str(t))
-#          else:
-#            t = min(1., 1. / flat_grad.to("cuda").abs().sum()) #* lr
-#              t = lr
-
           # directional derivative
   	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
 #          flat_grad = self._gather_norm_flat_grad(1, True) TODO: is this right?
@@ -891,7 +879,7 @@ class LBFGS(Optimizer):
                   t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
 #TODO: this may OOM, analyze worse-case allocation. We can perform this in gather routine if for some reason that creates less tensors
 #                  d = prev_flat_grad.neg().to(self.direction_device)
-                  d = self._gather_flat_grad().neg().to("cpu")
+                  d = self._gather_flat_grad().neg()
                   loss, flat_grad = obj_func(x_init, t, d)
                   self.t  = t
                   first_param = next(self.param_groups[0]['params'].__iter__())
