@@ -462,7 +462,7 @@ class LBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         views = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(views, 2.)
+        norm = torch.linalg.vector_norm(views, 2)
 #        norm = views.max()
         views.div_(norm)
 #TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
@@ -470,23 +470,9 @@ class LBFGS(Optimizer):
         #Clop
 #TODO: may be worth taking the top K here to have deterministic memory, do this after clopping to create a floor for allocation since we want to allow very sparse outlier gradients
         if isClop:
-#          mask = torch.logical_and(views > -1e-4,views < 1e-4)
-#          _, indices = torch.topk(views, k=10000000)
-#          mask = torch.zeros_like(views)
-#          views[indices] = 0
-#          mask[indices] = 1
-#          views = views*mask
-#          mask = mask.view_as(views)
-#          print("GRAD:  filtered elements: " + str( mask.sum()  ))
-#          views = views[mask]
-#          print("filtered: " + str(views[views!=0]))
-          views[torch.logical_and(views > -self.gradient_clop,views < self.gradient_clop)] = 0
           print("gradient elements: " + str((views != 0).sum()) + " total: " + str(views.numel()), end=' ')
-#          views[torch.logical_and(views > -1e-8,views < 1e-8)] = 0
-#          l2_norm = torch.linalg.vector_norm(views, 2)
-#          views.div_(l2_norm)
-          views = views.to_sparse()
-#NOTE: layer width can be greater than precision for l1 norm. Look here for vanishing l1 viewsient if it occurs.
+#          views[torch.logical_and(views > -self.gradient_clop,views < self.gradient_clop)] = 0
+#          views = views.to_sparse()
         return views #.to("cpu")
     #TODO: clip out NaN based on dtype max value
     #        return grad_raw #.to("cpu")
@@ -543,15 +529,18 @@ class LBFGS(Optimizer):
         num_old = len(old_dirs)
         hit_miss = str("")
         q = flat_grad.neg()
+        q[torch.logical_and(q > -self.gradient_clop,q < self.gradient_clop)] = 0
+        q = q.to_sparse()
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device) # Initialize al as tensor
 #TODO: dont type like this, use the precision of the architecture. If we do use an accumulation higher precision type standardize throughout the algorithm and expose as a singular hyperparameter
 #        direction_similarity = torch.empty_like(q, dtype=torch.float32, device=direction_device) # Preallocate direction_similarity tensor
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
+#TODO: both these loops are entirely parallelizable wrt q and d. Look into stacking this or something and getting a vectorized tensor op.
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i] * q).sum().item() # Use inplace copy to store intermediate result
 #            direction_og_similarity = (old_dirs[i] * flat_grad.neg()).sum().item() # Use inplace copy to store intermediate result
-            aligned = direction_similarity >= 1.  or direction_similarity <= -1.
+            aligned = direction_similarity >= 1e-7  or direction_similarity <= -1e-7
             direction_alignment_mask[i] = aligned
 #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
             if direction_alignment_mask[i]:
@@ -713,6 +702,10 @@ class LBFGS(Optimizer):
               if prev_flat_grad is not None:
                   prev_flat_grad = prev_flat_grad.to(self.direction_device) # Move prev_flat_grad to direction_device
               y = flat_grad.sub(prev_flat_grad)
+#Clop
+              y[torch.logical_and(y > -self.gradient_clop,y < self.gradient_clop)] = 0
+              y = y.to_sparse()
+              print("y-delta elements: " + str((y.values() != 0).sum()) + " total: " + str(y.numel()), end=' ')
               s = (d.mul(t)).to(self.direction_device) # Move s to direction_device
               ys_sparse_product = y * s
               ys = ys_sparse_product.sum()#y*s
@@ -811,24 +804,25 @@ class LBFGS(Optimizer):
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
 #          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
-          total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=2.).to(self.direction_device) # Move total_norm to direction_device
+          total_norm = torch.linalg.vector_norm(d, ord=1.).to(self.direction_device) # Move total_norm to direction_device
     #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
           d = d.div_(total_norm)
 #            print("direction init sparsity: " + str(d[d == 0.0].sum()))
 #            Clop
-          direction_values = d.coalesce().values()
+          direction_values = d
           mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
           direction_values[mask] = 0
           print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
+          d = direction_values.to_sparse()
           # Get the indices *after* clopping
-          indices = d.coalesce().indices()
-          valid_indices_mask = direction_values != 0
-          valid_indices = indices[:, valid_indices_mask]
-
-          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) # Move d to direction_device
+#          indices = d.coalesce().indices()
+#          valid_indices_mask = direction_values != 0
+#          valid_indices = indices[:, valid_indices_mask]
+#
+#          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) # Move d to direction_device
           del mask # DEL 9: mask is no longer needed
           del direction_values # DEL 10: direction_values is no longer needed
-          d = d.to_sparse() # Convert to sparse here, before topk
+#          d = d.to_sparse() # Convert to sparse here, before topk
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
           ############################################################
