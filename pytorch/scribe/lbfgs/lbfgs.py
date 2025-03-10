@@ -575,7 +575,7 @@ class LBFGS(Optimizer):
         total_norm = torch.linalg.vector_norm(d.values(), ord=1.).to(self.direction_device) # Move total_norm to direction_device
         d = d.div_(total_norm)
         direction_values = d
-        mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
+        mask = torch.logical_and(direction_values > -direction_clop, direction_values < direction_clop) #TODO: extract to sub_variance hyperparameter
         direction_values[mask] = 0
         print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
         d = direction_values.coalesce()
