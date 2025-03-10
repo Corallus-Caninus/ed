@@ -696,6 +696,9 @@ class LBFGS(Optimizer):
               print("RESET")
 #              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
               d = flat_grad.neg()
+              total_norm = torch.linalg.vector_norm(d, ord=1.).to("cuda")
+              d = d/total_norm
+              d[torch.logical_and(d > -self.gradient_clop,d < self.gradient_clop)] = 0
 #              prev_flat_grad  = None
 #              old_dirs = []
 #              old_stps = []
