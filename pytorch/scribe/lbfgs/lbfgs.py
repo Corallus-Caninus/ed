@@ -577,7 +577,7 @@ class LBFGS(Optimizer):
         direction_values = d
         mask = torch.logical_and(direction_values > -direction_clop, direction_values < direction_clop) #TODO: extract to sub_variance hyperparameter
         direction_values[mask] = 0
-        print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()))
+        print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
         d = direction_values.coalesce()
         del mask # DEL 9: mask is no longer needed
         del direction_values # DEL 10: direction_values is no longer needed
@@ -712,6 +712,8 @@ class LBFGS(Optimizer):
                   prev_flat_grad = prev_flat_grad.to(self.direction_device) # Move prev_flat_grad to direction_device
               y = flat_grad.sub(prev_flat_grad)
 #Clop
+              total_norm = torch.linalg.vector_norm(y, ord=1.).to(direction_device) # Move total_norm to direction_device
+              y = y/total_norm
               y[torch.logical_and(y > -self.gradient_clop,y < self.gradient_clop)] = 0
               y = y.to_sparse()
               print("y-delta elements: " + str((y.values() != 0).sum()) + " total: " + str(y.numel()), end=' ')
