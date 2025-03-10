@@ -572,7 +572,7 @@ class LBFGS(Optimizer):
 #TODO: TEST
               d = d.coalesce()
         print(hit_miss)
-        total_norm = torch.linalg.vector_norm(d.values(), ord=1.).to(self.direction_device) # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(d.values(), ord=1.).to(direction_device) # Move total_norm to direction_device
         d = d.div_(total_norm)
         direction_values = d
         mask = torch.logical_and(direction_values > -direction_clop, direction_values < direction_clop) #TODO: extract to sub_variance hyperparameter
