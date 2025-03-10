@@ -572,6 +572,15 @@ class LBFGS(Optimizer):
 #TODO: TEST
               d = d.coalesce()
         print(hit_miss)
+        total_norm = torch.linalg.vector_norm(d.values(), ord=1.).to(self.direction_device) # Move total_norm to direction_device
+        d = d.div_(total_norm)
+        direction_values = d
+        mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
+        direction_values[mask] = 0
+        print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
+        d = direction_values.coalesce()
+        del mask # DEL 9: mask is no longer needed
+        del direction_values # DEL 10: direction_values is no longer needed
         return d
 
     @torch.no_grad()
@@ -781,7 +790,7 @@ class LBFGS(Optimizer):
 #              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
 #              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
 
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, gradient_clop = self.gradient_clop)
 
               # Move history back to CPU
 #              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
@@ -804,24 +813,6 @@ class LBFGS(Optimizer):
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
 #          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
-          total_norm = torch.linalg.vector_norm(d, ord=1.).to(self.direction_device) # Move total_norm to direction_device
-    #TODO: models can have more parameters than precision can support for l1 and this. add a param to scale up the norm accordingly or automatically calculate the scaling parameter to guaruntee enough parameters
-          d = d.div_(total_norm)
-#            print("direction init sparsity: " + str(d[d == 0.0].sum()))
-#            Clop
-          direction_values = d
-          mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop) #TODO: extract to sub_variance hyperparameter
-          direction_values[mask] = 0
-          print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
-          d = direction_values.to_sparse()
-          # Get the indices *after* clopping
-#          indices = d.coalesce().indices()
-#          valid_indices_mask = direction_values != 0
-#          valid_indices = indices[:, valid_indices_mask]
-#
-#          d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(self.direction_device) # Move d to direction_device
-          del mask # DEL 9: mask is no longer needed
-          del direction_values # DEL 10: direction_values is no longer needed
 #          d = d.to_sparse() # Convert to sparse here, before topk
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
