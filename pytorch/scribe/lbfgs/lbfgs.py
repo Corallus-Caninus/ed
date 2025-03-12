@@ -540,6 +540,7 @@ class LBFGS(Optimizer):
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
 #            direction_og_similarity = (old_dirs[i] * flat_grad.neg()).sum().item() # Use inplace copy to store intermediate result
+#TODO: direction alignment hyperparam with a comment to explain how it creates multipathing of directions given a history based on locality of the gradient for the current data point and how this attempts to achieve solution of experts
             aligned = direction_similarity >= 5e-4  or direction_similarity <= -5e-4
             direction_alignment_mask[i] = aligned
 #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
@@ -547,14 +548,11 @@ class LBFGS(Optimizer):
               al[i] = direction_similarity * ro[i].item()
               hit_miss = hit_miss + str("| ")
               q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
-              al[i]
-#TODO: TEST
 #TODO: this may not work since we store d*t in the history so each iteration sees an unscaled/disproportionate amount of the history. The dot product may fix this though
 #              total_norm = torch.linalg.vector_norm(q, ord=float("inf"))
               total_norm = torch.linalg.vector_norm(q, ord=2)
               q = q/total_norm
 #              q = q.coalesce()
-#TODO: TEST
 
             else:
               hit_miss = hit_miss + str("_ ")
@@ -690,7 +688,7 @@ class LBFGS(Optimizer):
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
 #TODO: or if history is empty. Better if we do this by history in case we reset the approximation.
 #          if prev_flat_grad is None :
-          if n_iter == 1:
+          if n_iter == 1 or prev_flat_grad is None:
               restart = False
               print("RESET")
 #              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
@@ -937,37 +935,37 @@ class LBFGS(Optimizer):
 #                ro = []
 #                state["n_iter"] = 0
 #              flat_grad = flat_grad.to("cuda")
-#              if  ls_failed : #and Needle == False: 
-#                flat_grad = prev_flat_grad
-#                prev_flat_grad = None
-#              else:
-#                self.t  = t
-              if not ls_failed:
-                first_param = next(self.param_groups[0]['params'].__iter__())
-                t = torch.tensor(t).to(first_param.device)
-                d = d.to(first_param.device)
-                self._add_grad(t, d)
-                loss_device = d.device
-                print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
-                opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
+              if  ls_failed : #and Needle == False: 
+                flat_grad = prev_flat_grad
+                prev_flat_grad = None
+              else:
+                self.t  = t
+          if not ls_failed:
+            first_param = next(self.param_groups[0]['params'].__iter__())
+            t = torch.tensor(t).to(first_param.device)
+            d = d.to(first_param.device)
+            self._add_grad(t, d)
+            loss_device = d.device
+            print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
+            opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
 
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
 #              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
-         else:
-              # no line search, simply move with fixed-step
-              first_param = next(self.param_groups[0]['params'].__iter__())
-#              t = t.to(first_param.device)
-              d = d.to(first_param.device)
-              self._add_grad(t, d)
-              if n_iter != max_iter:
-                  # re-evaluate function only if not in last iteration
-                  # the reason we do this: in a stochastic setting,
-                  # no use to re-evaluate that function here
-                  with torch.enable_grad():
-                      loss = float(closure())
-                  flat_grad = self._gather_flat_grad()
-                  opt_cond = flat_grad.abs().max() <= tolerance_grad
-                  ls_func_evals = 1
+#         else:
+#              # no line search, simply move with fixed-step
+#              first_param = next(self.param_groups[0]['params'].__iter__())
+##              t = t.to(first_param.device)
+#              d = d.to(first_param.device)
+#              self._add_grad(t, d)
+#              if n_iter != max_iter:
+#                  # re-evaluate function only if not in last iteration
+#                  # the reason we do this: in a stochastic setting,
+#                  # no use to re-evaluate that function here
+#                  with torch.enable_grad():
+#                      loss = float(closure())
+#                  flat_grad = self._gather_flat_grad()
+#                  opt_cond = flat_grad.abs().max() <= tolerance_grad
+#                  ls_func_evals = 1
 
           # update func eval
           current_evals += ls_func_evals
@@ -976,7 +974,7 @@ class LBFGS(Optimizer):
           ############################################################
           # check conditions
           ############################################################
-          if n_iter == max_iter:
+          if n_iter == max_iter or loss == 0:
               break
 
 #          if current_evals >= max_eval:
@@ -985,9 +983,9 @@ class LBFGS(Optimizer):
           # optimal condition
 #TODO: we may not need this, just let it hit epsilon grad or zero grad for number of iteration times?
 #TODO: also, dont exit on loss < 1e-5 as above, let that point break (loss <= 0) condition
-          if opt_cond:
-              print("GRAD CONVERGE")
-              break
+#          if opt_cond:
+#              print("GRAD CONVERGE")
+#              break
 
           # lack of progress
 #          if d.mul(t).abs().max() <= tolerance_change:
