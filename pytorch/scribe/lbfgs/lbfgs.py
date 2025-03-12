@@ -537,21 +537,25 @@ class LBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
 #TODO: both these loops are entirely parallelizable wrt q and d. Look into stacking this or something and getting a vectorized tensor op.
+#            aligned = direction_similarity >= 5e-4  or direction_similarity <= -5e-4
+
+#TODO: vectorize alignment mask here since its immutable
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
-#            direction_og_similarity = (old_dirs[i] * flat_grad.neg()).sum().item() # Use inplace copy to store intermediate result
-#TODO: direction alignment hyperparam with a comment to explain how it creates multipathing of directions given a history based on locality of the gradient for the current data point and how this attempts to achieve solution of experts
-            aligned = direction_similarity >= 5e-4  or direction_similarity <= -5e-4
+            aligned = direction_similarity >= 2e-4  or direction_similarity <= -2e-4
             direction_alignment_mask[i] = aligned
-#TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
             if direction_alignment_mask[i]:
-              al[i] = direction_similarity * ro[i].item()
-              hit_miss = hit_miss + str("| ")
-              q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
-#TODO: this may not work since we store d*t in the history so each iteration sees an unscaled/disproportionate amount of the history. The dot product may fix this though
-#              total_norm = torch.linalg.vector_norm(q, ord=float("inf"))
-              total_norm = torch.linalg.vector_norm(q, ord=2)
-              q = q/total_norm
+#               direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
+  #            direction_og_similarity = (old_dirs[i] * flat_grad.neg()).sum().item() # Use inplace copy to store intermediate result
+  #TODO: direction alignment hyperparam with a comment to explain how it creates multipathing of directions given a history based on locality of the gradient for the current data point and how this attempts to achieve solution of experts
+  #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
+               al[i] = direction_similarity * ro[i].item()
+               hit_miss = hit_miss + str("| ")
+               q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
+ #TODO: this may not work since we store d*t in the history so each iteration sees an unscaled/disproportionate amount of the history. The dot product may fix this though
+ #              total_norm = torch.linalg.vector_norm(q, ord=float("inf"))
+               total_norm = torch.linalg.vector_norm(q, ord=2)
+               q = q/total_norm
 #              q = q.coalesce()
 
             else:
