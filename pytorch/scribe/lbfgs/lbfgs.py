@@ -103,7 +103,7 @@ def _strong_wolfe(
 #        c1_tensor = c1_tensor.to(gtd_tensor.device)
 #        t = t.to(gtd_tensor.device)
 
-        if (f_new > (f + c1 * t * gtd)) or f_new > f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+        if (f_new > (f + c1 * t.item() * gtd.item())) or f_new > f_best.item():  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
