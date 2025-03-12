@@ -1033,7 +1033,11 @@ class LBFGS(Optimizer):
             state["old_stps"] = [tensor.to(device) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
             state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Load history and move to direction_device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
-            self.t = history.get("t", 1) # Load step size t, default to 1 if not found
+            t_val = history.get("t", 1) # Load step size t, default to 1 if not found
+            if isinstance(t_val, torch.Tensor):
+                self.t = t_val.item()
+            else:
+                self.t = t_val
             state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
 
             if state["prev_flat_grad"] is not None:
