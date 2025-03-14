@@ -51,7 +51,7 @@ pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
 #optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
-optimizer = LBFGS(model.parameters(), lr=1., history_size=4.4, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=3e-4, direction_clop=5e-4, c1=3e-4, c2=0.9)
+optimizer = LBFGS(model.parameters(), lr=1., history_size=4., tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=5e-7, c1=3e-4, c2=0.9,direction_device="cpu", bracket_shift = 0.25, bracket_shove = 0.5)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -93,39 +93,42 @@ def closure():
   loss = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   cache = None
-  chunk_size=1000 #1000
-  grad_vector_size = 100 #5
+  chunk_size=0 #1000
+  grad_vector_size = 500 #5
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
   if num_tokens == chunk_size+1:
     chunk_size += 1
   torch.cuda.empty_cache()
-  for i in range(0, num_tokens - grad_vector_size, chunk_size):
-    end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
-    cur_input_ids = input_ids[:, i:end_idx]
-    cur_attention_mask = attention_mask[:, i:end_idx]
+  if chunk_size > 0:
+    for i in range(0, num_tokens - grad_vector_size, chunk_size):
+      end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
+      cur_input_ids = input_ids[:, i:end_idx]
+      cur_attention_mask = attention_mask[:, i:end_idx]
+  
+      if cache is not None:
+  #      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
+  #      outputs.loss.backward()
+        with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
+      else:
+  #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+        with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
+  #      outputs.loss.backward()
+      cache = outputs.cache_params
+      num_steps += 1
+      current_loss = outputs.loss.item()
+      avg_loss += current_loss # Accumulate loss values
 
-    if cache is not None:
-#      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
-#      outputs.loss.backward()
-      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-        outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
-    else:
-#      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-        outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
-#      outputs.loss.backward()
-    cache = outputs.cache_params
-    num_steps += 1
-    current_loss = outputs.loss.item()
-    avg_loss += current_loss # Accumulate loss values
-
-  outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
-  last_chunk_loss = outputs.loss.item()
-  avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
-  avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
-  outputs.loss.item = avg_loss
+    outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
+    last_chunk_loss = outputs.loss.item()
+    avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
+    avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
+    outputs.loss.item = avg_loss
+#TODO: else:
+  outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids)
   loss = outputs.loss # Perform backward pass on the original outputs.loss tensor
   loss.backward()
 
@@ -145,7 +148,7 @@ while True:
   random_index = torch.randint(0, dataset_size, (1,)).item() # Generate a random index
   batch_train = dataset[random_index]['text'] # Access data using random index
 
-  tokens = tokenizer(batch_train,truncation=True, max_length=2100,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+  tokens = tokenizer(batch_train,truncation=True, max_length=500,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
   print("got num_tokens: " + str(input_ids.size(1)))
 
@@ -153,7 +156,7 @@ while True:
   optimizer.step(closure)
   step_count += 1
 
-  if step_count % 1 == 0:
+  if step_count % 10 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
       accelerator.save(unwrapped_model.state_dict(), filename)
       optimizer.save_history(history_filename)
