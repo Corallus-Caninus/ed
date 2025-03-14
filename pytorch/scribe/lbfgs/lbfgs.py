@@ -5,6 +5,7 @@ import torch
 from torch import Tensor
 import gc
 import psutil
+import time
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
@@ -49,7 +50,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, x, t, d, f, g, gtd, c1=1e-5, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1., capture_max_step=100
+    obj_func, x, t, d, f, g, gtd, c1=1e-5, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100
 ):
 #TODO: this irks the mathematician in me.
     if c2 == 0:
@@ -103,7 +104,7 @@ def _strong_wolfe(
 #        c1_tensor = c1_tensor.to(gtd_tensor.device)
 #        t = t.to(gtd_tensor.device)
 
-        if (f_new > (f + c1 * t * gtd)) or f_new > f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+        if (f_new > (f + c1 * t * gtd)) :  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -175,6 +176,7 @@ def _strong_wolfe(
 #        bracket = [0, t]
 #        bracket_f = [f, f_new]
 #        bracket_g = [g, g_new]
+#        bracket_gtd = [gtd, gtd_new]
         bracket = [t_prev, t]
         bracket_f = [f_prev, f_new]
         bracket_g = [g_prev, g_new]
@@ -203,7 +205,7 @@ def _strong_wolfe(
             # line-search bracket is so small
             #TODO: extract stall_wolfe hyperparameter
             #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
-        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 3:   # type: ignore[possibly-undefined]
+        if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 5:   # type: ignore[possibly-undefined]
            print("WOLFE PACK")
            return success, f_best, g_best, t_best, ls_func_evals
        		#TODO: return the wolfe pack here
@@ -259,7 +261,7 @@ def _strong_wolfe(
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
-        if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos] or f_new > f_best: #NOTE: Ward condition
+        if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos] : #or f_new > f_best: #NOTE: Ward condition
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
@@ -298,12 +300,12 @@ def _strong_wolfe(
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-            bracket_g[low_pos] = g_new.clone()
+#            bracket_g[low_pos] = g_new.clone()
             bracket_g[low_pos] = g_new
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
         stall_wolfe += 1
-        if stall_wolfe >= 3:
+        if stall_wolfe >= 5:
           print("STALL WOLFE")
         if ls_iter >= max_ls: # Return Wolfe pack if max ls reached in zoom phase
           print("WOLFE PACK MAX LS")
@@ -547,15 +549,17 @@ class LBFGS(Optimizer):
             if direction_alignment_mask[i]:
 #               direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
   #            direction_og_similarity = (old_dirs[i] * flat_grad.neg()).sum().item() # Use inplace copy to store intermediate result
+#TODO: ro is now the unormalized value and must be tuned to ensure NaN rollover stability given the max possible history size
   #TODO: direction alignment hyperparam with a comment to explain how it creates multipathing of directions given a history based on locality of the gradient for the current data point and how this attempts to achieve solution of experts
   #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
                al[i] = direction_similarity * ro[i].item()
                hit_miss = hit_miss + str("| ")
                q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
  #TODO: this may not work since we store d*t in the history so each iteration sees an unscaled/disproportionate amount of the history. The dot product may fix this though
+#TODO: division of terms is not the same as terms that are divided. (associativity of division). This doesnt mean this calculation is wrong but it is different and requires a formal proof first
  #              total_norm = torch.linalg.vector_norm(q, ord=float("inf"))
-               total_norm = torch.linalg.vector_norm(q, ord=2)
-               q = q/total_norm
+#               total_norm = torch.linalg.vector_norm(q, ord=float("inf"))
+#               q = q/total_norm
 #              q = q.coalesce()
 
             else:
@@ -571,8 +575,8 @@ class LBFGS(Optimizer):
               be_i.copy_((old_dirs[i].to("cuda") * d).to_dense()) # Use inplace copy and preallocated tensor
               d.add_(old_stps[i].to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
 #TODO: 1 or 2 here? Also, does this mean we dont need direction alignment if we are l1ing the direction?
-              total_norm = torch.linalg.vector_norm(d, ord=2)
-              d = d/total_norm
+#              total_norm = torch.linalg.vector_norm(d, ord=float("inf"))
+#              d = d/total_norm
 
 #              d = d.coalesce()
         print(hit_miss)
@@ -732,7 +736,10 @@ class LBFGS(Optimizer):
 		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
 #              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
 #              if ys > 1e-16:
-              if  ys >= 1e-8 or ys <= -1e-8:
+#TODO: double check the math to ensure this will account for opposing direction-curvature
+#              if  ys >= 1e-8 or ys <= -1e-8:
+#TODO: TEST Also, check the math again.
+              if  ys >= 1e-8 :
                 # updating memory
 #                if len(old_dirs) <= history_size:
                 if self.direction_device == 'cuda' and torch.cuda.is_available():
@@ -757,6 +764,7 @@ class LBFGS(Optimizer):
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
+                        gc.collect()
                   except Exception as e:
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
@@ -873,13 +881,13 @@ class LBFGS(Optimizer):
                       obj_func, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
-#              Needle = False
+              Needle = False
 #TODO: consider on grad convergence fail linesearch to speed up near convergence points
 #TODO: using t here for convergence test is wrong. Check the new gtd or abs.max/mean of flat_grads. We can get away with this for now due to normalization.
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   print("saddle-search subroutine..")
-#                  Needle = True
+                  Needle = True
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
 #TODO: this may OOM, analyze worse-case allocation. We can perform this in gather routine if for some reason that creates less tensors
@@ -916,6 +924,7 @@ class LBFGS(Optimizer):
 #TODO: we should maybe put the needle in the hessian so that we dont have any discontinuity in the gradients
                   loss_device = d.device
                   print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
+                  prev_flat_grad = None
 
 
 #                flat_grad = None
@@ -939,7 +948,7 @@ class LBFGS(Optimizer):
 #                ro = []
 #                state["n_iter"] = 0
 #              flat_grad = flat_grad.to("cuda")
-              if  ls_failed : #and Needle == False: 
+              if  ls_failed and Needle == False: #and Needle == False: 
                 flat_grad = prev_flat_grad
                 prev_flat_grad = None
               else:
