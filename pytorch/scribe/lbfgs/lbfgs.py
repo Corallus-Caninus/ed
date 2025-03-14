@@ -46,7 +46,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
         return torch.tensor((xmin_bound + xmax_bound) / 2.0)
 
 
-#TODO: if gtd converges, return failure
+#TODO: cleanup all the AI device mess
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
@@ -88,21 +88,6 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-#        device = gtd.device
-#        c1_tensor = torch.tensor(c1, device=device)
-#        f_tensor = torch.tensor(f, device=device)
-#        gtd_tensor = torch.tensor(gtd, device=device)
-#        c1_tensor = c1_tensor.to(device)
-#        f_tensor = f_tensor.to(device)
-#        gtd_tensor = gtd_tensor.to(device)
-##        t = t.to(device)
-#        f_best = f_best.to(gtd_tensor.device)
-#        if not isinstance(f_new, torch.Tensor):
-#            f_new = torch.tensor(f_new)
-#        f_new = f_new.to(gtd_tensor.device)
-#        f_tensor = f_tensor.to(gtd_tensor.device)
-#        c1_tensor = c1_tensor.to(gtd_tensor.device)
-#        t = t.to(gtd_tensor.device)
 
         if (f_new > (f + c1 * t * gtd)) :  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
             bracket = [t_prev, t]
@@ -426,7 +411,7 @@ class LBFGS(Optimizer):
 
         return self._numel_cache
 
-    # gather flat grads with L2 Normalization
+    # gather flat grads with L1 Normalization and without clopping
     def _gather_flat_grad(self):
         views = []
         for p in self._params:
@@ -530,10 +515,17 @@ class LBFGS(Optimizer):
     def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str, direction_clop: float, gradient_clop: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
+#        q = flat_grad.neg()
         q = flat_grad.neg()
+#TODO: this may be numerically unstable (too many transformations from the gradient) the idea is to help align with a locallity while still maintaining the l2 properties for Y and curvature selection
+#        total_norm = torch.linalg.vector_norm(q, ord=1.).to("cuda") # Move total_norm to direction_device
+#        q = q.div_(total_norm)
+#TODO: clop?
+#        mask = torch.logical_and(q> -direction_clop, q< direction_clop) #TODO: extract to sub_variance hyperparameter
+
 #        q[torch.logical_and(q > -gradient_clop,q < gradient_clop)] = 0
 #        q = q.to_sparse()
-        al = torch.empty(num_old, dtype=q.dtype, device="cpu") # Initialize al as tensor
+        al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
 #TODO: dont type like this, use the precision of the architecture. If we do use an accumulation higher precision type standardize throughout the algorithm and expose as a singular hyperparameter
 #        direction_similarity = torch.empty_like(q, dtype=torch.float32, device=direction_device) # Preallocate direction_similarity tensor
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
@@ -544,7 +536,9 @@ class LBFGS(Optimizer):
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
-            aligned = direction_similarity >= 2e-4  or direction_similarity <= -2e-4
+#TODO: consider increasing alignment on each hit iteratively to prevent over aligning (reduce the calculation time and help prevent early convergence)
+#            aligned = direction_similarity >= 2e-4  or direction_similarity <= -2e-4
+            aligned = direction_similarity >= 5e-7  or direction_similarity <= -5e-7
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
 #               direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
@@ -807,7 +801,9 @@ class LBFGS(Optimizer):
 #              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
 
               gc.collect()
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
+#              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
+#TODO: TEST: use the l1 norm to bootstrap alignment/selection and rely on the l2 for convergence metrics and curvature.
+              d = self.direction_approximate(old_stps, old_dirs, ro, self._gather_flat_grad(), H_diag, direction_device="cpu", direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
 
               # Move history back to CPU
 #              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
@@ -882,8 +878,8 @@ class LBFGS(Optimizer):
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               Needle = False
-#TODO: consider on grad convergence fail linesearch to speed up near convergence points
-#TODO: using t here for convergence test is wrong. Check the new gtd or abs.max/mean of flat_grads. We can get away with this for now due to normalization.
+#TODO: consider linesearch with only the c2 condition to ensure the loss decreases if it can, take the resulting step size either way (loss can increase if necessary)
+#TODO: consider searching for the norm term too s.t. the norm <= 1. This can be a custom linesearch that searches for step size and norm values, every time t drops below 1 we iteratively reduce the norm or linesearch the norm then try step size again. On failure we can pass the data point (can converge the entire dataset) or we bump the model with epsilon (the current solution essentially, possible minimizing the loss increase to some constant amount via linesearch) or if not a constant amount the min of loss_increase/t Consolidate all these features to one linesearch algorithm with an equation that minimizes loss increase and maximizes t by varying norm and t
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   print("saddle-search subroutine..")
