@@ -538,7 +538,7 @@ class LBFGS(Optimizer):
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
 #TODO: consider increasing alignment on each hit iteratively to prevent over aligning (reduce the calculation time and help prevent early convergence)
 #            aligned = direction_similarity >= 2e-4  or direction_similarity <= -2e-4
-            aligned = direction_similarity >= 5e-7  or direction_similarity <= -5e-7
+            aligned = direction_similarity >= 1e-7  or direction_similarity <= -1e-7
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
 #               direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
@@ -692,12 +692,14 @@ class LBFGS(Optimizer):
 #          if prev_flat_grad is None :
           if n_iter == 1 or prev_flat_grad is None:
               restart = False
+#TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET")
 #              flat_grad_sparse = self._gather_norm_flat_grad(1, True)
-              d = flat_grad.neg()
-              total_norm = torch.linalg.vector_norm(d, ord=1.).to("cuda")
-              d = d/total_norm
-              d[torch.logical_and(d > -self.gradient_clop,d < self.gradient_clop)] = 0
+#              d = flat_grad.neg()
+              d = self._gather_flat_grad().neg()
+#              total_norm = torch.linalg.vector_norm(d, ord=1.).to("cuda")
+#              d = d/total_norm
+              d[torch.logical_and(d > -self.direction_clop,d < self.direction_clop)] = 0
               d = d.to_sparse()
 #              prev_flat_grad  = None
 #              old_dirs = []
