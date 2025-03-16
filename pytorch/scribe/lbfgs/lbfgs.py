@@ -884,6 +884,7 @@ class LBFGS(Optimizer):
                   x_init_needle = self._clone_param() # Clone params for needle search
 
                   # Iteratively increase t until loss no longer decreases
+#TODO: initialize the gtd here instead of the original gtd.
                   while True:
 #TODO: use raw gradients so we dont double norm here
                       d_needle = self._gather_flat_grad().neg()
@@ -894,6 +895,7 @@ class LBFGS(Optimizer):
                       total_norm = torch.linalg.vector_norm(d_needle, ord=0.75)
                       d_needle = d_needle.div_(total_norm)
                       current_needle_loss, _ = self._directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
+#TODO: is this convergence condition correct?
                       if current_needle_loss < best_needle_loss or abs(gtd_needle) > -c2 * gtd: #or abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
                           best_needle_loss = current_needle_loss
                           best_needle_t = needle_t.clone()
