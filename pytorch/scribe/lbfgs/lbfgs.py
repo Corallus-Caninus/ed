@@ -412,6 +412,7 @@ class LBFGS(Optimizer):
         return self._numel_cache
 
     # gather flat grads with L1 Normalization and without clopping
+#TODO: rename
     def _gather_flat_grad(self):
         views = []
         for p in self._params:
@@ -434,6 +435,7 @@ class LBFGS(Optimizer):
 #        return grad_raw #.to(self.direction_device)
 
     # gather flat grads with L2 Normalization
+#TODO: rename
     def _gather_norm_flat_grad(self, norm, isClop = True):
         views = []
         total = 0
@@ -512,9 +514,13 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str, direction_clop: float, gradient_clop: float) -> Tensor:
+    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, direction_clop: float, gradient_clop: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
+        similarity = 5e-5
+#TODO: underflow
+        if t < 1:
+          similarity = similarity/t
 #        q = flat_grad.neg()
         q = flat_grad.neg()
 #TODO: this may be numerically unstable (too many transformations from the gradient) the idea is to help align with a locallity while still maintaining the l2 properties for Y and curvature selection
@@ -530,32 +536,18 @@ class LBFGS(Optimizer):
 #        direction_similarity = torch.empty_like(q, dtype=torch.float32, device=direction_device) # Preallocate direction_similarity tensor
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
-#TODO: both these loops are entirely parallelizable wrt q and d. Look into stacking this or something and getting a vectorized tensor op.
-#            aligned = direction_similarity >= 5e-4  or direction_similarity <= -5e-4
 
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
-#TODO: consider increasing alignment on each hit iteratively to prevent over aligning (reduce the calculation time and help prevent early convergence)
+#TODO: consider scaling alignment by previous step size to resist early convergence. e.g. if t < 1 alignment=t*alignment
 #            aligned = direction_similarity >= 2e-4  or direction_similarity <= -2e-4
-            aligned = direction_similarity >= 1e-7  or direction_similarity <= -1e-7
+            aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
-#               direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
-  #            direction_og_similarity = (old_dirs[i] * flat_grad.neg()).sum().item() # Use inplace copy to store intermediate result
-#TODO: ro is now the unormalized value and must be tuned to ensure NaN rollover stability given the max possible history size
-  #TODO: direction alignment hyperparam with a comment to explain how it creates multipathing of directions given a history based on locality of the gradient for the current data point and how this attempts to achieve solution of experts
-  #TODO: instead, compare the dot product without ro and build a mask of a bool vector otherwise, low curvature will repulse the vector which is interesting and may improve efficient exploration of the parameter-gradient space but may be overly complex for what we are doing here.
-               al[i] = direction_similarity * ro[i].item()
-               hit_miss = hit_miss + str("| ")
-               q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
- #TODO: this may not work since we store d*t in the history so each iteration sees an unscaled/disproportionate amount of the history. The dot product may fix this though
-#TODO: division of terms is not the same as terms that are divided. (associativity of division). This doesnt mean this calculation is wrong but it is different and requires a formal proof first
- #              total_norm = torch.linalg.vector_norm(q, ord=float("inf"))
-#               total_norm = torch.linalg.vector_norm(q, ord=float("inf"))
-#               q = q/total_norm
-#              q = q.coalesce()
-
+              al[i] = direction_similarity * ro[i].item()
+              hit_miss = hit_miss + str("| ")
+              q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
             else:
               hit_miss = hit_miss + str("_ ")
 
@@ -568,11 +560,7 @@ class LBFGS(Optimizer):
             if direction_alignment_mask[i]:
               be_i.copy_((old_dirs[i].to("cuda") * d).to_dense()) # Use inplace copy and preallocated tensor
               d.add_(old_stps[i].to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
-#TODO: 1 or 2 here? Also, does this mean we dont need direction alignment if we are l1ing the direction?
-#              total_norm = torch.linalg.vector_norm(d, ord=float("inf"))
-#              d = d/total_norm
 
-#              d = d.coalesce()
         print(hit_miss)
         total_norm = torch.linalg.vector_norm(d, ord=1.).to("cuda") # Move total_norm to direction_device
         d = d.div_(total_norm)
@@ -805,7 +793,7 @@ class LBFGS(Optimizer):
               gc.collect()
 #              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
 #TODO: TEST: use the l1 norm to bootstrap alignment/selection and rely on the l2 for convergence metrics and curvature.
-              d = self.direction_approximate(old_stps, old_dirs, ro, self._gather_flat_grad(), H_diag, direction_device="cpu", direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t, direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
 
               # Move history back to CPU
 #              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
