@@ -876,38 +876,38 @@ class LBFGS(Optimizer):
                   print("saddle-search subroutine..")
                   Needle = True
                   first_param = next(self.param_groups[0]['params'].__iter__())
-                  t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
-#TODO: this may OOM, analyze worse-case allocation. We can perform this in gather routine if for some reason that creates less tensors
-#                  d = prev_flat_grad.neg().to(self.direction_device)
-                  d = self._gather_flat_grad().neg()
-                  loss, flat_grad = obj_func(x_init, t, d)
+                  needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
+                  best_needle_loss = float('inf')
+                  best_needle_t = needle_t.clone()
+                  x_init_needle = self._clone_param() # Clone params for needle search
+
+                  # Iteratively increase t until loss no longer decreases
+                  while True:
+                      d_needle = self._gather_flat_grad().neg()
+                      current_needle_loss, _ = self._directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
+                      if current_needle_loss < best_needle_loss:
+                          best_needle_loss = current_needle_loss
+                          best_needle_t = needle_t.clone()
+                          needle_t *= 2  # Increase t for next iteration
+                      else:
+                          break # Stop if loss no longer decreasing
+
+                  t = best_needle_t # Use best t found
+                  d = self._gather_flat_grad().neg() # Recompute direction with best t
+
                   self.t  = t
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   t = torch.tensor(t).to(first_param.device)
                   d = d.to(first_param.device)
 
-#TODO: this should always be 1 or possibly less than 1. We cannot scale up the norm. Also consider l1 on raw grads
-                  total_norm = torch.linalg.vector_norm(d, ord=0.75) # Move total_norm to direction_device
+                  total_norm = torch.linalg.vector_norm(d, ord=0.75)
                   d = d.div_(total_norm)
-#                  direction_values = d.coalesce().values()
-                  direction_values = d
-#                  topk_result = torch.topk(d, k=250000)
-#                  topk_values = topk_result.values
-#                  print("saddle-needle elements post-reset: " + str((topk_values != 0).sum()) + " total: " + str(topk_values.numel()), end=' ')
-#
-                  # d is already sparse from earlier conversion
-                  indices = topk_result.indices
-#                  if indices.ndim == 1:
-#                      indices = indices.unsqueeze(0)
-#                  d = torch.sparse_coo_tensor(indices, topk_values, d.size()).coalesce() # No need to convert to sparse again, d is already sparse
-                  self._add_grad(t, d)
-#TODO: we should maybe put the needle in the hessian so that we dont have any discontinuity in the gradients
+                  self._add_grad(t, d) # Use best t for add_grad
+
                   loss_device = d.device
-                  print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
+                  print(f" \n -----------got needle stepsize: {t} and loss: \033[92m{best_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
                   prev_flat_grad = None
 
-
-#                flat_grad = None
                 print("\033[91mLinesearch failure, resetting..\033[0m")
                 ls_failed = True
 #                old_dirs.clear()
@@ -939,8 +939,8 @@ class LBFGS(Optimizer):
             d = d.to(first_param.device)
             self._add_grad(t, d)
             loss_device = d.device
-            print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
-            opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
+            print(f" \n -----------got stepsize: {t} and loss: \033[92m{best_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
+            opt_cond =  best_needle_loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision # Use best_needle_loss
 
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
 #              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
