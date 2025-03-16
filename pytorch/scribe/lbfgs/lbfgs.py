@@ -887,11 +887,14 @@ class LBFGS(Optimizer):
                   while True:
 #TODO: use raw gradients so we dont double norm here
                       d_needle = self._gather_flat_grad().neg()
+                      gtd_needle_sparse_product = flat_grad * d_needle #TODO: use raw gradients so we dont double norm here
+                      gtd_needle = gtd_needle_sparse_product.sum() # g * d
+                      del gtd_needle_sparse_product
 #TODO: sharpen routine first before pressure
                       total_norm = torch.linalg.vector_norm(d_needle, ord=0.75)
                       d_needle = d_needle.div_(total_norm)
                       current_needle_loss, _ = self._directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
-                      if current_needle_loss < best_needle_loss:
+                      if current_needle_loss < best_needle_loss or abs(gtd_needle) > -c2 * gtd: #or abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
                           best_needle_loss = current_needle_loss
                           best_needle_t = needle_t.clone()
 #TODO: try a exponential scaling here of 2**n
