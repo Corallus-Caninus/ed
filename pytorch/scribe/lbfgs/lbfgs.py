@@ -877,7 +877,7 @@ class LBFGS(Optimizer):
                   Needle = True
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
-                  best_needle_loss = float('inf')
+                  best_needle_loss = float('inf') # Initialize best_needle_loss here
                   best_needle_t = needle_t.clone()
                   x_init_needle = self._clone_param() # Clone params for needle search
 
