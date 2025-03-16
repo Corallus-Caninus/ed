@@ -910,9 +910,6 @@ class LBFGS(Optimizer):
 
                 print("\033[91mLinesearch failure, resetting..\033[0m")
                 ls_failed = True
-#                old_dirs.clear()
-#                old_stps.clear()
-#                ro.clear()
               else:
                 ls_failed = False
 
