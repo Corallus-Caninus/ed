@@ -869,6 +869,7 @@ class LBFGS(Optimizer):
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               Needle = False
 #TODO: consider linesearch with only the c2 condition to ensure the loss decreases if it can, take the resulting step size either way (loss can increase if necessary)
+#TODO: easiest way is possible: scale norm until 1 doesnt increase loss then scale t until loss stops decreasing up to a max iteration
 #TODO: consider searching for the norm term too s.t. the norm <= 1. This can be a custom linesearch that searches for step size and norm values, every time t drops below 1 we iteratively reduce the norm or linesearch the norm then try step size again. On failure we can pass the data point (can converge the entire dataset) or we bump the model with epsilon (the current solution essentially, possible minimizing the loss increase to some constant amount via linesearch) or if not a constant amount the min of loss_increase/t Consolidate all these features to one linesearch algorithm with an equation that minimizes loss increase and maximizes t by varying norm and t
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
@@ -890,22 +891,15 @@ class LBFGS(Optimizer):
                   d = d.div_(total_norm)
 #                  direction_values = d.coalesce().values()
                   direction_values = d
-#TODO: we probably need a third (and LAST) hyperparam tuple here for clop and norm in saddle-search e.g. saddle_clop saddle_norm
-#                  mask = torch.logical_and(direction_values > -1e-16, direction_values < 1e-16) #TODO: extract to sub_variance hyperparameter
-#                  mask = torch.logical_and(direction_values == 0)
-#                  direction_values[mask] = 0
-                  topk_result = torch.topk(d, k=250000)
-                  topk_values = topk_result.values
-                  print("saddle-needle elements post-reset: " + str((topk_values != 0).sum()) + " total: " + str(topk_values.numel()), end=' ')
-#                  indices = d.coalesce().indices() # Indices are not relevant after topk since it reorders the tensor
-#                  valid_indices_mask = topk_values != 0 # Use topk_values for mask
-#                  valid_indices = indices[:, valid_indices_mask] # Indices are not relevant after topk
-
+#                  topk_result = torch.topk(d, k=250000)
+#                  topk_values = topk_result.values
+#                  print("saddle-needle elements post-reset: " + str((topk_values != 0).sum()) + " total: " + str(topk_values.numel()), end=' ')
+#
                   # d is already sparse from earlier conversion
                   indices = topk_result.indices
-                  if indices.ndim == 1:
-                      indices = indices.unsqueeze(0)
-                  d = torch.sparse_coo_tensor(indices, topk_values, d.size()).coalesce() # No need to convert to sparse again, d is already sparse
+#                  if indices.ndim == 1:
+#                      indices = indices.unsqueeze(0)
+#                  d = torch.sparse_coo_tensor(indices, topk_values, d.size()).coalesce() # No need to convert to sparse again, d is already sparse
                   self._add_grad(t, d)
 #TODO: we should maybe put the needle in the hessian so that we dont have any discontinuity in the gradients
                   loss_device = d.device
