@@ -895,8 +895,9 @@ class LBFGS(Optimizer):
                       total_norm = torch.linalg.vector_norm(d_needle, ord=0.75)
                       d_needle = d_needle.div_(total_norm)
                       current_needle_loss, _ = self._directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
+                      armijo_condition = current_needle_loss <= best_needle_loss + c1 * needle_t * gtd
 #TODO: is this convergence condition correct?
-                      if current_needle_loss < best_needle_loss or abs(gtd_needle) > -c2 * gtd: #or abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
+                      if current_needle_loss < best_needle_loss or abs(gtd_needle) > -c2 * gtd or armijo_condition: #or abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
                           best_needle_loss = current_needle_loss
                           best_needle_t = needle_t.clone()
 #TODO: try a exponential scaling here of 2**n
