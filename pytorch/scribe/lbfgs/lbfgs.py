@@ -884,6 +884,8 @@ class LBFGS(Optimizer):
                   # Iteratively increase t until loss no longer decreases
                   while True:
                       d_needle = self._gather_flat_grad().neg()
+                      total_norm = torch.linalg.vector_norm(d_needle, ord=0.75)
+                      d_needle = d_needle.div_(total_norm)
                       current_needle_loss, _ = self._directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
                       if current_needle_loss < best_needle_loss:
                           best_needle_loss = current_needle_loss
@@ -900,8 +902,6 @@ class LBFGS(Optimizer):
                   t = torch.tensor(t).to(first_param.device)
                   d = d.to(first_param.device)
 
-                  total_norm = torch.linalg.vector_norm(d, ord=0.75)
-                  d = d.div_(total_norm)
                   self._add_grad(t, d) # Use best t for add_grad
 
                   loss_device = d.device
