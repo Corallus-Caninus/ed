@@ -868,7 +868,7 @@ class LBFGS(Optimizer):
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
               Needle = False
-              best_needle_loss = float('inf') # Initialize best_needle_loss here to ensure it's always defined
+              best_needle_loss = loss # Initialize best_needle_loss here to ensure it's always defined
 #TODO: consider linesearch with only the c2 condition to ensure the loss decreases if it can, take the resulting step size either way (loss can increase if necessary)
 #TODO: easiest way is possible: scale norm until 1 doesnt increase loss then scale t until loss stops decreasing up to a max iteration
 #TODO: consider searching for the norm term too s.t. the norm <= 1. This can be a custom linesearch that searches for step size and norm values, every time t drops below 1 we iteratively reduce the norm or linesearch the norm then try step size again. On failure we can pass the data point (can converge the entire dataset) or we bump the model with epsilon (the current solution essentially, possible minimizing the loss increase to some constant amount via linesearch) or if not a constant amount the min of loss_increase/t Consolidate all these features to one linesearch algorithm with an equation that minimizes loss increase and maximizes t by varying norm and t
