@@ -879,22 +879,28 @@ class LBFGS(Optimizer):
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
                   best_needle_t = needle_t.clone()
+#TODO: just use x_init
+#TODO we need to check convergence on the needle
                   x_init_needle = self._clone_param() # Clone params for needle search
 
                   # Iteratively increase t until loss no longer decreases
                   while True:
+#TODO: use raw gradients so we dont double norm here
                       d_needle = self._gather_flat_grad().neg()
+#TODO: sharpen routine first before pressure
                       total_norm = torch.linalg.vector_norm(d_needle, ord=0.75)
                       d_needle = d_needle.div_(total_norm)
                       current_needle_loss, _ = self._directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
                       if current_needle_loss < best_needle_loss:
                           best_needle_loss = current_needle_loss
                           best_needle_t = needle_t.clone()
+#TODO: try a exponential scaling here of 2**n
                           needle_t *= 2  # Increase t for next iteration
                       else:
                           break # Stop if loss no longer decreasing
 
                   t = best_needle_t # Use best t found
+#TODO: this should just be the needle we linesearched
                   d = self._gather_flat_grad().neg() # Recompute direction with best t
 
                   self.t  = t
@@ -937,7 +943,7 @@ class LBFGS(Optimizer):
             self._add_grad(t, d)
             loss_device = d.device
             print(f" \n -----------got stepsize: {t} and loss: \033[92m{best_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
-            opt_cond =  best_needle_loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision # Use best_needle_loss
+            opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision # Use best_needle_loss
 
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
 #              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
