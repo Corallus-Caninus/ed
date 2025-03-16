@@ -513,31 +513,28 @@ class LBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
+    def _needle_directional_evaluate(self, closure, x, t, d):
+        self._add_grad(t, d)
+        loss = float(closure())
+        flat_grad = self._gather_flat_grad()
+#        flat_grad = self._gather_flat_grad()
+        self._set_param(x)
+        return loss, flat_grad
+
     @torch.jit.script
     def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, direction_clop: float, gradient_clop: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 5e-5
-#TODO: underflow
+#TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
         if t < 1:
           similarity = similarity/t
-#        q = flat_grad.neg()
         q = flat_grad.neg()
-#TODO: this may be numerically unstable (too many transformations from the gradient) the idea is to help align with a locallity while still maintaining the l2 properties for Y and curvature selection
-#        total_norm = torch.linalg.vector_norm(q, ord=1.).to("cuda") # Move total_norm to direction_device
-#        q = q.div_(total_norm)
-#TODO: clop?
-#        mask = torch.logical_and(q> -direction_clop, q< direction_clop) #TODO: extract to sub_variance hyperparameter
-
-#        q[torch.logical_and(q > -gradient_clop,q < gradient_clop)] = 0
-#        q = q.to_sparse()
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
 #TODO: dont type like this, use the precision of the architecture. If we do use an accumulation higher precision type standardize throughout the algorithm and expose as a singular hyperparameter
-#        direction_similarity = torch.empty_like(q, dtype=torch.float32, device=direction_device) # Preallocate direction_similarity tensor
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
 
-#TODO: vectorize alignment mask here since its immutable
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
 #TODO: consider scaling alignment by previous step size to resist early convergence. e.g. if t < 1 alignment=t*alignment
@@ -867,13 +864,15 @@ class LBFGS(Optimizer):
                       obj_func, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
 #                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
+#TODO: there is something simpler here in terms of linesearch. formulate the norm with the step size based on convergence and loss reduction such that we maximize step size and loss reduction
+#TODO: possible use interpolation for the norm and step size for loss reduction Need to formulate the equation first for step size and norm for loss reduction
+#TODO: the norm may be able to formulate into cubic interpolation by replacing the gtd convergence component with norm since it has similar behavior. I'm not sure about this. Probably need to formulate it myself since the norm relationship to loss reduction is nonlinear and and possibly concave
+#TODO: Another solution is to decrease the norm order if the loss doesnt reduce and only break when decreasing the order does not also decrease the loss
               Needle = False
-              best_needle_loss = loss # Initialize best_needle_loss here to ensure it's always defined
-#TODO: consider linesearch with only the c2 condition to ensure the loss decreases if it can, take the resulting step size either way (loss can increase if necessary)
-#TODO: easiest way is possible: scale norm until 1 doesnt increase loss then scale t until loss stops decreasing up to a max iteration
-#TODO: consider searching for the norm term too s.t. the norm <= 1. This can be a custom linesearch that searches for step size and norm values, every time t drops below 1 we iteratively reduce the norm or linesearch the norm then try step size again. On failure we can pass the data point (can converge the entire dataset) or we bump the model with epsilon (the current solution essentially, possible minimizing the loss increase to some constant amount via linesearch) or if not a constant amount the min of loss_increase/t Consolidate all these features to one linesearch algorithm with an equation that minimizes loss increase and maximizes t by varying norm and t
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
+                  t = 1. #Reset t to 1 for after needling
+                  best_needle_loss = float("inf") # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
                   Needle = True
                   first_param = next(self.param_groups[0]['params'].__iter__())
@@ -885,36 +884,32 @@ class LBFGS(Optimizer):
 
                   # Iteratively increase t until loss no longer decreases
 #TODO: initialize the gtd here instead of the original gtd.
+                  flat_grad = self._gather_flat_grad()
+                  d_needle = flat_grad.neg()
+                  total_norm = torch.linalg.vector_norm(d_needle, ord=0.75)
+                  d_needle = d_needle.div_(total_norm)
+#NOTE: I use l1 norm so we converge quickly and dont over apply the needle
+                  gtd = d_needle * flat_grad
+                  gtd = gtd.sum()
                   while True:
 #TODO: use raw gradients so we dont double norm here
-                      d_needle = self._gather_flat_grad().neg()
+#TODO: only calculate the d_needle once since we are linesearching it
+#TODO: sharpen routine first before pressure
+                      current_needle_loss, flat_grad= self._needle_directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
                       gtd_needle_sparse_product = flat_grad * d_needle #TODO: use raw gradients so we dont double norm here
                       gtd_needle = gtd_needle_sparse_product.sum() # g * d
                       del gtd_needle_sparse_product
-#TODO: sharpen routine first before pressure
-                      total_norm = torch.linalg.vector_norm(d_needle, ord=0.75)
-                      d_needle = d_needle.div_(total_norm)
-                      current_needle_loss, _ = self._directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
                       armijo_condition = current_needle_loss <= best_needle_loss + c1 * needle_t * gtd
-#TODO: is this convergence condition correct?
-                      if current_needle_loss < best_needle_loss or abs(gtd_needle) > -c2 * gtd or armijo_condition: #or abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
+                      if current_needle_loss < best_needle_loss and abs(gtd_needle) > -c2 * gtd and armijo_condition: #and abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
                           best_needle_loss = current_needle_loss
                           best_needle_t = needle_t.clone()
-#TODO: try a exponential scaling here of 2**n
-                          needle_t *= 2  # Increase t for next iteration
+#TODO: try a exponential scaling here of 2**n. exponential may not be right but we need something more efficient like interpolation. we may be able to just guess how far by the convergence rate
+                          needle_t = 2*needle_t  # Increase t for next iteration
                       else:
                           break # Stop if loss no longer decreasing
 
-                  t = best_needle_t # Use best t found
-#TODO: this should just be the needle we linesearched
-                  d = self._gather_flat_grad().neg() # Recompute direction with best t
 
-                  self.t  = t
-                  first_param = next(self.param_groups[0]['params'].__iter__())
-                  t = torch.tensor(t).to(first_param.device)
-                  d = d.to(first_param.device)
-
-                  self._add_grad(t, d) # Use best t for add_grad
+                  self._add_grad(best_needle_t, d_needle) # Use best t for add_grad
 
                   loss_device = d.device
                   print(f" \n -----------got needle stepsize: {t} and loss: \033[92m{best_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
@@ -948,7 +943,7 @@ class LBFGS(Optimizer):
             d = d.to(first_param.device)
             self._add_grad(t, d)
             loss_device = d.device
-            print(f" \n -----------got stepsize: {t} and loss: \033[92m{best_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
+            print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
             opt_cond =  loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision # Use best_needle_loss
 
 #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
