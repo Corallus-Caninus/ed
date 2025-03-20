@@ -51,7 +51,7 @@ pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
 #optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
-optimizer = LBFGS(model.parameters(), lr=1., history_size=4., tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-7, direction_clop=5e-7, c1=3e-4, c2=0.9,direction_device="cpu", bracket_shift = 0.25, bracket_shove = 0.5)
+optimizer = LBFGS(model.parameters(), lr=1., history_size=4., tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-14, direction_clop=1e-9, c1=3e-4, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -94,7 +94,7 @@ def closure():
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   cache = None
   chunk_size=0 #1000
-  grad_vector_size = 500 #5
+  grad_vector_size = 200 #5
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
@@ -148,7 +148,7 @@ while True:
   random_index = torch.randint(0, dataset_size, (1,)).item() # Generate a random index
   batch_train = dataset[random_index]['text'] # Access data using random index
 
-  tokens = tokenizer(batch_train,truncation=True, max_length=500,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+  tokens = tokenizer(batch_train,truncation=True, max_length=200,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
   print("got num_tokens: " + str(input_ids.size(1)))
 
