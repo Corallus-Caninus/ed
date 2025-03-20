@@ -12,7 +12,7 @@ from lbfgs import LBFGS
 from datasets import load_dataset
 import datasets
 from datasets import Dataset
-from accelerate import Accelerator, FullyShardedDataParallelPlugin
+from accelerate import Accelerator
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
 #from mamba_ssm import Mamba2
 
