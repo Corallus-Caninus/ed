@@ -505,7 +505,7 @@ class LBFGS(Optimizer):
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d)
         loss = float(closure())
-        flat_grad = self._gather_norm_flat_grad(1, True)
+        flat_grad = self._gather_flat_grad()
 #        flat_grad = self._gather_flat_grad()
         self._set_param(x)
         return loss, flat_grad
@@ -522,11 +522,13 @@ class LBFGS(Optimizer):
     def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, direction_clop: float, gradient_clop: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
-        similarity = 1e-9
+        similarity = 0.
 #TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
         if t < 1:
           similarity = similarity/t
         q = flat_grad.neg().to("cuda")
+        total_norm = torch.linalg.vector_norm(q, ord=0.75).to("cuda") # Move total_norm to direction_device
+        q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -direction_clop, q < direction_clop) #TODO: extract to sub_variance hyperparameter
 
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
@@ -615,7 +617,7 @@ class LBFGS(Optimizer):
 #      state["func_evals"] += 1
       al = []
 
-      flat_grad = self._gather_norm_flat_grad(1, True)
+#      flat_grad = self._gather_flat_grad()
 #      flat_grad = self._gather_norm_flat_grad(2, False)
 #      flat_grad = self._gather_flat_grad()
 #TODO: remove this if we remove gradient normalization.
@@ -662,7 +664,7 @@ class LBFGS(Optimizer):
         prev_flat_grad = None
 
       n_iter = 0
-      d = flat_grad.neg() # Initialize d on direction_device
+#      d = flat_grad.neg() # Initialize d on direction_device
       first_param = next(self.param_groups[0]['params'].__iter__())
       t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)
       ls_failed = False
@@ -684,6 +686,7 @@ class LBFGS(Optimizer):
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET")
               d = self._gather_flat_grad().neg()
+              flat_grad = self._gather_flat_grad()
 #TODO: if we do this we should norm inf for Rollover stability
               total_norm = torch.linalg.vector_norm(d, ord=0.75) # Move total_norm to direction_device
               d = d/total_norm
