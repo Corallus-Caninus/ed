@@ -535,7 +535,6 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
         for i in range(num_old - 1, -1, -1):
-#TODO: the only weird thing about this implementation is that ro can scale but direction similarity is always maxed by the sum of the given norms. This isn't necessarily bad as it helps for global direction search but it doesnt put as much emphasis on the locality. At the same time, since we are multiplying ro by similarity, everything is proportional anyways up to the max of ro given the sum of the norm order. also the ro for a given direction decays over time due to the inability of direction similarity to be > 1 unless we exclusively use the inf order for the first norm but then it is not the same as old_dirs and may as well not be normalized.. that isnt necesarily true since ro is the alpha param for old_dirs. ro can prevent decay itself since its unbounded there is still decay but we also have the rest of the approximation to support a given direction approximation.
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
