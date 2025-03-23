@@ -15,7 +15,7 @@ from torch.optim.optimizer import Optimizer, ParamsT
 #TODO: ensure g_prev and gtd_prev are processed on cuda device from swap
 
 
-__all__ = ["LBFGS"]
+__all__ = ["FBFGS"]
 
 
 def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
@@ -302,7 +302,7 @@ def _strong_wolfe(
     return success, f_new, g_new.to("cuda"), t, ls_func_evals
 
 
-class LBFGS(Optimizer):
+class FBFGS(Optimizer):
     """Implements L-BFGS algorithm.
 
     # Memory allocation strategies:
@@ -390,7 +390,7 @@ class LBFGS(Optimizer):
 
         if len(self.param_groups) != 1:
             raise ValueError(
-                "LBFGS doesn't support per-parameter options " "(parameter groups)"
+                "FBFGS doesn't support per-parameter options " "(parameter groups)"
             )
 
         self._params = self.param_groups[0]["params"]
@@ -604,7 +604,7 @@ class LBFGS(Optimizer):
       capture_min_step=group["capture_min_step"]
       capture_max_step=group["capture_max_step"]
 
-      # NOTE: LBFGS has only global state, but we register it as state for
+      # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
       state = self.state[self._params[0]]
 #      state.setdefault("func_evals", 0)
@@ -669,6 +669,7 @@ class LBFGS(Optimizer):
       t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)
       ls_failed = False
       # optimize for a max of max_iter iterations
+#TODO: we arent storing the last iteration in history. Consider reworking the last iteration logic for step function
       while n_iter < max_iter:
           # keep track of nb of iterations
           gc.collect()
@@ -738,12 +739,13 @@ class LBFGS(Optimizer):
               if  ys >= 1e-8  or ys <= -1e-8:
                 # updating memory
 #                if len(old_dirs) <= history_size:
-                if self.direction_device == 'cuda' and torch.cuda.is_available():
+#TODO: fix this so any cuda device gets this
+                if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
-                    cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
+                    cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
                     print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {history_size} GB") # Debug print
                     while cuda_memory_allocated >= history_size:#TODO: history size is the amount of memory available from the device
-                        cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
+                        cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
                         # shift  history by one (limited-memory)
                         old_dirs.pop(0)
                         old_stps.pop(0)
@@ -1024,7 +1026,7 @@ class LBFGS(Optimizer):
       return orig_loss
 
     def save_history(self, filename):
-        """Save LBFGS history to a file."""
+        """Save FBFGS history to a file."""
         state = self.state[self._params[0]]
         state_dict = self.state[self._params[0]]
         history = {
@@ -1038,7 +1040,7 @@ class LBFGS(Optimizer):
         torch.save(history, filename)
 
     def load_history(self, filename):
-        """Load LBFGS history from a file."""
+        """Load FBFGS history from a file."""
         try:
             history = torch.load(filename)
             state = self.state[self._params[0]]
@@ -1058,11 +1060,11 @@ class LBFGS(Optimizer):
 
             if state["prev_flat_grad"] is not None:
                 state["prev_flat_grad"] = state["prev_flat_grad"].to(device) # Move prev_flat_grad to direction_device if it exists
-            print(f"LBFGS history loaded from {filename}")
+            print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
         except Exception as e:
-            print(f"Error loading LBFGS history from {filename}: {e}. Starting from scratch.")
+            print(f"Error loading FBFGS history from {filename}: {e}. Starting from scratch.")
 
     def _compute_direction(self, n_iter, flat_grad, prev_flat_grad, d, t, old_dirs, old_stps, ro, loss, state):
         """Compute the L-BFGS search direction."""

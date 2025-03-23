@@ -8,7 +8,7 @@ import gc
 from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel 
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Dataset, DataLoader
-from lbfgs import LBFGS
+from fbfgs import FBFGS
 from datasets import load_dataset
 import datasets
 from datasets import Dataset
@@ -26,7 +26,7 @@ import time
 tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
 model_id = "AntonV/mamba2-130m-hf"
 model_id = "state-spaces/mamba2-130m"
-history_filename = "lbfgs_history.pth"
+history_filename = "fbfgs_history.pth"
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
@@ -50,8 +50,8 @@ else: # Load initial model weights from AntonV if no checkpoint exists
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
-#optimizer = LBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
-optimizer = LBFGS(model.parameters(), lr=1., history_size=4., tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-11, direction_clop=1e-10, c1=3e-4, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+#optimizer = FBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=10.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=1e-10, direction_clop=1e-10, c1=3e-4, c2=0.9,direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -160,7 +160,7 @@ while True:
       unwrapped_model = accelerator.unwrap_model(model)
       accelerator.save(unwrapped_model.state_dict(), filename)
       optimizer.save_history(history_filename)
-      print(f"Model and LBFGS history saved to {filename} and {history_filename} at step {step_count}")
+      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}")
 
   torch.cuda.empty_cache()
   prompt = "The Factor programming language is "
