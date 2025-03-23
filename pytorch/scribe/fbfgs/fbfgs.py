@@ -425,7 +425,7 @@ class FBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         grad = torch.cat(views, 0)
-#        norm = torch.linalg.vector_norm(grad, ord="inf"
+#        norm = torch.linalg.vector_norm(grad, ord=1.
 #        grad = grad/norm
 #        return torch.cat(views, 0).to(self.direction_device)
         return grad
@@ -527,7 +527,7 @@ class FBFGS(Optimizer):
         if t < 1:
           similarity = similarity/t
         q = flat_grad.neg().to("cuda")
-        total_norm = torch.linalg.vector_norm(q, ord="inf").to("cuda") # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -direction_clop, q < direction_clop) #TODO: extract to sub_variance hyperparameter
 
@@ -549,7 +549,7 @@ class FBFGS(Optimizer):
 #                similarity += 0.1*similarity*(1 - abs(direction_similarity)) #TODO: we assume worst case which is variance has doubled ?  We can calculate this based on the alignment. the less aligned the more variance in the solution.
 #              else:
 #                similarity += 5e-8 #TODO: a better way to prevent PowerPoints
-              similarity += 0.1*similarity
+#              similarity += 0.1*similarity
             else:
               hit_miss = hit_miss + str("_ ")
 
@@ -565,7 +565,7 @@ class FBFGS(Optimizer):
 
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
-        total_norm = torch.linalg.vector_norm(d, ord="inf").to("cuda") # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(d, ord=1.).to("cuda") # Move total_norm to direction_device
         d = d.div_(total_norm)
 #        direction = d
 #        mask = torch.logical_and(direction > -direction_clop, direction < direction_clop) #TODO: extract to sub_variance hyperparameter
@@ -690,7 +690,7 @@ class FBFGS(Optimizer):
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
 #TODO: if we do this we should norm inf for Rollover stability
-              total_norm = torch.linalg.vector_norm(d, ord="inf") # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(d, ord=1.) # Move total_norm to direction_device
               d = d/total_norm
 #              d[torch.logical_and(d > -self.direction_clop,d < self.direction_clop)] = 0
 #              d = d.to_sparse()
@@ -709,7 +709,7 @@ class FBFGS(Optimizer):
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               s_dense = (d.mul(t))
               ys = y.dot(s_dense)
-              total_norm = torch.linalg.vector_norm(y, ord="inf") # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(y, ord=1.) # Move total_norm to direction_device
               y = y/total_norm
               y[torch.logical_and(y > -self.gradient_clop,y < self.gradient_clop)] = 0
               if self.gradient_clop != 0:
@@ -717,7 +717,7 @@ class FBFGS(Optimizer):
                 print("y-delta elements: " + str((y.values() != 0).sum()) + " total: " + str(y.numel()), end=' ')
 #              else:
 #                print("y-delta elements: " + str((y != 0).sum()) + " total: " + str(y.numel()), end=' ')
-#              total_norm = torch.linalg.vector_norm(d, ord="inf") # Move total_norm to direction_device
+#              total_norm = torch.linalg.vector_norm(d, ord=1.) # Move total_norm to direction_device
 #              d = d/total_norm
               d[torch.logical_and(d > -self.direction_clop,d < self.direction_clop)] = 0
               d = d.to_sparse()
@@ -897,7 +897,7 @@ class FBFGS(Optimizer):
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   t = 1. #Reset t to 1 for after needling
-                  best_needle_loss = float("inf") # Initialize best_needle_loss here to ensure it's always defined
+                  best_needle_loss = float(1.) # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
                   Needle = True
                   first_param = next(self.param_groups[0]['params'].__iter__())
