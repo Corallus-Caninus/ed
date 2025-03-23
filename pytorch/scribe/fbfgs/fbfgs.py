@@ -425,7 +425,7 @@ class FBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         grad = torch.cat(views, 0)
-#        norm = torch.linalg.vector_norm(grad, ord=0.75
+#        norm = torch.linalg.vector_norm(grad, ord="inf"
 #        grad = grad/norm
 #        return torch.cat(views, 0).to(self.direction_device)
         return grad
@@ -527,7 +527,7 @@ class FBFGS(Optimizer):
         if t < 1:
           similarity = similarity/t
         q = flat_grad.neg().to("cuda")
-        total_norm = torch.linalg.vector_norm(q, ord=0.75).to("cuda") # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(q, ord="inf").to("cuda") # Move total_norm to direction_device
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -direction_clop, q < direction_clop) #TODO: extract to sub_variance hyperparameter
 
@@ -535,6 +535,7 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
         for i in range(num_old - 1, -1, -1):
+#TODO: the only weird thing about this implementation is that ro can scale but direction similarity is always maxed by the sum of the given norms. This isn't necessarily bad as it helps for global direction search but it doesnt put as much emphasis on the locality. At the same time, since we are multiplying ro by similarity, everything is proportional anyways up to the max of ro given the sum of the norm order. also the ro for a given direction decays over time due to the inability of direction similarity to be > 1 unless we exclusively use the inf order for the first norm but then it is not the same as old_dirs and may as well not be normalized.. that isnt necesarily true since ro is the alpha param for old_dirs. ro can prevent decay itself since its unbounded there is still decay but we also have the rest of the approximation to support a given direction approximation.
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
@@ -565,7 +566,7 @@ class FBFGS(Optimizer):
 
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
-        total_norm = torch.linalg.vector_norm(d, ord=0.75).to("cuda") # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(d, ord="inf").to("cuda") # Move total_norm to direction_device
         d = d.div_(total_norm)
 #        direction = d
 #        mask = torch.logical_and(direction > -direction_clop, direction < direction_clop) #TODO: extract to sub_variance hyperparameter
@@ -690,7 +691,7 @@ class FBFGS(Optimizer):
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
 #TODO: if we do this we should norm inf for Rollover stability
-              total_norm = torch.linalg.vector_norm(d, ord=0.75) # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(d, ord="inf") # Move total_norm to direction_device
               d = d/total_norm
 #              d[torch.logical_and(d > -self.direction_clop,d < self.direction_clop)] = 0
 #              d = d.to_sparse()
@@ -709,7 +710,7 @@ class FBFGS(Optimizer):
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               s_dense = (d.mul(t))
               ys = y.dot(s_dense)
-              total_norm = torch.linalg.vector_norm(y, ord=0.75) # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(y, ord="inf") # Move total_norm to direction_device
               y = y/total_norm
               y[torch.logical_and(y > -self.gradient_clop,y < self.gradient_clop)] = 0
               if self.gradient_clop != 0:
@@ -717,7 +718,7 @@ class FBFGS(Optimizer):
                 print("y-delta elements: " + str((y.values() != 0).sum()) + " total: " + str(y.numel()), end=' ')
 #              else:
 #                print("y-delta elements: " + str((y != 0).sum()) + " total: " + str(y.numel()), end=' ')
-#              total_norm = torch.linalg.vector_norm(d, ord=0.75) # Move total_norm to direction_device
+#              total_norm = torch.linalg.vector_norm(d, ord="inf") # Move total_norm to direction_device
 #              d = d/total_norm
               d[torch.logical_and(d > -self.direction_clop,d < self.direction_clop)] = 0
               d = d.to_sparse()
