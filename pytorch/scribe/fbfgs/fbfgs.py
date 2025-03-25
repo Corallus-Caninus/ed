@@ -358,8 +358,7 @@ class FBFGS(Optimizer):
         bracket_shove: float =(1/3),
         capture_min_step: float =1.,
         capture_max_step: float =100,
-        gradient_clop: float = 5e-7,
-        direction_clop: float = 5e-7,
+        clop: float = 5e-7,
         direction_device: str = 'cuda'
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
@@ -382,8 +381,7 @@ class FBFGS(Optimizer):
             bracket_shove=bracket_shove,
             capture_min_step=capture_min_step,
             capture_max_step=capture_max_step,
-            gradient_clop=gradient_clop,
-            direction_clop=direction_clop,
+            clop=clop,
             direction_device=direction_device
         )
         super().__init__(params, defaults)
@@ -395,8 +393,8 @@ class FBFGS(Optimizer):
 
         self._params = self.param_groups[0]["params"]
         self._numel_cache = None
-        self.gradient_clop = gradient_clop
-        self.direction_clop = direction_clop
+        self.clop = clop
+        self.clop = clop
         self.direction_device = direction_device
         self.t = 1
 
@@ -457,7 +455,7 @@ class FBFGS(Optimizer):
 #TODO: may be worth taking the top K here to have deterministic memory, do this after clopping to create a floor for allocation since we want to allow very sparse outlier gradients
 #        if isClop:
 #          print("gradient elements: " + str((views != 0).sum()) + " total: " + str(views.numel()), end=' ')
-#          views[torch.logical_and(views > -self.gradient_clop,views < self.gradient_clop)] = 0
+#          views[torch.logical_and(views > -self.clop,views < self.clop)] = 0
 #          views = views.to_sparse()
         return views #.to("cpu")
     #TODO: clip out NaN based on dtype max value
@@ -519,7 +517,7 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, direction_clop: float, gradient_clop: float) -> Tensor:
+    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 0.
@@ -529,7 +527,7 @@ class FBFGS(Optimizer):
         q = flat_grad.neg().to("cuda")
         total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
         q = q.div_(total_norm)
-#        mask = torch.logical_and(q > -direction_clop, q < direction_clop) #TODO: extract to sub_variance hyperparameter
+#        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
@@ -568,7 +566,7 @@ class FBFGS(Optimizer):
         total_norm = torch.linalg.vector_norm(d, ord=1.).to("cuda") # Move total_norm to direction_device
         d = d.div_(total_norm)
 #        direction = d
-#        mask = torch.logical_and(direction > -direction_clop, direction < direction_clop) #TODO: extract to sub_variance hyperparameter
+#        mask = torch.logical_and(direction > -clop, direction < clop) #TODO: extract to sub_variance hyperparameter
 #        direction[mask] = 0
 #        d = direction.to_sparse()
 #        print("direction elements: " + str((direction != 0).sum()) )
@@ -692,7 +690,7 @@ class FBFGS(Optimizer):
 #TODO: if we do this we should norm inf for Rollover stability
               total_norm = torch.linalg.vector_norm(d, ord=1.) # Move total_norm to direction_device
               d = d/total_norm
-#              d[torch.logical_and(d > -self.direction_clop,d < self.direction_clop)] = 0
+#              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
               H_diag = 1
               t = 1
@@ -711,16 +709,17 @@ class FBFGS(Optimizer):
               ys = y.dot(s_dense)
               total_norm = torch.linalg.vector_norm(y, ord=1.) # Move total_norm to direction_device
               y = y/total_norm
-              y[torch.logical_and(y > -self.gradient_clop,y < self.gradient_clop)] = 0
-              if self.gradient_clop != 0:
+              y[torch.logical_and(y > -self.clop,y < self.clop)] = 0
+#              y = y*total_norm
+#
+#              total_norm = torch.linalg.vector_norm(y, ord=float("inf")) # Move total_norm to direction_device
+#              y = y/total_norm
+              if self.clop != 0:
                 y = y.to_sparse()
                 print("y-delta elements: " + str((y.values() != 0).sum()) + " total: " + str(y.numel()), end=' ')
-#              else:
-#                print("y-delta elements: " + str((y != 0).sum()) + " total: " + str(y.numel()), end=' ')
-#              total_norm = torch.linalg.vector_norm(d, ord=1.) # Move total_norm to direction_device
-#              d = d/total_norm
-              d[torch.logical_and(d > -self.direction_clop,d < self.direction_clop)] = 0
-              d = d.to_sparse()
+              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+              if self.clop != 0:
+                d = d.to_sparse()
               s = (d.mul(t)) # Move s to direction_device
               print("S elements: " + str((s.values() != 0).sum()) + " total: " + str(s.numel()), end=' ')
 #TODO: may need to calculate ys before
@@ -769,16 +768,20 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-                if self.gradient_clop > 0:
+                if self.clop > 0:
                   y_sparse = y.to_sparse()
-                if self.gradient_clop > 0:
+                if self.clop > 0:
                   y_sparse = y.to(self.direction_device) # Store y_sparse on direction_device
                   old_dirs.append(y_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
                 else:
                   y_sparse = y.to(self.direction_device) # Store y_sparse on direction_device
                   old_dirs.append(y_sparse.to(self.direction_device)) # NOTE: was cpu
-                s_sparse = s.to_sparse().to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
-                old_stps.append(s_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
+                if self.clop > 0:
+                  s_sparse = s.to_sparse().to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
+                  old_stps.append(s_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
+                else:
+                  s_sparse = s.to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
+                  old_stps.append(s_sparse.to(self.direction_device)) # NOTE: was cpu
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               if n_iter > max_iter:
                 break
@@ -815,9 +818,9 @@ class FBFGS(Optimizer):
 #              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
 
               gc.collect()
-#              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
+#              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", clop=self.clop, clop=self.clop)
 #TODO: TEST: use the l1 norm to bootstrap alignment/selection and rely on the l2 for convergence metrics and curvature.
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t, direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop)
 
               # Move history back to CPU
 #              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
@@ -937,7 +940,7 @@ class FBFGS(Optimizer):
                   self._add_grad(best_needle_t, d_needle) # Use best t for add_grad
 
                   loss_device = d.device
-                  print(f" \n -----------got needle stepsize: {best_needle_t} and loss: \033[92m{best_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
+                  print(f" \n -----------got needle stepsize: {needle_t} and loss: \033[92m{current_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
                   prev_flat_grad = None
 
                 print("\033[91mLinesearch failure, resetting..\033[0m")
@@ -1113,15 +1116,19 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache()
 
-                if self.gradient_clop != 0:
+                if self.clop != 0:
                   y_sparse = y.to_sparse()
                 y_sparse = y.to(self.direction_device) # Store on direction_device (CPU if direction_device='cpu')
-                if self.gradient_clop != 0:
+                if self.clop != 0:
                   old_dirs.append(y_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
                 else:
                   old_dirs.append(y_sparse) # Store on direction_device (CPU if direction_device='cpu')
-                s_sparse = s.to_sparse().to(self.direction_device) # Store on direction_device (CPU if direction_device='cpu')
-                old_stps.append(s_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
+                if self.clop != 0:
+                  old_stps.append(s_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
+                else:
+                  old_stps.append(s_sparse) # Store on direction_device (CPU if direction_device='cpu')
+#                s_sparse = s.to_sparse().to(self.direction_device) # Store on direction_device (CPU if direction_device='cpu')
+#                old_stps.append(s_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # Store on direction_device (CPU if direction_device='cpu')
 
                 y_squared = (y * y).sum()
@@ -1139,7 +1146,7 @@ class FBFGS(Optimizer):
             H_diag_calc_device = H_diag.to("cuda")
 
 
-            d = self.direction_approximate(old_stps_calc_device, old_dirs_calc_device, ro_calc_device, flat_grad_calc_device, H_diag_calc_device, direction_clop=self.direction_clop, gradient_clop=self.gradient_clop)
+            d = self.direction_approximate(old_stps_calc_device, old_dirs_calc_device, ro_calc_device, flat_grad_calc_device, H_diag_calc_device,  clop=self.clop)
             torch.cuda.empty_cache()
             del H_diag
 
@@ -1152,7 +1159,7 @@ class FBFGS(Optimizer):
         d.div_(total_norm)
 
         direction_values = d.coalesce().values()
-        mask = torch.logical_and(direction_values > -self.direction_clop, direction_values < self.direction_clop)
+        mask = torch.logical_and(direction_values > -self.clop, direction_values < self.clop)
         direction_values[mask] = 0
         print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
         indices = d.coalesce().indices()
