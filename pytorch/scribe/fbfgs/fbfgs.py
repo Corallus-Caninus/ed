@@ -359,7 +359,8 @@ class FBFGS(Optimizer):
         capture_min_step: float =1.,
         capture_max_step: float =100,
         clop: float = 5e-7,
-        direction_device: str = 'cuda'
+        direction_device: str = 'cuda',
+        norm: float = 1.0
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -382,7 +383,8 @@ class FBFGS(Optimizer):
             capture_min_step=capture_min_step,
             capture_max_step=capture_max_step,
             clop=clop,
-            direction_device=direction_device
+            direction_device=direction_device,
+            norm=norm
         )
         super().__init__(params, defaults)
 
