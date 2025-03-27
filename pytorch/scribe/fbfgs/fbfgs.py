@@ -423,8 +423,8 @@ class FBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         grad = torch.cat(views, 0)
-#        norm = torch.linalg.vector_norm(grad, ord=1.
-#        grad = grad/norm
+#        norm_val = torch.linalg.vector_norm(grad, ord=1.)
+#        grad = grad/norm_val
 #        return torch.cat(views, 0).to(self.direction_device)
         return grad
 #TODO: clip out NaN based on dtype max value
@@ -517,7 +517,7 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float) -> Tensor:
+    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 0.
@@ -563,7 +563,7 @@ class FBFGS(Optimizer):
 
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
-        total_norm = torch.linalg.vector_norm(d, ord=1.).to("cuda") # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda") # Move total_norm to direction_device
         d = d.div_(total_norm)
 #        direction = d
 #        mask = torch.logical_and(direction > -clop, direction < clop) #TODO: extract to sub_variance hyperparameter
@@ -601,6 +601,7 @@ class FBFGS(Optimizer):
       bracket_shove=group["bracket_shove"]
       capture_min_step=group["capture_min_step"]
       capture_max_step=group["capture_max_step"]
+      norm = group["norm"]
 
       # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
@@ -688,7 +689,7 @@ class FBFGS(Optimizer):
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
 #TODO: if we do this we should norm inf for Rollover stability
-              total_norm = torch.linalg.vector_norm(d, ord=1.) # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               d = d/total_norm
 #              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
@@ -820,7 +821,7 @@ class FBFGS(Optimizer):
               gc.collect()
 #              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", clop=self.clop, clop=self.clop)
 #TODO: TEST: use the l1 norm to bootstrap alignment/selection and rely on the l2 for convergence metrics and curvature.
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop)
+              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
 
               # Move history back to CPU
 #              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
@@ -1146,7 +1147,7 @@ class FBFGS(Optimizer):
             H_diag_calc_device = H_diag.to("cuda")
 
 
-            d = self.direction_approximate(old_stps_calc_device, old_dirs_calc_device, ro_calc_device, flat_grad_calc_device, H_diag_calc_device,  clop=self.clop)
+            d = self.direction_approximate(old_stps_calc_device, old_dirs_calc_device, ro_calc_device, flat_grad_calc_device, H_diag_calc_device,  clop=self.clop, norm=norm)
             torch.cuda.empty_cache()
             del H_diag
 
@@ -1155,7 +1156,7 @@ class FBFGS(Optimizer):
         else:
             prev_flat_grad = flat_grad
 
-        total_norm = torch.abs(d.coalesce().values()).sum().to("cuda") # Norm on calculation device
+        total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=norm).to("cuda") # Norm on calculation device
         d.div_(total_norm)
 
         direction_values = d.coalesce().values()
