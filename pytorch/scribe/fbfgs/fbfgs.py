@@ -710,7 +710,7 @@ class FBFGS(Optimizer):
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               s_dense = (d.mul(t))
               ys = y.dot(s_dense)
-              total_norm = torch.linalg.vector_norm(y, ord=1.) # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(y, ord=norm) # Move total_norm to direction_device
               y = y/total_norm
               y[torch.logical_and(y > -self.clop,y < self.clop)] = 0
 #              y = y*total_norm
