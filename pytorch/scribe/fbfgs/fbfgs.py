@@ -99,6 +99,20 @@ class SparseFlatTensor:
             return NotImplemented
 
     @staticmethod
+    def add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor: Tensor) -> Tensor:
+        """
+        Adds a SparseFlatTensor to a dense tensor.
+
+        Args:
+            sparse_tensor (SparseFlatTensor): The sparse tensor to add.
+            dense_tensor (Tensor): The dense tensor to add to.
+
+        Returns:
+            Tensor: The dense result of the addition.
+        """
+        return sparse_tensor.to_dense() + dense_tensor
+
+    @staticmethod
     def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
         """
         Computes the dot product of a SparseFlatTensor with a dense tensor, optimized for sparsity.
