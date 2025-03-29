@@ -109,7 +109,7 @@ class SparseFlatTensor:
          # 2. Vectorized value extraction using advanced indexing
          values = dense_tensor.view(-1)[flat_indices]
 
-         return (starts.to(device), ends.to(device), values.to(device), total_size)
+         return (starts.to(device), ends.to(device), values.to(device), torch.tensor(total_size))
 
     # Add methods here later (e.g., to_dense, to_sparse, etc.)
 
