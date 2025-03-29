@@ -81,7 +81,7 @@ class SparseFlatTensor:
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
 
     @staticmethod
-    def sparse_dot_dense(sparse_tensor_arg, dense_tensor):
+    def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
         """
         Computes the dot product of a SparseFlatTensor with a dense tensor, optimized for sparsity.
         """
