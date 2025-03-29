@@ -78,12 +78,11 @@ class SparseFlatTensor:
 
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
 
-    def __rmul__(self, scalar):
+    def rmul(self, scalar):
         """
         Scalar multiplication (right operand) for SparseFlatTensor.
         """
-        scalar_tensor = torch.tensor(scalar, dtype=self.values.dtype, device=self.values.device)
-        multiplied_values = self.values * scalar_tensor
+        multiplied_values = self.values * scalar
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
 
     def __mul__(self, scalar):
@@ -707,7 +706,7 @@ class FBFGS(Optimizer):
             dense_old_dir = torch.zeros_like(q) # Initialize dense_old_dir as a zero tensor
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item() # Use direction_similarity which is now computed with SparseFlatTensor
-              sparse_old_dir_scaled = old_dirs[i].rmul((-al[i])) # Scale sparse tensor
+              sparse_old_dir_scaled = old_dirs[i].to("cuda").rmul((-al[i])) # Scale sparse tensor
               q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled.to("cuda"), q) # Sparse addition
               hit_miss = hit_miss + str("| ")
 # TODO: prevent over-alignment to keep the direction multipathed?
@@ -735,7 +734,7 @@ class FBFGS(Optimizer):
               # del dense_old_dir # DEL 11: Initialize dense_old_dir before if block in second loop
               # d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
               alpha_val = al[i] - be_i.sum() * ro[i].item()
-              sparse_old_stp_scaled = old_stps[i].rmul(alpha_val) # Scale sparse tensor
+              sparse_old_stp_scaled = old_stps[i].to("cuda").rmul(alpha_val) # Scale sparse tensor
               d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled.to("cuda"), d) # Sparse addition
               #del dense_old_stp
 
