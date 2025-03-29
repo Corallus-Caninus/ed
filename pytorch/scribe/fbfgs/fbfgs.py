@@ -104,11 +104,8 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
         end_time_interleave = time.time()
         print(f"dense_to_sparse_flat_tensor: torch.repeat_interleave time: {end_time_interleave - start_time_interleave:.4f} seconds")
 
-
-        flat_indices = segment_indices_offsets + segment_internal_indices
-
         # 2. Vectorized value extraction using advanced indexing
-        values_local = dense_tensor.view(-1)[flat_indices]
+        values_local = dense_tensor.view(-1)[segment_indices_offsets]
         total_size_local = torch.tensor(total_size)
         print(f"dense_to_sparse_flat_tensor: values_local.shape={values_local.shape}")
 
