@@ -45,7 +45,7 @@ class SparseFlatTensor:
         dense_tensor[segment_indices] = self.values
         return dense_tensor
 
-    def to(self, device):
+    def to(self, device: str):
         """
         Moves all internal tensors to the specified device and returns a new SparseFlatTensor.
         """
