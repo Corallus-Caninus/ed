@@ -678,7 +678,7 @@ class FBFGS(Optimizer):
         for i in range(num_old - 1, -1, -1):
             #direction_similarity = (old_dirs[i].to_dense().to("cuda") * q).sum().item() # Convert to dense here
             sparse_dir_i = old_dirs[i] # Explicitly get old_dirs[i]
-            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i.to(str(direction_device)), q).item() # Use sparse_dir_i
+            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i.to("cuda"), q).item() # Use sparse_dir_i
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
