@@ -94,7 +94,7 @@ class SparseFlatTensor:
 
 
     @staticmethod
-    #@torch.jit.script # Removing jit for now to debug
+    @torch.jit.script # Removing jit for now to debug
     def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
     print("dense_to_sparse_flat_tensor: Start")
     """
