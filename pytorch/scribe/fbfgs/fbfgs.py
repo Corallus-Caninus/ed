@@ -705,7 +705,7 @@ class FBFGS(Optimizer):
             if direction_alignment_mask[i]:
               #be_i.copy_((old_dirs[i].to_dense().to("cuda") * d).to_dense()) # Convert to dense here
 #              dense_old_dir = old_dirs[i].to_dense().to("cuda")
-              be_i.copy_((old_dir[i] * d).to_dense())
+              be_i.copy_((old_dirs[i] * d).to_dense())
               #del dense_old_dir # DEL 11: Initialize dense_old_dir before if block in second loop
               #d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
               dense_old_stp = old_stps[i].to_dense().to("cuda")
