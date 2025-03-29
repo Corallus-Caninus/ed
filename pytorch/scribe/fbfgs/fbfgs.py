@@ -68,8 +68,18 @@ class SparseFlatTensor:
         """
         Element-wise multiplication of SparseFlatTensor with a dense tensor.
         """
-        dense_self = self.to_dense()
-        return SparseFlatTensor.dense_to_sparse_flat_tensor(dense_self * other)
+        segment_lengths = self.ends - self.starts
+        segment_indices_offsets = torch.repeat_interleave(self.starts, segment_lengths)
+        indices = torch.arange(segment_lengths.sum(), device=self.starts.device)
+        segment_lengths_cumsum = segment_lengths.cumsum(0)
+        start_indices = torch.cat([torch.tensor([0], device=self.starts.device), segment_lengths_cumsum[:-1]])
+        segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
+        segment_internal_indices = indices - start_indices[segment_ids]
+        segment_indices = segment_indices_offsets + segment_internal_indices
+
+        multiplied_values = self.values * other.view(-1)[segment_indices]
+
+        return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
 
     @staticmethod
     def sparse_dot_dense(sparse_tensor, dense_tensor):
