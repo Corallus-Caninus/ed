@@ -71,8 +71,8 @@ class SparseFlatTensor:
         dense_other = other.to_dense()
         return torch.dot(dense_self, dense_other)
 
-     @staticmethod
-     def from_dense(dense_tensor):
+    @staticmethod
+    def from_dense(dense_tensor):
          """
          Converts a dense PyTorch tensor to a SparseFlatTensor without for loops, using GPU parallelism.
          """
