@@ -76,7 +76,7 @@ class SparseFlatTensor:
         segment_internal_indices = indices - start_indices[segment_ids]
         segment_indices = segment_indices_offsets + segment_internal_indices
 
-        multiplied_values = self.values * other.view(-1)[segment_indices]
+        multiplied_values = self.values * other.view(-1)[segment_indices.to(other.view(-1).device)]
 
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
 
