@@ -713,7 +713,7 @@ class FBFGS(Optimizer):
               #d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
               dense_old_stp = old_stps[i].to_dense().to("cuda")
               d.add_(dense_old_stp, alpha=al[i] - be_i.sum() * ro[i].item())
-              del dense_old_stp
+              #del dense_old_stp
 
 
         print(hit_miss)
