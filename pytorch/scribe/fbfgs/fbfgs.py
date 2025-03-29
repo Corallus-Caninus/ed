@@ -46,11 +46,12 @@ class SparseFlatTensor:
         This method modifies self.starts, self.ends, and self.values in place.
         """
         dense_tensor = self.to_dense()
-        sparse_flat_tensor = SparseFlatTensor.from_dense(dense_tensor)
-        self.starts = sparse_flat_tensor.starts
-        self.ends = sparse_flat_tensor.ends
-        self.values = sparse_flat_tensor.values
-        self.total_size = sparse_flat_tensor.total_size
+        starts, ends, values, total_size = SparseFlatTensor.from_dense(dense_tensor)
+        sparse_flat_tensor = SparseFlatTensor(starts, ends, values, total_size)
+        self.starts = starts
+        self.ends = ends
+        self.values = values
+        self.total_size = total_size
 
     def to(self, device):
         """
@@ -85,10 +86,10 @@ class SparseFlatTensor:
          non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
 
          if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
-             return SparseFlatTensor(torch.empty(0, dtype=torch.int64, device=device),
-                                      torch.empty(0, dtype=torch.int64, device=device),
-                                      torch.empty(0, dtype=dtype, device=device),
-                                      torch.tensor(total_size))
+             return (torch.empty(0, dtype=torch.int64, device=device),
+                     torch.empty(0, dtype=torch.int64, device=device),
+                     torch.empty(0, dtype=dtype, device=device),
+                     torch.tensor(total_size))
 
          # Find start and end indices of contiguous segments
          diff = non_zero_indices[1:] - non_zero_indices[:-1]
@@ -108,7 +109,7 @@ class SparseFlatTensor:
          # 2. Vectorized value extraction using advanced indexing
          values = dense_tensor.view(-1)[flat_indices]
 
-         return SparseFlatTensor(starts.to(device), ends.to(device), values.to(device), total_size)
+         return (starts.to(device), ends.to(device), values.to(device), total_size)
 
     # Add methods here later (e.g., to_dense, to_sparse, etc.)
 
