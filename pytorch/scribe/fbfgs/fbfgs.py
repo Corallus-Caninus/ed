@@ -103,41 +103,43 @@ class SparseFlatTensor:
         dense_other = other.to_dense()
         return torch.dot(dense_self, dense_other)
 
-    @staticmethod
-    def from_dense(dense_tensor):
-        """
-        Converts a dense PyTorch tensor to a SparseFlatTensor.
-        """
-        device = dense_tensor.device
-        dtype = dense_tensor.dtype
-        total_size = dense_tensor.numel()
-        # Find indices of non-zero elements
-        non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
+     @staticmethod
+     def from_dense(dense_tensor):
+         """
+         Converts a dense PyTorch tensor to a SparseFlatTensor without for loops, using GPU parallelism.
+         """
+         device = dense_tensor.device
+         dtype = dense_tensor.dtype
+         total_size = dense_tensor.numel()
 
-        if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
-            return SparseFlatTensor(torch.empty(0, dtype=torch.int64, device=device),
-                                     torch.empty(0, dtype=torch.int64, device=device),
-                                     torch.empty((0, 0), dtype=dtype, device=device),
-                                     torch.tensor(total_size))
+         # Find indices of non-zero elements
+         non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
 
-        # Find start and end indices of contiguous segments
-        diff = non_zero_indices[1:] - non_zero_indices[:-1]
-        segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
-        segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
-        segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
+         if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
+             return SparseFlatTensor(torch.empty(0, dtype=torch.int64, device=device),
+                                      torch.empty(0, dtype=torch.int64, device=device),
+                                      torch.empty(0, dtype=dtype, device=device),
+                                      torch.tensor(total_size))
 
-        starts = non_zero_indices[segment_starts_indices]
-        ends = non_zero_indices[segment_ends_indices - 1] + 1
+         # Find start and end indices of contiguous segments
+         diff = non_zero_indices[1:] - non_zero_indices[:-1]
+         segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
+         segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
+         segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
 
-        values_list = []
-        for i in range(len(starts)):
-            start_idx = starts[i]
-            end_idx = ends[i]
-            segment_values = dense_tensor.view(-1)[start_idx:end_idx]
-            values_list.append(segment_values)
-        values = torch.cat(values_list) # Concatenate into a 1D tensor
+         starts = non_zero_indices[segment_starts_indices]
+         ends = non_zero_indices[segment_ends_indices - 1] + 1
+         segment_lengths = ends - starts
 
-        return SparseFlatTensor(starts.to(device), ends.to(device), values.to(device), total_size)
+         # 1. Generate segment indices without loops - vectorized approach
+         segment_indices_offsets = torch.repeat_interleave(starts, segment_lengths)
+         segment_internal_indices = torch.cat([torch.arange(length, device=device) for length in segment_lengths])
+         flat_indices = segment_indices_offsets + segment_internal_indices
+
+         # 2. Vectorized value extraction using advanced indexing
+         values = dense_tensor.view(-1)[flat_indices]
+
+         return SparseFlatTensor(starts.to(device), ends.to(device), values.to(device), total_size)
 
     # Add methods here later (e.g., to_dense, to_sparse, etc.)
 
