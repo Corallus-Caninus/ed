@@ -89,9 +89,8 @@ class SparseFlatTensor:
         """
         Scalar multiplication for SparseFlatTensor.
         """
-        if isinstance(scalar, (int, float)):
-            multiplied_values = self.values * scalar
-            return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
+        multiplied_values = self.values * scalar
+        return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
 
     @staticmethod
     def add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor: Tensor) -> Tensor:
