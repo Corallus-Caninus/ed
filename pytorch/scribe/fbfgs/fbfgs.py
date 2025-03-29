@@ -82,7 +82,8 @@ class SparseFlatTensor:
         """
         Scalar multiplication (right operand) for SparseFlatTensor.
         """
-        multiplied_values = self.values * scalar
+        scalar_tensor = torch.tensor(scalar, dtype=self.values.dtype, device=self.values.device)
+        multiplied_values = self.values * scalar_tensor
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
 
     def __mul__(self, scalar):
