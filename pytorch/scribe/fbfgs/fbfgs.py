@@ -104,58 +104,55 @@ class SparseFlatTensor:
         return torch.dot(sparse_values_from_dense, sparse_tensor.values)
 
 
-    @staticmethod
-    def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
-        print("dense_to_sparse_flat_tensor: Start")
-        """
-        Converts a dense tensor to SparseFlatTensor representation.
-        """
-        device = dense_tensor.device
-        dtype = dense_tensor.dtype
-        total_size = dense_tensor.numel()
-        print(f"dense_to_sparse_flat_tensor: device={device}, dtype={dtype}, total_size={total_size}")
-
-        # Find indices of non-zero elements
-        non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
-        print(f"dense_to_sparse_flat_tensor: non_zero_indices.numel()={non_zero_indices.numel()}")
-
-        if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
-            starts_local = torch.empty(0, dtype=torch.int64, device=device)
-            ends_local = torch.empty(0, dtype=torch.int64, device=device)
-            values_local = torch.empty(0, dtype=dtype, device=device)
-            total_size_local = torch.tensor(total_size)
-            print("dense_to_sparse_flat_tensor: Completely sparse tensor")
-        else:
-            # Find start and end indices of contiguous segments
-            diff = non_zero_indices[1:] - non_zero_indices[:-1]
-            segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
-            segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
-            segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
-
-            starts_local = non_zero_indices[segment_starts_indices]
-            ends_local = non_zero_indices[segment_ends_indices - 1] + 1
-            segment_lengths = ends_local - starts_local
-            print(f"dense_to_sparse_flat_tensor: starts_local.shape={starts_local.shape}, ends_local.shape={ends_local.shape}")
-
-
-            # 1. Generate segment indices without loops - vectorized approach
-            start_time_interleave = time.time()
-            segment_indices_offsets = torch.repeat_interleave(starts_local, segment_lengths)
-            end_time_interleave = time.time()
-            print(f"dense_to_sparse_flat_tensor: torch.repeat_interleave time: {end_time_interleave - start_time_interleave:.4f} seconds")
-
-            # 2. Vectorized value extraction using advanced indexing
-            values_local = dense_tensor.view(-1)[segment_indices_offsets]
-            total_size_local = torch.tensor(total_size)
-            print(f"dense_to_sparse_flat_tensor: values_local.shape={values_local.shape}")
-
-        print("dense_to_sparse_flat_tensor: End")
-        return SparseFlatTensor(starts_local, ends_local, values_local, total_size_local)
-
-
-
-
 __all__ = ["FBFGS"]
+
+
+def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
+    print("dense_to_sparse_flat_tensor: Start")
+    """
+    Converts a dense tensor to SparseFlatTensor representation.
+    """
+    device = dense_tensor.device
+    dtype = dense_tensor.dtype
+    total_size = dense_tensor.numel()
+    print(f"dense_to_sparse_flat_tensor: device={device}, dtype={dtype}, total_size={total_size}")
+
+    # Find indices of non-zero elements
+    non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
+    print(f"dense_to_sparse_flat_tensor: non_zero_indices.numel()={non_zero_indices.numel()}")
+
+    if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
+        starts_local = torch.empty(0, dtype=torch.int64, device=device)
+        ends_local = torch.empty(0, dtype=torch.int64, device=device)
+        values_local = torch.empty(0, dtype=dtype, device=device)
+        total_size_local = torch.tensor(total_size)
+        print("dense_to_sparse_flat_tensor: Completely sparse tensor")
+    else:
+        # Find start and end indices of contiguous segments
+        diff = non_zero_indices[1:] - non_zero_indices[:-1]
+        segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
+        segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
+        segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
+
+        starts_local = non_zero_indices[segment_starts_indices]
+        ends_local = non_zero_indices[segment_ends_indices - 1] + 1
+        segment_lengths = ends_local - starts_local
+        print(f"dense_to_sparse_flat_tensor: starts_local.shape={starts_local.shape}, ends_local.shape={ends_local.shape}")
+
+
+        # 1. Generate segment indices without loops - vectorized approach
+        start_time_interleave = time.time()
+        segment_indices_offsets = torch.repeat_interleave(starts_local, segment_lengths)
+        end_time_interleave = time.time()
+        print(f"dense_to_sparse_flat_tensor: torch.repeat_interleave time: {end_time_interleave - start_time_interleave:.4f} seconds")
+
+        # 2. Vectorized value extraction using advanced indexing
+        values_local = dense_tensor.view(-1)[segment_indices_offsets]
+        total_size_local = torch.tensor(total_size)
+        print(f"dense_to_sparse_flat_tensor: values_local.shape={values_local.shape}")
+
+    print("dense_to_sparse_flat_tensor: End")
+    return SparseFlatTensor(starts_local, ends_local, values_local, total_size_local)
 
 
 def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
@@ -869,8 +866,8 @@ class FBFGS(Optimizer):
               total_norm_s = torch.linalg.vector_norm(s_dense, ord=norm) # Move total_norm to direction_device
               s_dense = s_dense/total_norm_s
               s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
-              y = dense_to_sparse_flat_tensor(y_dense) # Convert to SparseFlatTensor after norm and clop
-              s = dense_to_sparse_flat_tensor(s_dense) # Convert s_dense to SparseFlatTensor here
+              y = dense_to_sparse_flat_tensor(y_dense)
+              s = dense_to_sparse_flat_tensor(s_dense)
 
 #              y = y*total_norm
 #
