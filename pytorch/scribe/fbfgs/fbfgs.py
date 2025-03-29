@@ -918,13 +918,9 @@ class FBFGS(Optimizer):
 #              y = y/total_norm
 #              if self.clop != 0:
 #                y = y.to_sparse()
-              print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-              d_dense = d.to_dense()
-              d_dense[torch.logical_and(d_dense > -self.clop,d_dense < self.clop)] = 0
-              d = SparseFlatTensor.from_dense(d_dense) # Convert d to SparseFlatTensor after clopping
-#              if self.clop != 0:
-#                d = d.to_sparse()
+              print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ') # s_dense is still dense here
+              print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
 #TODO: may need to calculate ys before
 #              ys_sparse_product = y * s
 #              ys = ys_sparse_product.sum()#y*s
