@@ -8,6 +8,199 @@ import psutil
 import time
 
 from torch.optim.optimizer import Optimizer, ParamsT
+
+class SparseFlatTensor:
+    def __init__(self, starts, ends, values, total_size):
+        """
+        Represents a 1D sparse tensor using start and end indices for sparse segments.
+
+        Args:
+            starts (torch.Tensor): 1D tensor of start indices for each dense segment.
+            ends (torch.Tensor): 1D tensor of end indices for each dense segment.
+            values (torch.Tensor): 1D tensor containing concatenated values of all dense segments.
+            total_size (int): The total size of the 1D tensor.
+        """
+        self.starts = starts
+        self.ends = ends
+        self.values = values # Now a 1D tensor
+        self.total_size = total_size
+
+    def __repr__(self):
+        return f"SparseFlatTensor(starts={self.starts}, ends={self.ends}, values={self.values}, total_size={self.total_size})"
+
+    def to_dense(self):
+        """
+        Converts the sparse tensor representation to a dense PyTorch tensor.
+        """
+        dense_tensor = torch.zeros(self.total_size, dtype=self.values.dtype, device=self.values.device)
+        value_offset = 0
+        for i in range(len(self.starts)):
+            start_idx = self.starts[i]
+            end_idx = self.ends[i]
+            segment_length = end_idx - start_idx
+            segment_values = self.values[value_offset:value_offset + segment_length]
+            dense_tensor[start_idx:end_idx] = segment_values
+            value_offset += segment_length
+        return dense_tensor
+
+    def to_sparse(self):
+        """
+        Converts the SparseFlatTensor to a PyTorch sparse tensor (torch.sparse_coo_tensor).
+        """
+        indices = []
+        indices_list = [] # Changed to indices_list to avoid shadowing outer 'indices'
+        values_list = []  # Changed to values_list to avoid shadowing outer 'values'
+        value_offset = 0
+        for i in range(len(self.starts)):
+            start_idx = self.starts[i]
+            end_idx = self.ends[i]
+            segment_length = end_idx - start_idx
+            segment_values = self.values[value_offset:value_offset + segment_length] # <--- CORRECTED: Slice values
+            segment_indices = torch.arange(start_idx, end_idx)
+            indices_list.append(segment_indices)
+            values_list.append(segment_values)
+            value_offset += segment_length
+
+        indices = torch.cat([index.unsqueeze(0) for index in indices_list], dim=1) # Corrected dim=1 for concatenation
+        values = torch.cat(values_list)
+        sparse_tensor = torch.sparse_coo_tensor(indices, values, size=(int(self.total_size),), dtype=self.values.dtype, device=self.values.device)
+        return sparse_tensor
+
+    def __add__(self, other):
+        """
+        Element-wise addition of two SparseFlatTensors.
+        """
+        if not isinstance(other, SparseFlatTensor):
+            raise TypeError("Addition is only supported between SparseFlatTensor instances.")
+        return SparseFlatTensor.sparse_add(self, other)
+
+    def __sub__(self, other):
+        """
+        Element-wise subtraction of two SparseFlatTensors.
+        """
+        if not isinstance(other, SparseFlatTensor):
+            raise TypeError("Subtraction is only supported between SparseFlatTensor instances.")
+        return SparseFlatTensor.sparse_sub(self, other)
+
+    def __mul__(self, scalar):
+        """
+        Scalar multiplication of a SparseFlatTensor.
+        """
+        # Scalar multiplication is straightforward for SparseFlatTensor
+        return SparseFlatTensor(self.starts, self.ends, self.values * scalar, self.total_size)
+
+    def __truediv__(self, scalar):
+        """
+        Scalar division of a SparseFlatTensor.
+        """
+        if isinstance(scalar, (int, float)):
+            return SparseFlatTensor(self.starts, self.ends, self.values / scalar, self.total_size)
+        elif isinstance(scalar, torch.Tensor) and scalar.numel() == 1:
+            return SparseFlatTensor(self.starts, self.ends, self.values / scalar, self.total_size)
+        else:
+            raise TypeError("Scalar division is only supported for scalar values or 1-element tensors.")
+
+    def dot(self, other):
+        """
+        Dot product of two SparseFlatTensors.
+        """
+        if not isinstance(other, SparseFlatTensor):
+            raise TypeError("Dot product is only supported between SparseFlatTensor instances.")
+        return SparseFlatTensor.sparse_dot_product(self, other)
+
+
+    def neg(self):
+        """
+        Negates the SparseFlatTensor.
+        """
+        return SparseFlatTensor(self.starts, self.ends, -self.values, self.total_size)
+
+    def to(self, device):
+        """
+        Moves the SparseFlatTensor to the specified device.
+        """
+        starts = self.starts.to(device)
+        ends = self.ends.to(device)
+        values = self.values.to(device)
+        return SparseFlatTensor(starts, ends, values, self.total_size)
+
+
+    @staticmethod
+    def from_dense(dense_tensor):
+        """
+        Converts a dense PyTorch tensor to a SparseFlatTensor.
+        """
+        device = dense_tensor.device
+        dtype = dense_tensor.dtype
+        total_size = dense_tensor.numel()
+        # Find indices of non-zero elements
+        non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
+
+        if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
+            return SparseFlatTensor(torch.empty(0, dtype=torch.int64, device=device),
+                                     torch.empty(0, dtype=torch.int64, device=device),
+                                     torch.empty((0, 0), dtype=dtype, device=device),
+                                     total_size)
+
+        # Find start and end indices of contiguous segments
+        diff = non_zero_indices[1:] - non_zero_indices[:-1]
+        segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
+        segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
+        segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
+
+        starts = non_zero_indices[segment_starts_indices]
+        ends = non_zero_indices[segment_ends_indices - 1] + 1
+
+        values_list = []
+        for i in range(len(starts)):
+            start_idx = starts[i]
+            end_idx = ends[i]
+            segment_values = dense_tensor.view(-1)[start_idx:end_idx]
+            values_list.append(segment_values)
+        values = torch.cat(values_list) # Concatenate into a 1D tensor
+
+        return SparseFlatTensor(starts.to(device), ends.to(device), values.to(device), total_size)
+
+
+    @staticmethod
+    def sparse_add(tensor1, tensor2):
+        """
+        Efficiently adds two SparseFlatTensors.
+        """
+        """
+        Efficiently adds two SparseFlatTensors.
+        """
+        dense1 = tensor1.to_dense()
+        dense2 = tensor2.to_dense()
+        return dense1 + dense2
+
+    @staticmethod
+    def sparse_sub(tensor1, tensor2):
+        """
+        Efficiently subtracts two SparseFlatTensors.
+        """
+        """
+        Efficiently subtracts two SparseFlatTensors.
+        """
+        dense1 = tensor1.to_dense()
+        dense2 = tensor2.to_dense()
+        return dense1 - dense2
+
+    @staticmethod
+    def sparse_dot_product(tensor1, tensor2):
+        """
+        Efficiently computes the dot product of two SparseFlatTensors.
+        """
+        """
+        Efficiently computes the dot product of two SparseFlatTensors.
+        """
+        dense1 = tensor1.to_dense()
+        dense2 = tensor2.to_dense()
+        return torch.dot(dense1, dense2)
+
+    # Add methods here later (e.g., to_dense, to_sparse, etc.)
+
+
 #TODO: reoptimize moving to cpu and add configuration for the different swap cases
 #TODO: implement dense tensor switch also for direction when clop is 0 also, it would be better to have this as a bool possibly since >%50 sparsity should also be dense (also need to consider sparse structure)
 #TODO: Is it worth noting in a docstring etc. that the delta-y (gradient information) must always be larger than the direction by some amount to ensure loss reduces (and overall stability)?
@@ -519,7 +712,7 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
+    def direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 0.
@@ -535,12 +728,12 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
 
         for i in range(num_old - 1, -1, -1):
-            direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Use inplace copy to store intermediate result
+            direction_similarity = (old_dirs[i].to_dense().to("cuda") * q).sum().item() # Convert to dense here
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item()
-              q.add_(old_dirs[i].to("cuda"), alpha=-al[i])
+              q.add_(old_dirs[i].to_dense().to("cuda"), alpha=-al[i]) # Convert to dense here
               hit_miss = hit_miss + str("| ")
 #TODO: prevent over-alignment to keep the direction multipathed ?
 #prevent over-alignment by considering the expansion of near-orthogonal entries
@@ -560,8 +753,8 @@ class FBFGS(Optimizer):
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
             if direction_alignment_mask[i]:
-              be_i.copy_((old_dirs[i].to("cuda") * d).to_dense()) # Use inplace copy and preallocated tensor
-              d.add_(old_stps[i].to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Use be_i in calculation
+              be_i.copy_((old_dirs[i].to_dense().to("cuda") * d).to_dense()) # Convert to dense here
+              d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
 
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
@@ -704,27 +897,34 @@ class FBFGS(Optimizer):
               if prev_flat_grad is not None:
                   prev_flat_grad = prev_flat_grad # Move prev_flat_grad to direction_device
 #TODO: ensure this is on GPU
-              y = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
+              y_dense = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
 #Clop
 #TODO: can we scale after norm to prevent the magnitude after clopping from being epsilon? I think this would be mathematically unstable but would help with the direction approximation's curvature
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               s_dense = (d.mul(t))
-              ys = y.dot(s_dense)
-              total_norm = torch.linalg.vector_norm(y, ord=norm) # Move total_norm to direction_device
-              y = y/total_norm
-              y[torch.logical_and(y > -self.clop,y < self.clop)] = 0
+              ys = None # Initialize ys here
+              total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm) # Move total_norm to direction_device
+              y_dense = y_dense/total_norm_y
+              y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
+              y = SparseFlatTensor.from_dense(y_dense) # Convert to SparseFlatTensor after norm and clop
+              if ys is None: # Only calculate ys if it hasn't been calculated before
+                  s = SparseFlatTensor.from_dense(s_dense) # Convert s_dense to SparseFlatTensor here
+                  ys = y.dot(s) # Calculate ys here after s is SparseFlatTensor
+              del s # Delete s here as it's no longer needed
+
 #              y = y*total_norm
 #
 #              total_norm = torch.linalg.vector_norm(y, ord=float("inf")) # Move total_norm to direction_device
 #              y = y/total_norm
-              if self.clop != 0:
-                y = y.to_sparse()
-                print("y-delta elements: " + str((y.values() != 0).sum()) + " total: " + str(y.numel()), end=' ')
-              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
-              if self.clop != 0:
-                d = d.to_sparse()
-              s = (d.mul(t)) # Move s to direction_device
-              print("S elements: " + str((s.values() != 0).sum()) + " total: " + str(s.numel()), end=' ')
+#              if self.clop != 0:
+#                y = y.to_sparse()
+              print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
+              d_dense = d.to_dense()
+              d_dense[torch.logical_and(d_dense > -self.clop,d_dense < self.clop)] = 0
+              d = SparseFlatTensor.from_dense(d_dense) # Convert d to SparseFlatTensor after clopping
+#              if self.clop != 0:
+#                d = d.to_sparse()
+              print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ') # s_dense is still dense here
 #TODO: may need to calculate ys before
 #              ys_sparse_product = y * s
 #              ys = ys_sparse_product.sum()#y*s
@@ -771,29 +971,29 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-                if self.clop > 0:
-                  y_sparse = y.to_sparse()
-                if self.clop > 0:
-                  y_sparse = y.to(self.direction_device) # Store y_sparse on direction_device
-                  old_dirs.append(y_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
-                else:
-                  y_sparse = y.to(self.direction_device) # Store y_sparse on direction_device
-                  old_dirs.append(y_sparse.to(self.direction_device)) # NOTE: was cpu
-                if self.clop > 0:
-                  s_sparse = s.to_sparse().to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
-                  old_stps.append(s_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
-                else:
-                  s_sparse = s.to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
-                  old_stps.append(s_sparse.to(self.direction_device)) # NOTE: was cpu
+#                if self.clop > 0:
+#                  y_sparse = y.to_sparse()
+#                if self.clop > 0:
+#                  y_sparse = y.to(self.direction_device) # Store y_sparse on direction_device
+#                  old_dirs.append(y_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
+#                else:
+#                  y_sparse = y.to(self.direction_device) # Store y_sparse on direction_device
+#                  old_dirs.append(y_sparse.to(self.direction_device)) # NOTE: was cpu
+#                if self.clop > 0:
+#                  s_sparse = s.to_sparse().to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
+#                  old_stps.append(s_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
+#                else:
+#                  s_sparse = s.to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
+#                  old_stps.append(s_sparse.to(self.direction_device)) # NOTE: was cpu
+                old_dirs.append(y.to(self.direction_device)) # Store y as SparseFlatTensor
+                old_stps.append(s.to(self.direction_device)) # Store s as SparseFlatTensor
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               if n_iter > max_iter:
                 break
 #TODO: break here on n_iters
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
-              y_squared_sparse_product = y * y
-              y_squared = y_squared_sparse_product.sum()
-              del y_squared_sparse_product
+              y_squared = y.dot(y)
               H_diag = ys / y_squared  # (y*y)
               del y_squared
 
