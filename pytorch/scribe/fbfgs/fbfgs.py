@@ -52,19 +52,6 @@ class SparseFlatTensor:
         self.values = sparse_flat_tensor.values
         self.total_size = sparse_flat_tensor.total_size
 
-    @torch.jit.script
-    def to_sparse(self):
-        """
-        Updates the SparseFlatTensor representation from the dense tensor.
-        This method modifies self.starts, self.ends, and self.values in place.
-        """
-        dense_tensor = self.to_dense()
-        sparse_flat_tensor = SparseFlatTensor.from_dense(dense_tensor)
-        self.starts = sparse_flat_tensor.starts
-        self.ends = sparse_flat_tensor.ends
-        self.values = sparse_flat_tensor.values
-        self.total_size = sparse_flat_tensor.total_size
-
     def to(self, device):
         """
         Moves all internal tensors to the specified device and returns a new SparseFlatTensor.
