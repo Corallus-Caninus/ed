@@ -18,12 +18,12 @@ class SparseFlatTensor:
             starts (torch.Tensor): 1D tensor of start indices for each dense segment.
             ends (torch.Tensor): 1D tensor of end indices for each dense segment.
             values (torch.Tensor): 1D tensor containing concatenated values of all dense segments.
-            total_size (int): The total size of the 1D tensor.
+            total_size (Tensor): The total size of the 1D tensor.
         """
         self.starts = starts
         self.ends = ends
         self.values = values # Now a 1D tensor
-        self.total_size = total_size
+        self.total_size = torch.tensor(total_size)
 
     def __repr__(self):
         return f"SparseFlatTensor(starts={self.starts}, ends={self.ends}, values={self.values}, total_size={self.total_size})"
