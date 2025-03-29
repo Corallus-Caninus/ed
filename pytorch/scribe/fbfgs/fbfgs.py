@@ -81,8 +81,8 @@ def from_dense(dense_tensor):
      dtype = dense_tensor.dtype
      total_size = dense_tensor.numel()
 
-         # Find indices of non-zero elements
-         non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
+     # Find indices of non-zero elements
+     non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
 
          if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
              return (torch.empty(0, dtype=torch.int64, device=device),
