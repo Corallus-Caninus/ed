@@ -899,15 +899,18 @@ class FBFGS(Optimizer):
 #TODO: ensure this is on GPU
               y_dense = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
               s_dense = (d.mul(t)) # Define s_dense here
-              y = SparseFlatTensor.from_dense(y_dense) # Convert to SparseFlatTensor after norm and clop
-              s = SparseFlatTensor.from_dense(s_dense) # Convert s_dense to SparseFlatTensor here
-              ys = y.dot(s) # Calculate ys here after s is SparseFlatTensor
+              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 #Clop
 #TODO: can we scale after norm to prevent the magnitude after clopping from being epsilon? I think this would be mathematically unstable but would help with the direction approximation's curvature
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm) # Move total_norm to direction_device
               y_dense = y_dense/total_norm_y
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
+              total_norm_s = torch.linalg.vector_norm(s_dense, ord=norm) # Move total_norm to direction_device
+              s_dense = s_dense/total_norm_s
+              s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
+              y = SparseFlatTensor.from_dense(y_dense) # Convert to SparseFlatTensor after norm and clop
+              s = SparseFlatTensor.from_dense(s_dense) # Convert s_dense to SparseFlatTensor here
 
 #              y = y*total_norm
 #
