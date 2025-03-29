@@ -36,7 +36,7 @@ class SparseFlatTensor:
         dense_tensor = torch.zeros(self.total_size, dtype=self.values.dtype, device=self.values.device)
         segment_lengths = self.ends - self.starts
         indices = torch.repeat_interleave(torch.arange(len(self.starts), device=self.starts.device), segment_lengths)
-        segment_indices = (indices * (self.ends[0] if len(self.ends) > 0 else torch.tensor(0, device=self.starts.device))).cumsum(0) + torch.repeat_interleave(self.starts, segment_lengths)
+        segment_indices = segment_indices_offsets + segment_internal_indices
         dense_tensor[segment_indices] = self.values
         return dense_tensor
 
