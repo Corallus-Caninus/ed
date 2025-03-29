@@ -31,17 +31,13 @@ class SparseFlatTensor:
 
     def to_dense(self):
         """
-        Converts the sparse tensor representation to a dense PyTorch tensor.
+        Converts the sparse tensor representation to a dense PyTorch tensor using vectorized operations.
         """
         dense_tensor = torch.zeros(self.total_size, dtype=self.values.dtype, device=self.values.device)
-        value_offset = 0
-        for i in range(len(self.starts)):
-            start_idx = self.starts[i]
-            end_idx = self.ends[i]
-            segment_length = end_idx - start_idx
-            segment_values = self.values[value_offset:value_offset + segment_length]
-            dense_tensor[start_idx:end_idx] = segment_values
-            value_offset += segment_length
+        segment_lengths = self.ends - self.starts
+        indices = torch.repeat_interleave(torch.arange(len(self.starts), device=self.starts.device), segment_lengths)
+        segment_indices = (indices * (self.ends[0] if len(self.ends) > 0 else 0)).cumsum(0) + torch.repeat_interleave(self.starts, segment_lengths)
+        dense_tensor[segment_indices] = self.values
         return dense_tensor
 
     def to_sparse(self):
