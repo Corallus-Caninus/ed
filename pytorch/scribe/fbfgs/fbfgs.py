@@ -9,6 +9,7 @@ import time
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
+@torch.jit.script
 class SparseFlatTensor:
     def __init__(self, starts, ends, values, total_size):
         """
