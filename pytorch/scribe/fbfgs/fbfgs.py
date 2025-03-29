@@ -908,9 +908,6 @@ class FBFGS(Optimizer):
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm) # Move total_norm to direction_device
               y_dense = y_dense/total_norm_y
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
-              del s_dense # s_dense is no longer needed after SparseFlatTensor conversion
-              del s # s is no longer needed after ys calculation
-              del y # y is no longer needed after ys calculation
 
 #              y = y*total_norm
 #
