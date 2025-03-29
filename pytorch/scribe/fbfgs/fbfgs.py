@@ -898,6 +898,7 @@ class FBFGS(Optimizer):
                   prev_flat_grad = prev_flat_grad # Move prev_flat_grad to direction_device
 #TODO: ensure this is on GPU
               y_dense = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
+              s_dense = (d.mul(t)) # Define s_dense here
 #Clop
 #TODO: can we scale after norm to prevent the magnitude after clopping from being epsilon? I think this would be mathematically unstable but would help with the direction approximation's curvature
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
