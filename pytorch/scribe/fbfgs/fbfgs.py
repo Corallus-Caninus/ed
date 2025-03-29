@@ -69,7 +69,7 @@ class SparseFlatTensor:
         Element-wise multiplication of SparseFlatTensor with a dense tensor.
         """
         dense_self = self.to_dense()
-        return SparseFlatTensor.dense_to_sparse_flat_tensor(dense_self * other)
+        return self.dense_to_sparse_flat_tensor(dense_self * other)
 
     @staticmethod
     def sparse_dot_dense(sparse_tensor, dense_tensor):
