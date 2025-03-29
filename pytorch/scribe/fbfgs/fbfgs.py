@@ -82,10 +82,11 @@ class SparseFlatTensor:
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
 
     @staticmethod
-    def sparse_dot_dense(sparse_tensor, dense_tensor):
+    def sparse_dot_dense(sparse_tensor_arg, dense_tensor):
         """
         Computes the dot product of a SparseFlatTensor with a dense tensor, optimized for sparsity.
         """
+        sparse_tensor = sparse_tensor_arg # Explicitly use sparse_tensor_arg
         # Get indices and values from sparse tensor
         segment_lengths = sparse_tensor.ends - sparse_tensor.starts
         segment_indices_offsets = torch.repeat_interleave(sparse_tensor.starts, segment_lengths)
