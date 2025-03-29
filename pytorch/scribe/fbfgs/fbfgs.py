@@ -50,39 +50,11 @@ class SparseFlatTensor:
         This method modifies self.starts, self.ends, and self.values in place.
         """
         dense_tensor = self.to_dense()
-        device = dense_tensor.device
-        dtype = dense_tensor.dtype
-        total_size = dense_tensor.numel()
-        # Find indices of non-zero elements
-        non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
-
-        if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
-            self.starts = torch.empty(0, dtype=torch.int64, device=device)
-            self.ends = torch.empty(0, dtype=torch.int64, device=device)
-            self.values = torch.empty(0, dtype=dtype, device=device)
-            self.total_size = torch.tensor(total_size)
-            return
-
-        # Find start and end indices of contiguous segments
-        diff = non_zero_indices[1:] - non_zero_indices[:-1]
-        segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
-        segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
-        segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
-
-        starts = non_zero_indices[segment_starts_indices]
-        ends = non_zero_indices[segment_ends_indices - 1] + 1
-
-        values_list = []
-        for i in range(len(starts)):
-            start_idx = starts[i]
-            end_idx = ends[i]
-            segment_values = dense_tensor.view(-1)[start_idx:end_idx]
-            values_list.append(segment_values)
-        values = torch.cat(values_list) # Concatenate into a 1D tensor
-
-        self.starts = starts.to(device)
-        self.ends = ends.to(device)
-        self.values = values.to(device)
+        sparse_flat_tensor = SparseFlatTensor.from_dense(dense_tensor)
+        self.starts = sparse_flat_tensor.starts
+        self.ends = sparse_flat_tensor.ends
+        self.values = sparse_flat_tensor.values
+        self.total_size = sparse_flat_tensor.total_size
 
     def to(self, device):
         """
