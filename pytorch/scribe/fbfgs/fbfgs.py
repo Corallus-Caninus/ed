@@ -87,7 +87,7 @@ class SparseFlatTensor:
         Scalar multiplication of a SparseFlatTensor.
         """
         # Scalar multiplication is straightforward for SparseFlatTensor
-        return SparseFlatTensor(self.starts, self.ends, self.values * scalar, self.total_size)
+        return SparseFlatTensor(self.starts, self.ends, self.values * scalar, torch.tensor(self.total_size))
 
     def __truediv__(self, scalar):
         """
@@ -113,7 +113,7 @@ class SparseFlatTensor:
         """
         Negates the SparseFlatTensor.
         """
-        return SparseFlatTensor(self.starts, self.ends, -self.values, self.total_size)
+        return SparseFlatTensor(self.starts, self.ends, -self.values, torch.tensor(self.total_size))
 
     def to(self, device):
         """
@@ -122,7 +122,7 @@ class SparseFlatTensor:
         starts = self.starts.to(device)
         ends = self.ends.to(device)
         values = self.values.to(device)
-        return SparseFlatTensor(starts, ends, values, self.total_size)
+        return SparseFlatTensor(starts, ends, values, torch.tensor(self.total_size))
 
 
     @staticmethod
@@ -140,7 +140,7 @@ class SparseFlatTensor:
             return SparseFlatTensor(torch.empty(0, dtype=torch.int64, device=device),
                                      torch.empty(0, dtype=torch.int64, device=device),
                                      torch.empty((0, 0), dtype=dtype, device=device),
-                                     total_size)
+                                     torch.tensor(total_size))
 
         # Find start and end indices of contiguous segments
         diff = non_zero_indices[1:] - non_zero_indices[:-1]
