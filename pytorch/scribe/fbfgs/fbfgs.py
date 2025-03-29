@@ -685,7 +685,6 @@ class FBFGS(Optimizer):
               #q.add_(old_dirs[i].to_dense().to("cuda"), alpha=-al[i]) # Convert to dense here
               dense_old_dir = old_dirs[i].to_dense().to("cuda")
               q.add_(dense_old_dir, alpha=-al[i])
-              del dense_old_dir
               hit_miss = hit_miss + str("| ")
 #TODO: prevent over-alignment to keep the direction multipathed?
 # Prevent over-alignment by considering the expansion of near-orthogonal entries
