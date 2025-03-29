@@ -46,12 +46,43 @@ class SparseFlatTensor:
         This method modifies self.starts, self.ends, and self.values in place.
         """
         dense_tensor = self.to_dense()
-        starts, ends, values, total_size = from_dense(dense_tensor)
-        sparse_flat_tensor = SparseFlatTensor(starts, ends, values, total_size)
-        self.starts = starts
-        self.ends = ends
-        self.values = values
-        self.total_size = total_size
+        device = dense_tensor.device
+        dtype = dense_tensor.dtype
+        total_size = dense_tensor.numel()
+
+        # Find indices of non-zero elements
+        non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
+
+        if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
+            starts_local = torch.empty(0, dtype=torch.int64, device=device)
+            ends_local = torch.empty(0, dtype=torch.int64, device=device)
+            values_local = torch.empty(0, dtype=dtype, device=device)
+            total_size_local = torch.tensor(total_size)
+        else:
+            # Find start and end indices of contiguous segments
+            diff = non_zero_indices[1:] - non_zero_indices[:-1]
+            segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
+            segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
+            segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
+
+            starts_local = non_zero_indices[segment_starts_indices]
+            ends_local = non_zero_indices[segment_ends_indices - 1] + 1
+            segment_lengths = ends_local - starts_local
+
+            # 1. Generate segment indices without loops - vectorized approach
+            segment_indices_offsets = torch.repeat_interleave(starts_local, segment_lengths)
+            segment_internal_indices = torch.cat([torch.arange(length, device=device) for length in segment_lengths])
+            flat_indices = segment_indices_offsets + segment_internal_indices
+
+            # 2. Vectorized value extraction using advanced indexing
+            values_local = dense_tensor.view(-1)[flat_indices]
+            total_size_local = torch.tensor(total_size)
+
+
+        self.starts = starts_local
+        self.ends = ends_local
+        self.values = values_local
+        self.total_size = total_size_local
 
     def to(self, device):
         """
@@ -72,46 +103,6 @@ class SparseFlatTensor:
         dense_other = other.to_dense()
         return torch.dot(dense_self, dense_other)
 
-@torch.jit.script
-def from_dense(dense_tensor):
-     """
-     Converts a dense PyTorch tensor to a SparseFlatTensor without for loops, using GPU parallelism.
-     """
-     device = dense_tensor.device
-     dtype = dense_tensor.dtype
-     total_size = dense_tensor.numel()
-
-     # Find indices of non-zero elements
-     non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
-
-         if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
-             return (torch.empty(0, dtype=torch.int64, device=device),
-                     torch.empty(0, dtype=torch.int64, device=device),
-                     torch.empty(0, dtype=dtype, device=device),
-                     torch.tensor(total_size))
-
-         # Find start and end indices of contiguous segments
-         diff = non_zero_indices[1:] - non_zero_indices[:-1]
-         segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
-         segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
-         segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
-
-         starts = non_zero_indices[segment_starts_indices]
-         ends = non_zero_indices[segment_ends_indices - 1] + 1
-         segment_lengths = ends - starts
-
-         # 1. Generate segment indices without loops - vectorized approach
-         segment_indices_offsets = torch.repeat_interleave(starts, segment_lengths)
-         segment_internal_indices = torch.cat([torch.arange(length, device=device) for length in segment_lengths])
-         flat_indices = segment_indices_offsets + segment_internal_indices
-
-         # 2. Vectorized value extraction using advanced indexing
-         values = dense_tensor.view(-1)[flat_indices]
-
-         return (starts.to(device), ends.to(device), values.to(device), torch.tensor(total_size))
-
-
-#TODO: reoptimize moving to cpu and add configuration for the different swap cases
 #TODO: implement dense tensor switch also for direction when clop is 0 also, it would be better to have this as a bool possibly since >%50 sparsity should also be dense (also need to consider sparse structure)
 #TODO: Is it worth noting in a docstring etc. that the delta-y (gradient information) must always be larger than the direction by some amount to ensure loss reduces (and overall stability)?
 #TODO expose hyperparams (ys threshold, curvature, direction and needle norm etc.)
