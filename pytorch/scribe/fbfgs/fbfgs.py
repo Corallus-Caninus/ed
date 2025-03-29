@@ -94,7 +94,10 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
 
 
         # 1. Generate segment indices without loops - vectorized approach
+        start_time_interleave = time.time()
         segment_indices_offsets = torch.repeat_interleave(starts_local, segment_lengths)
+        end_time_interleave = time.time()
+        print(f"dense_to_sparse_flat_tensor: torch.repeat_interleave time: {end_time_interleave - start_time_interleave:.4f} seconds")
         segment_internal_indices = torch.cat([torch.arange(length, device=device) for length in segment_lengths])
         flat_indices = segment_indices_offsets + segment_internal_indices
 
