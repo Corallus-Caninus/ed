@@ -94,6 +94,14 @@ class SparseFlatTensor:
             self.total_size.to(device)
         )
 
+    def dot(self, other):
+        """
+        Computes the dot product of this SparseFlatTensor with another SparseFlatTensor.
+        """
+        dense_self = self.to_dense()
+        dense_other = other.to_dense()
+        return torch.dot(dense_self, dense_other)
+
     @staticmethod
     def from_dense(dense_tensor):
         """
