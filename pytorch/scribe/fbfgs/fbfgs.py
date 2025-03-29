@@ -87,6 +87,7 @@ class SparseFlatTensor:
         Computes the dot product of a SparseFlatTensor with a dense tensor, optimized for sparsity.
         """
         sparse_tensor = sparse_tensor_arg # Explicitly use sparse_tensor_arg
+        assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
         # Get indices and values from sparse tensor
         segment_lengths = sparse_tensor.ends - sparse_tensor.starts
         segment_indices_offsets = torch.repeat_interleave(sparse_tensor.starts, segment_lengths)
