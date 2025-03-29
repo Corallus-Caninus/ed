@@ -46,7 +46,7 @@ class SparseFlatTensor:
         This method modifies self.starts, self.ends, and self.values in place.
         """
         dense_tensor = self.to_dense()
-        starts, ends, values, total_size = SparseFlatTensor.from_dense(dense_tensor)
+        starts, ends, values, total_size = from_dense(dense_tensor)
         sparse_flat_tensor = SparseFlatTensor(starts, ends, values, total_size)
         self.starts = starts
         self.ends = ends
@@ -72,15 +72,14 @@ class SparseFlatTensor:
         dense_other = other.to_dense()
         return torch.dot(dense_self, dense_other)
 
-    @staticmethod
-    @torch.jit.script
-    def from_dense(dense_tensor):
-         """
-         Converts a dense PyTorch tensor to a SparseFlatTensor without for loops, using GPU parallelism.
-         """
-         device = dense_tensor.device
-         dtype = dense_tensor.dtype
-         total_size = dense_tensor.numel()
+@torch.jit.script
+def from_dense(dense_tensor):
+     """
+     Converts a dense PyTorch tensor to a SparseFlatTensor without for loops, using GPU parallelism.
+     """
+     device = dense_tensor.device
+     dtype = dense_tensor.dtype
+     total_size = dense_tensor.numel()
 
          # Find indices of non-zero elements
          non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
@@ -110,8 +109,6 @@ class SparseFlatTensor:
          values = dense_tensor.view(-1)[flat_indices]
 
          return (starts.to(device), ends.to(device), values.to(device), torch.tensor(total_size))
-
-    # Add methods here later (e.g., to_dense, to_sparse, etc.)
 
 
 #TODO: reoptimize moving to cpu and add configuration for the different swap cases
