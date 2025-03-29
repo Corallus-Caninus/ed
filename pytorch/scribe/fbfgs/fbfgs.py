@@ -999,7 +999,6 @@ class FBFGS(Optimizer):
 
 
               y = y #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
-              s = s #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
               ys = ys #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
 
               # compute the approximate (L-BFGS) inverse Hessian
