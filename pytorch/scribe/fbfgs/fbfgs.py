@@ -76,9 +76,27 @@ class SparseFlatTensor:
         segment_internal_indices = (indices - start_indices[segment_ids]).to(torch.long)
         segment_indices = (segment_indices_offsets + segment_internal_indices).to(torch.long)
 
-        multiplied_values = self.values * other.view(-1)[segment_indices.to(other.view(-1).device)]
-
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
+
+    def __rmul__(self, scalar):
+        """
+        Scalar multiplication (right operand) for SparseFlatTensor.
+        """
+        if isinstance(scalar, (int, float)):
+            multiplied_values = self.values * scalar
+            return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
+        else:
+            return NotImplemented
+
+    def __mul__(self, scalar):
+        """
+        Scalar multiplication for SparseFlatTensor.
+        """
+        if isinstance(scalar, (int, float)):
+            multiplied_values = self.values * scalar
+            return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
+        else:
+            return NotImplemented
 
     @staticmethod
     def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
@@ -680,11 +698,10 @@ class FBFGS(Optimizer):
             dense_old_dir = torch.zeros_like(q) # Initialize dense_old_dir as a zero tensor
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item() # Use direction_similarity which is now computed with SparseFlatTensor
-              #q.add_(old_dirs[i].to_dense().to("cuda"), alpha=-al[i]) # Convert to dense here
-              dense_old_dir = old_dirs[i].to_dense().to("cuda")
-              q.add_(dense_old_dir, alpha=-al[i])
+              sparse_old_dir_scaled = old_dirs[i] * (-al[i]) # Scale sparse tensor
+              q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled.to("cuda"), q) # Sparse addition
               hit_miss = hit_miss + str("| ")
-#TODO: prevent over-alignment to keep the direction multipathed?
+# TODO: prevent over-alignment to keep the direction multipathed?
 # Prevent over-alignment by considering the expansion of near-orthogonal entries
 #              if direction_similarity < 1 and direction_similarity > -1:
 ##TODO: over-alignment hyperparameter (last one I swear this one is really necessary)
@@ -706,10 +723,11 @@ class FBFGS(Optimizer):
               #be_i.copy_((old_dirs[i].to_dense().to("cuda") * d).to_dense()) # Convert to dense here
 #              dense_old_dir = old_dirs[i].to_dense().to("cuda")
               be_i.copy_((old_dirs[i].to("cuda") * d).to_dense())
-              #del dense_old_dir # DEL 11: Initialize dense_old_dir before if block in second loop
-              #d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
-              dense_old_stp = old_stps[i].to_dense().to("cuda")
-              d.add_(dense_old_stp, alpha=al[i] - be_i.sum() * ro[i].item())
+              # del dense_old_dir # DEL 11: Initialize dense_old_dir before if block in second loop
+              # d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
+              alpha_val = al[i] - be_i.sum() * ro[i].item()
+              sparse_old_stp_scaled = old_stps[i] * alpha_val # Scale sparse tensor
+              d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled.to("cuda"), d) # Sparse addition
               #del dense_old_stp
 
 
