@@ -59,7 +59,7 @@ class SparseFlatTensor:
         dense_other = other.to_dense()
         return torch.dot(dense_self, dense_other)
 
-@torch.jit.script
+#@torch.jit.script
 def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
     """
     Converts a dense tensor to SparseFlatTensor representation.
@@ -882,7 +882,7 @@ class FBFGS(Optimizer):
 #TODO: break here on n_iters
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
-              y_squared = y.dot(y)
+              y_squared = y_dense.dot(y_dense)
               H_diag = ys / y_squared  # (y*y)
               del y_squared
 
