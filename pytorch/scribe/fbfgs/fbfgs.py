@@ -36,7 +36,11 @@ class SparseFlatTensor:
         dense_tensor = torch.zeros(self.total_size, dtype=self.values.dtype, device=self.values.device)
         segment_lengths = self.ends - self.starts
         segment_indices_offsets = torch.repeat_interleave(self.starts, segment_lengths)
-        indices = torch.repeat_interleave(torch.arange(len(self.starts), device=self.starts.device), segment_lengths)
+        indices = torch.arange(segment_lengths.sum(), device=self.starts.device)
+        segment_lengths_cumsum = segment_lengths.cumsum(0)
+        start_indices = torch.cat([torch.tensor([0], device=self.starts.device), segment_lengths_cumsum[:-1]])
+        segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
+        segment_internal_indices = indices - start_indices[segment_ids]
         segment_indices = segment_indices_offsets + segment_internal_indices
         dense_tensor[segment_indices] = self.values
         return dense_tensor
@@ -99,14 +103,6 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
         segment_indices_offsets = torch.repeat_interleave(starts_local, segment_lengths)
         end_time_interleave = time.time()
         print(f"dense_to_sparse_flat_tensor: torch.repeat_interleave time: {end_time_interleave - start_time_interleave:.4f} seconds")
-
-        segment_lengths = ends_local - starts_local
-        total_length = segment_lengths.sum()
-        indices = torch.arange(total_length, device=device)
-        segment_lengths_cumsum = segment_lengths.cumsum(0)
-        start_indices = torch.cat([torch.tensor([0], device=device), segment_lengths_cumsum[:-1]])
-        segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
-        segment_internal_indices = indices - start_indices[segment_ids]
 
 
         flat_indices = segment_indices_offsets + segment_internal_indices
