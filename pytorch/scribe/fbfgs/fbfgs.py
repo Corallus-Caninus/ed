@@ -64,8 +64,38 @@ class SparseFlatTensor:
         dense_other = other.to_dense()
         return torch.dot(dense_self, dense_other)
 
-#@torch.jit.script
-def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
+    def __mul__(self, other):
+        """
+        Element-wise multiplication of SparseFlatTensor with a dense tensor.
+        """
+        dense_self = self.to_dense()
+        return SparseFlatTensor.dense_to_sparse_flat_tensor(dense_self * other)
+
+    @staticmethod
+    def sparse_dot_dense(sparse_tensor, dense_tensor):
+        """
+        Computes the dot product of a SparseFlatTensor with a dense tensor, optimized for sparsity.
+        """
+        # Get indices and values from sparse tensor
+        segment_lengths = sparse_tensor.ends - sparse_tensor.starts
+        segment_indices_offsets = torch.repeat_interleave(sparse_tensor.starts, segment_lengths)
+        indices = torch.arange(segment_lengths.sum(), device=sparse_tensor.starts.device)
+        segment_lengths_cumsum = segment_lengths.cumsum(0)
+        start_indices = torch.cat([torch.tensor([0], device=sparse_tensor.starts.device), segment_lengths_cumsum[:-1]])
+        segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
+        segment_internal_indices = indices - start_indices[segment_ids]
+        segment_indices = segment_indices_offsets + segment_internal_indices
+
+        # Extract corresponding values from dense tensor using sparse indices
+        sparse_values_from_dense = dense_tensor.view(-1)[segment_indices]
+
+        # Compute dot product
+        return torch.dot(sparse_values_from_dense, sparse_tensor.values)
+
+
+    @staticmethod
+    #@torch.jit.script # Removing jit for now to debug
+    def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
     print("dense_to_sparse_flat_tensor: Start")
     """
     Converts a dense tensor to SparseFlatTensor representation.
@@ -632,18 +662,22 @@ class FBFGS(Optimizer):
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
-        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device) # Initialize al as tensor
+        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
         for i in range(num_old - 1, -1, -1):
-            direction_similarity = (old_dirs[i].to_dense().to("cuda") * q).sum().item() # Convert to dense here
+            #direction_similarity = (old_dirs[i].to_dense().to("cuda") * q).sum().item() # Convert to dense here
+            direction_similarity = SparseFlatTensor.sparse_dot_dense(old_dirs[i].to("cuda"), q).item()
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item()
-              q.add_(old_dirs[i].to_dense().to("cuda"), alpha=-al[i]) # Convert to dense here
+              #q.add_(old_dirs[i].to_dense().to("cuda"), alpha=-al[i]) # Convert to dense here
+              dense_old_dir = old_dirs[i].to_dense().to("cuda")
+              q.add_(dense_old_dir, alpha=-al[i])
+              del dense_old_dir
               hit_miss = hit_miss + str("| ")
-#TODO: prevent over-alignment to keep the direction multipathed ?
-#prevent over-alignment by considering the expansion of near-orthogonal entries
+#TODO: prevent over-alignment to keep the direction multipathed?
+# Prevent over-alignment by considering the expansion of near-orthogonal entries
 #              if direction_similarity < 1 and direction_similarity > -1:
 ##TODO: over-alignment hyperparameter (last one I swear this one is really necessary)
 #                similarity += 0.1*similarity*(1 - abs(direction_similarity)) #TODO: we assume worst case which is variance has doubled ?  We can calculate this based on the alignment. the less aligned the more variance in the solution.
@@ -660,12 +694,19 @@ class FBFGS(Optimizer):
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
             if direction_alignment_mask[i]:
-              be_i.copy_((old_dirs[i].to_dense().to("cuda") * d).to_dense()) # Convert to dense here
-              d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
+              #be_i.copy_((old_dirs[i].to_dense().to("cuda") * d).to_dense()) # Convert to dense here
+              dense_old_dir = old_dirs[i].to_dense().to("cuda")
+              be_i.copy_((dense_old_dir * d).to_dense())
+              del dense_old_dir
+              #d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
+              dense_old_stp = old_stps[i].to_dense().to("cuda")
+              d.add_(dense_old_stp, alpha=al[i] - be_i.sum() * ro[i].item())
+              del dense_old_stp
+
 
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
-        total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda") # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
         d = d.div_(total_norm)
 #        direction = d
 #        mask = torch.logical_and(direction > -clop, direction < clop) #TODO: extract to sub_variance hyperparameter
