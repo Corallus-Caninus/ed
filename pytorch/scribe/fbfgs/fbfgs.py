@@ -66,65 +66,6 @@ class SparseFlatTensor:
         sparse_tensor = torch.sparse_coo_tensor(indices, values, size=(int(self.total_size),), dtype=self.values.dtype, device=self.values.device)
         return sparse_tensor
 
-    def __add__(self, other):
-        """
-        Element-wise addition of two SparseFlatTensors.
-        """
-        if not isinstance(other, SparseFlatTensor):
-            raise TypeError("Addition is only supported between SparseFlatTensor instances.")
-        return SparseFlatTensor.sparse_add(self, other)
-
-    def __sub__(self, other):
-        """
-        Element-wise subtraction of two SparseFlatTensors.
-        """
-        if not isinstance(other, SparseFlatTensor):
-            raise TypeError("Subtraction is only supported between SparseFlatTensor instances.")
-        return SparseFlatTensor.sparse_sub(self, other)
-
-    def __mul__(self, scalar):
-        """
-        Scalar multiplication of a SparseFlatTensor.
-        """
-        # Scalar multiplication is straightforward for SparseFlatTensor
-        return SparseFlatTensor(self.starts, self.ends, self.values * scalar, torch.tensor(self.total_size))
-
-    def __truediv__(self, scalar):
-        """
-        Scalar division of a SparseFlatTensor.
-        """
-        if isinstance(scalar, (int, float)):
-            return SparseFlatTensor(self.starts, self.ends, self.values / scalar, self.total_size)
-        elif isinstance(scalar, torch.Tensor) and scalar.numel() == 1:
-            return SparseFlatTensor(self.starts, self.ends, self.values / scalar, self.total_size)
-        else:
-            raise TypeError("Scalar division is only supported for scalar values or 1-element tensors.")
-
-    def dot(self, other):
-        """
-        Dot product of two SparseFlatTensors.
-        """
-        if not isinstance(other, SparseFlatTensor):
-            raise TypeError("Dot product is only supported between SparseFlatTensor instances.")
-        return SparseFlatTensor.sparse_dot_product(self, other)
-
-
-    def neg(self):
-        """
-        Negates the SparseFlatTensor.
-        """
-        return SparseFlatTensor(self.starts, self.ends, -self.values, torch.tensor(self.total_size))
-
-    def to(self, device):
-        """
-        Moves the SparseFlatTensor to the specified device.
-        """
-        starts = self.starts.to(device)
-        ends = self.ends.to(device)
-        values = self.values.to(device)
-        return SparseFlatTensor(starts, ends, values, torch.tensor(self.total_size))
-
-
     @staticmethod
     def from_dense(dense_tensor):
         """
@@ -160,43 +101,6 @@ class SparseFlatTensor:
         values = torch.cat(values_list) # Concatenate into a 1D tensor
 
         return SparseFlatTensor(starts.to(device), ends.to(device), values.to(device), total_size)
-
-
-    @staticmethod
-    def sparse_add(tensor1, tensor2):
-        """
-        Efficiently adds two SparseFlatTensors.
-        """
-        """
-        Efficiently adds two SparseFlatTensors.
-        """
-        dense1 = tensor1.to_dense()
-        dense2 = tensor2.to_dense()
-        return dense1 + dense2
-
-    @staticmethod
-    def sparse_sub(tensor1, tensor2):
-        """
-        Efficiently subtracts two SparseFlatTensors.
-        """
-        """
-        Efficiently subtracts two SparseFlatTensors.
-        """
-        dense1 = tensor1.to_dense()
-        dense2 = tensor2.to_dense()
-        return dense1 - dense2
-
-    @staticmethod
-    def sparse_dot_product(tensor1, tensor2):
-        """
-        Efficiently computes the dot product of two SparseFlatTensors.
-        """
-        """
-        Efficiently computes the dot product of two SparseFlatTensors.
-        """
-        dense1 = tensor1.to_dense()
-        dense2 = tensor2.to_dense()
-        return torch.dot(dense1, dense2)
 
     # Add methods here later (e.g., to_dense, to_sparse, etc.)
 
