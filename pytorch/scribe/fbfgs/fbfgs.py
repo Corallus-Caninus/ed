@@ -83,6 +83,17 @@ class SparseFlatTensor:
         self.ends = ends.to(device)
         self.values = values.to(device)
 
+    def to(self, device):
+        """
+        Moves all internal tensors to the specified device and returns a new SparseFlatTensor.
+        """
+        return SparseFlatTensor(
+            self.starts.to(device),
+            self.ends.to(device),
+            self.values.to(device),
+            self.total_size.to(device)
+        )
+
     @staticmethod
     def from_dense(dense_tensor):
         """
