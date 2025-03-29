@@ -20,10 +20,10 @@ class SparseFlatTensor:
             values (torch.Tensor): 1D tensor containing concatenated values of all dense segments.
             total_size (Tensor): The total size of the 1D tensor.
         """
-        self.starts = starts
-        self.ends = ends
+        self.starts = starts.to(torch.long)
+        self.ends = ends.to(torch.long)
         self.values = values # Now a 1D tensor
-        self.total_size = torch.tensor(total_size)
+        self.total_size = torch.tensor(total_size).to(torch.long)
 
     def __repr__(self):
         return f"SparseFlatTensor(starts={self.starts}, ends={self.ends}, values={self.values}, total_size={self.total_size})"
@@ -33,14 +33,14 @@ class SparseFlatTensor:
         Converts the sparse tensor representation to a dense PyTorch tensor using vectorized operations.
         """
         dense_tensor = torch.zeros(self.total_size, dtype=self.values.dtype, device=self.values.device)
-        segment_lengths = self.ends - self.starts
-        segment_indices_offsets = torch.repeat_interleave(self.starts, segment_lengths)
-        indices = torch.arange(segment_lengths.sum(), device=self.starts.device)
-        segment_lengths_cumsum = segment_lengths.cumsum(0)
-        start_indices = torch.cat([torch.tensor([0], device=self.starts.device), segment_lengths_cumsum[:-1]])
+        segment_lengths = (self.ends - self.starts).to(torch.long)
+        segment_indices_offsets = torch.repeat_interleave(self.starts.to(torch.long), segment_lengths)
+        indices = torch.arange(segment_lengths.sum(), device=self.starts.device).to(torch.long)
+        segment_lengths_cumsum = segment_lengths.cumsum(0).to(torch.long)
+        start_indices = torch.cat([torch.tensor([0], device=self.starts.device), segment_lengths_cumsum[:-1]]).to(torch.long)
         segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
-        segment_internal_indices = indices - start_indices[segment_ids]
-        segment_indices = segment_indices_offsets + segment_internal_indices
+        segment_internal_indices = (indices - start_indices[segment_ids]).to(torch.long)
+        segment_indices = (segment_indices_offsets + segment_internal_indices).to(torch.long)
         dense_tensor[segment_indices] = self.values
         return dense_tensor
 
@@ -67,14 +67,14 @@ class SparseFlatTensor:
         """
         Element-wise multiplication of SparseFlatTensor with a dense tensor.
         """
-        segment_lengths = self.ends - self.starts
-        segment_indices_offsets = torch.repeat_interleave(self.starts, segment_lengths)
-        indices = torch.arange(segment_lengths.sum(), device=self.starts.device)
-        segment_lengths_cumsum = segment_lengths.cumsum(0)
-        start_indices = torch.cat([torch.tensor([0], device=self.starts.device), segment_lengths_cumsum[:-1]])
+        segment_lengths = (self.ends - self.starts).to(torch.long)
+        segment_indices_offsets = torch.repeat_interleave(self.starts.to(torch.long), segment_lengths)
+        indices = torch.arange(segment_lengths.sum(), device=self.starts.device).to(torch.long)
+        segment_lengths_cumsum = segment_lengths.cumsum(0).to(torch.long)
+        start_indices = torch.cat([torch.tensor([0], device=self.starts.device), segment_lengths_cumsum[:-1]]).to(torch.long)
         segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
-        segment_internal_indices = indices - start_indices[segment_ids]
-        segment_indices = segment_indices_offsets + segment_internal_indices
+        segment_internal_indices = (indices - start_indices[segment_ids]).to(torch.long)
+        segment_indices = (segment_indices_offsets + segment_internal_indices).to(torch.long)
 
         multiplied_values = self.values * other.view(-1)[segment_indices.to(other.view(-1).device)]
 
