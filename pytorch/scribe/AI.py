@@ -89,6 +89,25 @@ while True:
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
   print("got num_tokens: " + str(input_ids.size(1)))
 
+  print("-----------------------step---------------------")
+  optimizer.step(closure)
+
+  step_count += 1
+
+  if step_count % 10 == 0:
+      unwrapped_model = accelerator.unwrap_model(model)
+      accelerator.save(unwrapped_model.state_dict(), filename)
+      optimizer.save_history(history_filename)
+      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}")
+
+  torch.cuda.empty_cache()
+  prompt = "The Factor programming language is "
+  input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
+  with torch.no_grad():
+    generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
+    generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    print(f"Model response: {generated_text}")
+
   def closure(): # Define closure here, outside the if block
     total_loss= 0
     start_time = time.time()
@@ -143,11 +162,6 @@ while True:
     del outputs
     torch.cuda.empty_cache()
     return loss
-
-  print("-----------------------step---------------------")
-  optimizer.step(closure)
-
-  step_count += 1
 
   if step_count % 10 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
