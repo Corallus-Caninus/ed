@@ -65,7 +65,7 @@ else:
 #    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
 #dataset = dataset.take(1000) # Limit dataset size to 1,000,000 # No longer needed for local dataset
 #dataloader = DataLoader(dataset.take(100), batch_size=8)
-#dataloader.save_to_disk("c_code_dataset.ds")
+dataset.save_to_disk("c_code_dataset.ds")
 
 model.train()
 
@@ -89,7 +89,7 @@ def closure(): # Define closure here, outside the if block
   cache = None
   chunk_size=1000 #1000
   grad_vector_size = 10 #5
-  num_tokens = len(tokens)
+  num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
   if num_tokens == chunk_size+1:
