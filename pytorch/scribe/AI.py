@@ -90,6 +90,7 @@ while True:
   print("got num_tokens: " + str(input_ids.size(1)))
 
   print("-----------------------step---------------------")
+  optimizer.step(closure)
 
   def closure(): # Define closure here, inside the if block
     total_loss= 0
