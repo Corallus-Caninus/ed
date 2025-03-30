@@ -64,8 +64,8 @@ if os.path.exists("c_code_dataset.ds"):
     dataset = datasets.load_from_disk("c_code_dataset.ds",streaming=True)
 else:
     dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
-dataset = dataset.take(1000000) # Limit dataset size to 1,000,000
-dataloader = DataLoader(dataset.take(100), batch_size=8)
+dataset = dataset.take(1000) # Limit dataset size to 1,000,000
+#dataloader = DataLoader(dataset.take(100), batch_size=8)
 #dataloader.save_to_disk("c_code_dataset.ds")
 
 def get_random_streaming_item(dataset, index):
