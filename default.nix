@@ -6,7 +6,9 @@ stdenv.mkDerivation {
 
   src = /home/jward/Code/Code_Backup_2024/ed; # Path to your source directory
 
-  buildInputs = [ ]; # Add any build inputs if necessary
+  buildInputs = [
+    pkgs.cudaPackages.cudatoolkit_12
+  ]; # Add any build inputs if necessary
 
   buildPhase = "make";
 
