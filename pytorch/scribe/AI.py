@@ -58,28 +58,11 @@ if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
 
 datalist = []
-if os.path.exists("chunked.ds"):
-    dataset = datasets.load_from_disk("chunked.ds")
+if os.path.exists("c_code_dataset.ds"):
+    dataset = datasets.load_from_disk("c_code_dataset.ds")
 else:
-    dataset = load_dataset(path="datasets", split="train")
-    print(dataset)
-    i = 0
-    batch_train = ""
-    def encode(examples):
-        global batch_train
-        global i
-        if i >=300:
-          res = batch_train
-          batch_train = ""
-          i = 0
-          return {"text": res}
-        else:
-          i += 1
-          batch_train += examples['text']
-          return {"text": None}
-    dataset = dataset.map(encode)
-    dataset = dataset.filter(lambda item: item['text'] != None )
-    dataset.save_to_disk("chunked.ds")
+    dataset = load_dataset("codeparrot/github_code", split="train", lang="c")
+    dataset.save_to_disk("c_code_dataset.ds")
 model.train()
 
 batch_train = None
