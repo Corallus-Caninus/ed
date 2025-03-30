@@ -131,7 +131,7 @@ def closure(): # Define closure here, outside the if block
 #  input_ids_grad = input_ids[:, -grad_vector_size:].to("cuda")
 #  attention_mask_grad = attention_mask[:, -grad_vector_size:].to("cuda")
 #  outputs = model(input_ids_grad, attention_mask=attention_mask_grad, labels=input_ids_grad, cache_params = cache, cache_position=[i]) # Use cache for grad section
-  avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
+  avg_loss = avg_loss / num_steps if num_steps > 0 else last_chunk_loss # Calculate average loss (including last chunk)
   outputs.loss.item = avg_loss
   loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
   loss.backward()
