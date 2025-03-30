@@ -33,13 +33,13 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
     config = AutoConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
-    model.load_state_dict(torch.load(filename, weights_only=True))
+    model.load_state_dict(torch.load(filename, weights_only=True), strict=False) # Load weights, ignoring size mismatches
     print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
 
 else: # Load initial model weights if no checkpoint exists
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
     config = AutoConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
-    model = Mamba2ForCausalLM(config).from_pretrained(model_id).to("cuda") # Load initial weights using config
+    model = Mamba2ForCausalLM(config).from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda") # Load initial weights using config, ignoring size mismatches
 #model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16,).to("cuda")
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
