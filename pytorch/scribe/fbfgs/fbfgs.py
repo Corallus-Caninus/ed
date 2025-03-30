@@ -1045,11 +1045,10 @@ class FBFGS(Optimizer):
               num_old = len(old_dirs)
 
               gc.collect()
-              if self.clop != 0:
-                d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
-              else:
+              if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
-
+              else:
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
               torch.cuda.empty_cache()
 
               del H_diag
