@@ -5,7 +5,7 @@ import torch
 print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
 
 import gc
-from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel , AutoModelForCausalLM
+from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel , AutoModelForCausalLM, AutoConfig
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Dataset, DataLoader
 from fbfgs import FBFGS
@@ -31,14 +31,14 @@ history_filename = "fbfgs_history.pth"
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
-    config = MambaConfig.from_pretrained(model_id) # Load config from pretrained
+    config = AutoConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
     model.load_state_dict(torch.load(filename, weights_only=True))
     print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
 
 else: # Load initial model weights if no checkpoint exists
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
-    config = MambaConfig.from_pretrained(model_id) # Load config from pretrained
+    config = AutoConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     model = Mamba2ForCausalLM(config).from_pretrained(model_id).to("cuda") # Load initial weights using config
 #model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16,).to("cuda")
 
