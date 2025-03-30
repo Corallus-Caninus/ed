@@ -26,28 +26,28 @@ import time
 tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
 model_id = "AntonV/mamba2-130m-hf"
 model_id = "state-spaces/mamba2-130m"
-model_id = "hanzla/Falcon3-Mamba-R1-v0"
+#model_id = "hanzla/Falcon3-Mamba-R1-v0"
 history_filename = "fbfgs_history.pth"
 
-#if os.path.exists(filename): # Load model weights and optimizer history
-#    print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
-#    config = MambaConfig.from_pretrained(model_id) # Load config from pretrained
-#    model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
-#    try:
-#        model.load_state_dict(torch.load(filename, weights_only=True))
-#        print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
-#    except FileNotFoundError:
-#        print(f"Model checkpoint file '{filename}' not found, even though it was just checked. This is unexpected.")
-#        model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda") # Fallback to AntonV weights
-#        print(f"Loading initial weights from '{model_id}' instead.")
-#    except Exception as e:
-#        print(f"Error loading model checkpoint from '{filename}': {e}. Falling back to initial weights.")
-#        model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda") # Fallback to AntonV weights
-#        print(f"Loading initial weights from '{model_id}' instead.")
-#else: # Load initial model weights from AntonV if no checkpoint exists
-#    print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
-#    model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda")
-model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16,)
+if os.path.exists(filename): # Load model weights and optimizer history
+    print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
+    config = MambaConfig.from_pretrained(model_id) # Load config from pretrained
+    model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
+    try:
+        model.load_state_dict(torch.load(filename, weights_only=True))
+        print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
+    except FileNotFoundError:
+        print(f"Model checkpoint file '{filename}' not found, even though it was just checked. This is unexpected.")
+        model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda") # Fallback to AntonV weights
+        print(f"Loading initial weights from '{model_id}' instead.")
+    except Exception as e:
+        print(f"Error loading model checkpoint from '{filename}': {e}. Falling back to initial weights.")
+        model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda") # Fallback to AntonV weights
+        print(f"Loading initial weights from '{model_id}' instead.")
+else: # Load initial model weights from AntonV if no checkpoint exists
+    print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
+    model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda")
+#model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16,).to("cuda")
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
@@ -88,12 +88,10 @@ while True:
   batch_train = get_random_streaming_item(dataset, random_index)['code'] # Access data using random index
 
   tokens = tokenizer(batch_train,truncation=True, max_length=200,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
-  input_ids, attention_mask = (tokens.input_ids.to("cuda"), tokens.attention_mask.to("cuda"))
+  input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
   print("got num_tokens: " + str(input_ids.size(1)))
 
-  print("-----------------------step---------------------")
-
-  def closure(input_ids, attention_mask):
+  def closure():
     total_loss= 0
     start_time = time.time()
     loss = 0
@@ -136,7 +134,7 @@ while True:
   #TODO: else:
     input_ids = input_ids.to("cuda")
     attention_mask = attention_mask.to("cuda")
-    outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids.to("cuda"))
+    outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids)
     loss = outputs.loss # Perform backward pass on the original outputs.loss tensor
     loss.backward()
 
@@ -148,7 +146,8 @@ while True:
     torch.cuda.empty_cache()
     return loss
 
-  optimizer.step(lambda: closure(input_ids, attention_mask))
+  print("-----------------------step---------------------")
+  optimizer.step(closure)
   step_count += 1
 
   if step_count % 10 == 0:
