@@ -773,7 +773,7 @@ class FBFGS(Optimizer):
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
-              al[i] = direction_similarity * ro[i].item().to("cuda") # Use direction_similarity which is now computed with SparseFlatTensor
+              al[i] = direction_similarity * ro[i].to("cuda").item() # Use direction_similarity which is now computed with SparseFlatTensor
               q = q + (old_dirs[i].to("cuda") * ((-al[i]))) # Dense addition
               hit_miss = hit_miss + str("| ")
 # TODO: prevent over-alignment to keep the direction multipathed?
@@ -795,7 +795,7 @@ class FBFGS(Optimizer):
         for i in range(num_old):
             if direction_alignment_mask[i]:
               be_i.copy_((old_dirs[i].to("cuda") * d))
-              alpha_val = al[i] - be_i.sum() * ro[i].item().to("cuda")
+              alpha_val = al[i] - be_i.sum() * ro[i].to("cuda").item()
               d = d + (old_stps[i].to("cuda") * (alpha_val)) # Dense addition
 
 
