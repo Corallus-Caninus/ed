@@ -79,8 +79,7 @@ dataset_size = 1000
 input_ids = None
 attention_mask = None
 
-
-cache = None
+cache = None # Initialize cache here
 def closure(): # Define closure here, outside the if block
   global input_ids, attention_mask # Declare them as global so we can modify them
   total_loss= 0
