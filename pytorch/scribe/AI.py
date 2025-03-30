@@ -136,7 +136,7 @@ while True:
   #TODO: else:
     input_ids = input_ids.to("cuda")
     attention_mask = attention_mask.to("cuda")
-    outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids)
+    outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids.to("cuda"))
     loss = outputs.loss # Perform backward pass on the original outputs.loss tensor
     loss.backward()
 
