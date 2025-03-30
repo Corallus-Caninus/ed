@@ -683,7 +683,7 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
+    def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 0.
@@ -1044,35 +1044,15 @@ class FBFGS(Optimizer):
               # multiplied by the gradient
               num_old = len(old_dirs)
 
-#              if "al" not in state:
-#                state["al"] = [None] * history_size
-#              al = [None] * history_size
-              al = [None] * num_old
-#              al = state["al"]
-
-              # iteration in L-BFGS loop collapsed to use just one buffer
-#              q = flat_grad.neg()  # Move q to direction_device
-
-              # Move history to direction_device
-#              old_dirs_cuda = [tensor.to(self.direction_device) for tensor in old_dirs]
-#              old_stps_cuda = [tensor.to(self.direction_device) for tensor in old_stps]
-#              ro_cuda = [tensor.to(self.direction_device) for tensor in ro]
-
               gc.collect()
-#              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", clop=self.clop, clop=self.clop)
-#TODO: TEST: use the l1 norm to bootstrap alignment/selection and rely on the l2 for convergence metrics and curvature.
-              d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
-
-              # Move history back to CPU
-#              old_dirs = [tensor.to('cpu') for tensor in old_dirs_cuda]
-#              old_stps = [tensor.to('cpu') for tensor in old_stps_cuda]
-#              ro = [tensor.to('cpu') for tensor in ro_cuda]
+              if self.clop != 0:
+                d = self.direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
+              else:
+                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
 
               torch.cuda.empty_cache()
 
-              del H_diag  # DEL 6: H_diag is no longer needed
-              # del sparse_product_al # Delete after loop
-              # del intermediate_be # Delete after loop
+              del H_diag
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
 #              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was self.direction_device
