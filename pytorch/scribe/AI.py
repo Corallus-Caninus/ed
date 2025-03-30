@@ -131,14 +131,14 @@ def closure(): # Define closure here, outside the if block
     # If num_steps is 0, avg_loss remains 0, or you can handle it differently if needed.
     # For now, we assume that if no chunks were processed, the loss is just the last chunk loss (or the full loss if no chunking at all).
 
-  input_ids = input_ids.to("cuda")
-  attention_mask = attention_mask.to("cuda")
-  outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids)
-  loss = outputs.loss # Perform backward pass on the original outputs.loss tensor
+  input_ids_grad = input_ids[:, -grad_vector_size:].to("cuda")
+  attention_mask_grad = attention_mask[:, -grad_vector_size:].to("cuda")
+  outputs = model(input_ids_grad, attention_mask=attention_mask_grad, labels=input_ids_grad, use_cache=False) # No cache for grad section
+  loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
   loss.backward()
 
-  print("-", end="")
-  end_time = time.time()
+  print("-", end="") # Indicate step completion
+  end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
   del cache
   del outputs
