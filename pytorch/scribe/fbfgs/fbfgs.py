@@ -23,12 +23,6 @@ class SparseFlatTensor:
             unit_indices (torch.Tensor, optional): 1D tensor of indices for unit elements. Defaults to None.
             unit_values (torch.Tensor, optional): 1D tensor of values for unit elements. Defaults to None.
         """
-
-        Args:
-            starts (torch.Tensor): 1D tensor of start indices for each dense segment.
-            ends (torch.Tensor): 1D tensor of end indices for each dense segment.
-            values (torch.Tensor): 1D tensor containing concatenated values of all dense segments.
-            total_size (Tensor): The total size of the 1D tensor.
         self.starts = starts.to(torch.long)
         self.ends = ends.to(torch.long)
         self.values = values # Now a 1D tensor
