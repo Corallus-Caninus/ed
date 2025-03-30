@@ -93,7 +93,7 @@ while True:
 
   print("-----------------------step---------------------")
 
-  def closure():
+  def closure(input_ids, attention_mask):
     total_loss= 0
     start_time = time.time()
     loss = 0
@@ -148,7 +148,7 @@ while True:
     torch.cuda.empty_cache()
     return loss
 
-  optimizer.step(closure)
+  optimizer.step(lambda: closure(input_ids, attention_mask))
   step_count += 1
 
   if step_count % 10 == 0:
