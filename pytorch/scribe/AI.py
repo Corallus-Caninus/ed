@@ -24,8 +24,8 @@ filename = "AI_Checkpoint.ai"
 
 import time
 tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
-model_id = "AntonV/mamba2-130m-hf"
 model_id = "state-spaces/mamba2-130m"
+#model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 #model_id = "hanzla/Falcon3-Mamba-R1-v0"
 history_filename = "fbfgs_history.pth"
 
@@ -33,20 +33,13 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
     config = MambaConfig.from_pretrained(model_id) # Load config from pretrained
     model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
-    try:
-        model.load_state_dict(torch.load(filename, weights_only=True))
-        print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
-    except FileNotFoundError:
-        print(f"Model checkpoint file '{filename}' not found, even though it was just checked. This is unexpected.")
-        model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda") # Fallback to AntonV weights
-        print(f"Loading initial weights from '{model_id}' instead.")
-    except Exception as e:
-        print(f"Error loading model checkpoint from '{filename}': {e}. Falling back to initial weights.")
-        model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda") # Fallback to AntonV weights
-        print(f"Loading initial weights from '{model_id}' instead.")
-else: # Load initial model weights from AntonV if no checkpoint exists
+    model.load_state_dict(torch.load(filename, weights_only=True))
+    print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
+
+else: # Load initial model weights if no checkpoint exists
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
-    model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda")
+    config = MambaConfig.from_pretrained(model_id) # Load config from pretrained
+    model = Mamba2ForCausalLM(config).from_pretrained(model_id).to("cuda") # Load initial weights using config
 #model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16,).to("cuda")
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
