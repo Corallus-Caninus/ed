@@ -80,30 +80,18 @@ class SparseFlatTensor:
         dense_other = other.to_dense()
         return torch.dot(dense_self, dense_other)
 
-    def __mul__(self, other):
-        segment_lengths = (self.ends - self.starts).to(torch.long)
-        segment_indices_offsets = torch.repeat_interleave(self.starts.to(torch.long), segment_lengths)
-        indices = torch.arange(segment_lengths.sum(), device=self.starts.device).to(torch.long)
-        segment_lengths_cumsum = segment_lengths.cumsum(0).to(torch.long)
-        start_indices = torch.cat([torch.tensor([0], device=self.starts.device), segment_lengths_cumsum[:-1]]).to(torch.long)
-        segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
-        segment_internal_indices = (indices - start_indices[segment_ids]).to(torch.long)
-        segment_indices = (segment_indices_offsets + segment_internal_indices).to(torch.long)
-
-        multiplied_values = self.values * other # Element-wise multiplication with 'other' tensor
-        return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size, self.unit_indices, self.unit_values)
+    def __mul__(self, scalar):
+        """Scalar multiplication."""
+        multiplied_values = self.values * scalar
+        multiplied_unit_values = self.unit_values * scalar
+        return SparseFlatTensor(
+            self.starts, self.ends, multiplied_values, self.total_size,
+            self.unit_indices, multiplied_unit_values
+        )
 
     def rmul(self, scalar):
         """Scalar multiplication."""
-        multiplied_values = self.values * scalar
-        return SparseFlatTensor(
-            self.starts, self.ends, multiplied_values, self.total_size,
-            self.unit_indices, self.unit_values
-        )
-
-    def __mul__(self, scalar):
-        multiplied_values = self.values * scalar
-        return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size, self.unit_indices, self.unit_values)
+        return self.__mul__(scalar)
 
     @staticmethod
     def add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor: Tensor) -> Tensor:
