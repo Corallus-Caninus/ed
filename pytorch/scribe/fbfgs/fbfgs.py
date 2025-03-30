@@ -1028,8 +1028,12 @@ class FBFGS(Optimizer):
 #                else:
 #                  s_sparse = s.to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
 #                  old_stps.append(s_sparse.to(self.direction_device)) # NOTE: was cpu
-                old_dirs.append(y.to(self.direction_device)) # Store y as SparseFlatTensor
-                old_stps.append(s.to(self.direction_device)) # Store s as SparseFlatTensor
+                if self.clop != 0:
+                  old_dirs.append(y.to(self.direction_device)) # Store y as SparseFlatTensor
+                  old_stps.append(s.to(self.direction_device)) # Store s as SparseFlatTensor
+                else:
+                  old_dirs.append(y) # Store y as dense Tensor
+                  old_stps.append(s) # Store s as dense Tensor
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               if n_iter > max_iter:
                 break
