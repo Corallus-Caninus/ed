@@ -96,7 +96,8 @@ class SparseFlatTensor:
 
     def rmul(self, scalar):
         """
-        Scalar multiplication (right operand) for SparseFlatTensor, including unit indices.
+        Scalar multiplication (right operand) for SparseFlatTensor,
+        including unit indices.
         """
         multiplied_values = self.values * scalar
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
