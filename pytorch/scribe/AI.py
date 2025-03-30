@@ -142,7 +142,7 @@ dataset_size = 1000
 
 while True:
   random_index = torch.randint(0, dataset_size, (1,)).item() # Generate a random index
-  batch_train = get_random_streaming_item(dataset, random_index)['text'] # Access data using random index
+  batch_train = get_random_streaming_item(dataset, random_index)['code'] # Access data using random index
 
   tokens = tokenizer(batch_train,truncation=True, max_length=200,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
