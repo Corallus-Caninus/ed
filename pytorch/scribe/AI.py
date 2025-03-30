@@ -80,6 +80,7 @@ input_ids = None
 attention_mask = None
 
 
+cache = None
 def closure(): # Define closure here, outside the if block
   global input_ids, attention_mask # Declare them as global so we can modify them
   total_loss= 0
@@ -87,7 +88,6 @@ def closure(): # Define closure here, outside the if block
   loss = 0
   i = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
-  cache = None
   chunk_size=1000 #1000
   grad_vector_size = 10 #5
   num_tokens = input_ids.size(1)
@@ -105,6 +105,8 @@ def closure(): # Define closure here, outside the if block
       if cache is not None:
   #      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
   #      outputs.loss.backward()
+        if i == 0:
+          cache.reset()
         with torch.no_grad(): # Keep no_grad context for forward passes in the loop
           outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
       else:
