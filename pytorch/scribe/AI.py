@@ -90,7 +90,7 @@ while True:
     cache = None
     chunk_size=0 #1000
     grad_vector_size = 200 #5
-    num_tokens = tokens.len()
+    num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
     if num_tokens == chunk_size+1:
