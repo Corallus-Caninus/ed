@@ -1,6 +1,9 @@
 import os
+import sys
 
 import torch
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
 
