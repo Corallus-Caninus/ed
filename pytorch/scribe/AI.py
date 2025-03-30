@@ -91,7 +91,7 @@ while True:
 
   print("-----------------------step---------------------")
 
-  def closure():
+  def closure(): # Define closure here, inside the if block
     total_loss= 0
     start_time = time.time()
     loss = 0
