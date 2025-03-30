@@ -89,10 +89,7 @@ while True:
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
   print("got num_tokens: " + str(input_ids.size(1)))
 
-  print("-----------------------step---------------------")
-  optimizer.step(closure)
-
-  def closure(): # Define closure here, inside the if block
+  def closure(): # Define closure here, outside the if block
     total_loss= 0
     start_time = time.time()
     loss = 0
@@ -146,6 +143,9 @@ while True:
     del outputs
     torch.cuda.empty_cache()
     return loss
+
+  print("-----------------------step---------------------")
+  optimizer.step(closure)
 
   step_count += 1
 
