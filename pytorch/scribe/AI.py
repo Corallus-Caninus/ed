@@ -61,7 +61,7 @@ datalist = []
 if os.path.exists("c_code_dataset.ds"):
     dataset = datasets.load_from_disk("c_code_dataset.ds")
 else:
-    dataset = load_dataset("codeparrot/github_code", split="train", lang="c")
+    dataset = load_dataset("huggingface_hub:codeparrot/github_code", split="train", lang="c")
     dataset.save_to_disk("c_code_dataset.ds")
 model.train()
 
