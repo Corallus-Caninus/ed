@@ -64,6 +64,7 @@ if os.path.exists("c_code_dataset.ds"):
     dataset = datasets.load_from_disk("c_code_dataset.ds")
 else:
     dataset = load_dataset("codeparrot/github-code", split="train", name="C-all")
+    dataset = dataset.select(range(1000000)) # Limit dataset size to 1,000,000
     dataset.save_to_disk("c_code_dataset.ds")
 model.train()
 
