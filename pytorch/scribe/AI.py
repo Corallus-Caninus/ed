@@ -94,7 +94,6 @@ def closure(): # Define closure here, outside the if block
   avg_loss = 0.
   if num_tokens == chunk_size+1:
     chunk_size += 1
-  torch.cuda.empty_cache()
   if chunk_size > 0:
     for i in range(0, num_tokens - grad_vector_size, chunk_size):
       end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
@@ -127,8 +126,11 @@ def closure(): # Define closure here, outside the if block
 #  input_ids_grad = input_ids[:, -grad_vector_size:].to("cuda")
 #  attention_mask_grad = attention_mask[:, -grad_vector_size:].to("cuda")
 #  outputs = model(input_ids_grad, attention_mask=attention_mask_grad, labels=input_ids_grad, cache_params = cache, cache_position=[i]) # Use cache for grad section
+  print(str(outputs.loss.item()))
+  print(str(avg_loss))
   avg_loss = avg_loss / num_steps if num_steps > 0 else last_chunk_loss # Calculate average loss (including last chunk)
   outputs.loss.item = avg_loss
+  print(str(outputs.loss.item))
   loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
   loss.backward()
 
@@ -136,7 +138,6 @@ def closure(): # Define closure here, outside the if block
   end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
   del outputs
-  torch.cuda.empty_cache()
   return loss
 
 
@@ -161,7 +162,7 @@ while True:
       print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}")
 
   torch.cuda.empty_cache()
-  prompt = "int main("
+  prompt = "#include"
   input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
   with torch.no_grad():
     generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
