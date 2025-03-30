@@ -926,6 +926,8 @@ class FBFGS(Optimizer):
               print("RESET")
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
+              dense_old_dirs = []
+              dense_old_stps = []
 #TODO: if we do this we should norm inf for Rollover stability
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               d = d/total_norm
