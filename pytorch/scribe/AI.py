@@ -61,12 +61,12 @@ if os.path.exists(filename): # Load optimizer history if checkpoint exists
 
 datalist = []
 if os.path.exists("c_code_dataset.ds"):
-if os.path.exists("c_code_dataset.ds"):
-    dataset = datasets.load_from_disk("c_code_dataset.ds")
+    dataset = datasets.load_from_disk("c_code_dataset.ds",streaming=True)
 else:
-    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all")
-dataset = dataset.select(range(1000000)) # Limit dataset size to 1,000,000
-dataset.save_to_disk("c_code_dataset.ds")
+    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
+dataset = dataset.take(range(1000000)) # Limit dataset size to 1,000,000
+dataset = DataLoader(dataset.take(100), batch_size=8)
+#dataset.save_to_disk("c_code_dataset.ds")
 model.train()
 
 batch_train = None
@@ -130,7 +130,8 @@ def closure():
 
 num_iters = 1000
 step_count = 0
-dataset_size = len(dataset) # Get dataset size outside the loop
+#dataset_size = len(dataset) # Get dataset size outside the loop
+dataset_size = 1000000
 
 while True:
   random_index = torch.randint(0, dataset_size, (1,)).item() # Generate a random index
