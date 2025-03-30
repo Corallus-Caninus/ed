@@ -77,55 +77,6 @@ def get_random_streaming_item(dataset, index):
 model.train()
 
 batch_train = None
-total_loss = 0. # Initialize total_loss OUTSIDE closure to accumulate across steps
-  chunk_size=0 #1000
-  grad_vector_size = 200 #5
-  num_tokens = input_ids.size(1)
-  num_steps = 0
-  avg_loss = 0.
-  if num_tokens == chunk_size+1:
-    chunk_size += 1
-  torch.cuda.empty_cache()
-  if chunk_size > 0:
-    for i in range(0, num_tokens - grad_vector_size, chunk_size):
-      end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
-      cur_input_ids = input_ids[:, i:end_idx]
-      cur_attention_mask = attention_mask[:, i:end_idx]
-
-      if cache is not None:
-  #      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
-  #      outputs.loss.backward()
-        with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
-      else:
-  #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-        with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
-  #      outputs.loss.backward()
-      cache = outputs.cache_params
-      num_steps += 1
-      current_loss = outputs.loss.item()
-      avg_loss += current_loss # Accumulate loss values
-
-    outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
-    last_chunk_loss = outputs.loss.item()
-    avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
-    avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
-    outputs.loss.item = avg_loss
-#TODO: else:
-  input_ids = input_ids.to("cuda")
-  attention_mask = attention_mask.to("cuda")
-  outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids)
-  loss = outputs.loss # Perform backward pass on the original outputs.loss tensor
-  loss.backward()
-
-  print("-", end="")
-  end_time = time.time()
-  elapsed_time = end_time - start_time
-  del cache
-  del outputs
-  torch.cuda.empty_cache()
-  return loss
 
 num_iters = 1000
 step_count = 0
@@ -141,7 +92,7 @@ while True:
   print("got num_tokens: " + str(input_ids.size(1)))
 
   def closure():
-    total_loss
+    total_loss= 0
     start_time = time.time()
     loss = 0
     optimizer.zero_grad()  #TODO: this belongs in the optimizer..
