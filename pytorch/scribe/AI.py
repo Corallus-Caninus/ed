@@ -81,7 +81,7 @@ attention_mask = None
 
 cache = None # Initialize cache here
 def closure(): # Define closure here, outside the if block
-  global input_ids, attention_mask, cache # Declare cache as global
+  global input_ids, attention_mask # Declare them as global so we can modify them
   total_loss= 0
   start_time = time.time()
   loss = 0
