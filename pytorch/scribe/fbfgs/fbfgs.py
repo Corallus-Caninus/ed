@@ -64,11 +64,11 @@ class SparseFlatTensor:
         dense_other = other.to_dense()
         return torch.dot(dense_self, dense_other)
 
-    def __add__(self, other):
-        """
-        Element-wise addition of SparseFlatTensor with a dense tensor.
-        """
-        return SparseFlatTensor.add_sparse_dense(self, other)
+#    def __add__(self, other):
+#        """
+#        Element-wise addition of SparseFlatTensor with a dense tensor.
+#        """
+#        return SparseFlatTensor.add_sparse_dense(self, other)
 
     def __mul__(self, other):
         """
