@@ -61,7 +61,8 @@ datalist = []
 if os.path.exists("c_code_dataset.ds"):
     dataset = datasets.load_from_disk("c_code_dataset.ds",streaming=True)
 else:
-    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
+    dataset = load_dataset("kye/all-torvalds-c-code-1", split="train", name="default",streaming=True)
+#    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
 dataset = dataset.take(1000) # Limit dataset size to 1,000,000
 #dataloader = DataLoader(dataset.take(100), batch_size=8)
 #dataloader.save_to_disk("c_code_dataset.ds")
@@ -92,8 +93,8 @@ def closure(): # Define closure here, outside the if block
   i = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   cache = None
-  chunk_size=1000 #1000
-  grad_vector_size = 200 #5
+  chunk_size=500 #1000
+  grad_vector_size = 10 #5
   num_tokens = len(tokens)
   num_steps = 0
   avg_loss = 0.
@@ -147,7 +148,7 @@ def closure(): # Define closure here, outside the if block
 
 while True:
   random_index = torch.randint(0, dataset_size, (1,)).item() # Generate a random index
-  batch_train = get_random_streaming_item(dataset, random_index)['code'] # Access data using random index
+  batch_train = get_random_streaming_item(dataset, random_index)['python_code'] # Access data using random index
 
   tokens = tokenizer(batch_train,truncation=True, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
