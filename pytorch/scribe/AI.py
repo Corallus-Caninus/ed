@@ -5,7 +5,7 @@ import torch
 print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
 
 import gc
-from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel 
+from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, Mamba2ForCausalLM, AutoModel , AutoModelForCausalLM
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Dataset, DataLoader
 from fbfgs import FBFGS
@@ -26,26 +26,28 @@ import time
 tokenizer = AutoTokenizer.from_pretrained("state-spaces/mamba-130m-hf", trust_remote_code=True)
 model_id = "AntonV/mamba2-130m-hf"
 model_id = "state-spaces/mamba2-130m"
+model_id = "hanzla/Falcon3-Mamba-R1-v0"
 history_filename = "fbfgs_history.pth"
 
-if os.path.exists(filename): # Load model weights and optimizer history
-    print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
-    config = MambaConfig.from_pretrained("AntonV/mamba2-130m-hf") # Load config from pretrained
-    model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
-    try:
-        model.load_state_dict(torch.load(filename, weights_only=True))
-        print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
-    except FileNotFoundError:
-        print(f"Model checkpoint file '{filename}' not found, even though it was just checked. This is unexpected.")
-        model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda") # Fallback to AntonV weights
-        print(f"Loading initial weights from '{model_id}' instead.")
-    except Exception as e:
-        print(f"Error loading model checkpoint from '{filename}': {e}. Falling back to initial weights.")
-        model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda") # Fallback to AntonV weights
-        print(f"Loading initial weights from '{model_id}' instead.")
-else: # Load initial model weights from AntonV if no checkpoint exists
-    print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
-    model = Mamba2ForCausalLM.from_pretrained("AntonV/mamba2-130m-hf").to("cuda")
+#if os.path.exists(filename): # Load model weights and optimizer history
+#    print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
+#    config = MambaConfig.from_pretrained(model_id) # Load config from pretrained
+#    model = Mamba2ForCausalLM(config).to("cuda") # Initialize model with config
+#    try:
+#        model.load_state_dict(torch.load(filename, weights_only=True))
+#        print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
+#    except FileNotFoundError:
+#        print(f"Model checkpoint file '{filename}' not found, even though it was just checked. This is unexpected.")
+#        model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda") # Fallback to AntonV weights
+#        print(f"Loading initial weights from '{model_id}' instead.")
+#    except Exception as e:
+#        print(f"Error loading model checkpoint from '{filename}': {e}. Falling back to initial weights.")
+#        model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda") # Fallback to AntonV weights
+#        print(f"Loading initial weights from '{model_id}' instead.")
+#else: # Load initial model weights from AntonV if no checkpoint exists
+#    print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
+#    model = Mamba2ForCausalLM.from_pretrained(model_id).to("cuda")
+model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16,)
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
@@ -61,7 +63,7 @@ datalist = []
 if os.path.exists("c_code_dataset.ds"):
     dataset = datasets.load_from_disk("c_code_dataset.ds")
 else:
-    dataset = load_dataset("codeparrot/github-code", split="train", name="cpp")
+    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all")
     dataset.save_to_disk("c_code_dataset.ds")
 model.train()
 
