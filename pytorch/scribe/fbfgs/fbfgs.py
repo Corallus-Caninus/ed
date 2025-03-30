@@ -1054,7 +1054,19 @@ class FBFGS(Optimizer):
 
               gc.collect()
               if self.clop == 0:
-                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
+                dense_old_stps = []
+                dense_old_dirs = []
+                for s in old_stps:
+                  if isinstance(s, SparseFlatTensor):
+                    dense_old_stps.append(s.to_dense())
+                  else:
+                    dense_old_stps.append(s)
+                for d_ in old_dirs:
+                  if isinstance(d_, SparseFlatTensor):
+                    dense_old_dirs.append(d_.to_dense())
+                  else:
+                    dense_old_dirs.append(d_)
+                d = self.dense_direction_approximate(dense_old_stps, dense_old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
               else:
                 d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
               torch.cuda.empty_cache()
