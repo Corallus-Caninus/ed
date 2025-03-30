@@ -5,7 +5,7 @@
 pkgs.mkShell {
   buildInputs = [
 #    pkgs.python3
-    pkgs.cudaPackages_11.cudatoolkit
+    pkgs.cudaPackages.cudatoolkit
     pkgs.linuxPackages.nvidia_x11_legacy470
 #    pkgs.glibc
 #    pkgs.glib
@@ -21,7 +21,7 @@ pkgs.mkShell {
 
   shellHook = ''
     echo "You are now using a NIX environment"
-    export CUDA_PATH=${pkgs.cudaPackages_11.cudatoolkit}
+    export CUDA_PATH=${pkgs.cudaPackages.cudatoolkit}
 #    export LD_LIBRARY_PATH=${pkgs.stdenv.cc.cc.lib}/lib
     export LD_LIBRARY_PATH=${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.gcc12}/lib
 #    export LD_LIBRARY_PATH=${pkgs.gcc11}/lib
