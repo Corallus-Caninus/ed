@@ -803,7 +803,7 @@ class FBFGS(Optimizer):
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
         d = d.div_(total_norm)
-#        direction = d
+        direction = d
 #        mask = torch.logical_and(direction > -clop, direction < clop) #TODO: extract to sub_variance hyperparameter
 #        direction[mask] = 0
 #        d = direction.to_sparse()
