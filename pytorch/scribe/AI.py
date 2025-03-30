@@ -65,7 +65,8 @@ else:
 #    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
 #dataset = dataset.take(1000) # Limit dataset size to 1,000,000 # No longer needed for local dataset
 #dataloader = DataLoader(dataset.take(100), batch_size=8)
-dataset.save_to_disk("c_code_dataset.ds")
+if not os.path.exists("c_code_dataset.ds"):
+    dataset.save_to_disk("c_code_dataset.ds")
 
 model.train()
 
