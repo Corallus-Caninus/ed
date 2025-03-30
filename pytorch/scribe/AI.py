@@ -5,7 +5,7 @@ import torch
 print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
 
 import gc
-from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, AutoModel , AutoModelForCausalLM, AutoConfig, MambaLMHeadModel
+from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer, MambaModel, AutoModel , AutoModelForCausalLM, AutoConfig
 
 from mamba_ssm.models.mixer_seq_simple import MambaLMHeadMode
 from torch.nn.parallel import DistributedDataParallel
