@@ -26,12 +26,12 @@ filename = "AI_Checkpoint.ai"
 #TODO: project Basilisk: parallelize the model layer-wise with the gradients. Also parallelize the flat-grads and gtd etc in L-BFGS-N. Simplest parallelization, assuming we are using commodity last-gen accelerators for edge learning, this will allow the most performant scale-out of models (e.g.: 3 k80's or 3 MI25's)
 
 import time
-model_id = "state-spaces/mamba2-130m"
-#model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
+#model_id = "state-spaces/mamba2-130m"
+model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 #model_id = "hanzla/Falcon3-Mamba-R1-v0"
 history_filename = "fbfgs_history.pth"
 #tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
-tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, tokenizer_class="GPTNeoXTokenizerFast")
+tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
