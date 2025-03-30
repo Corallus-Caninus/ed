@@ -123,6 +123,8 @@ def closure():
     avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
     outputs.loss.item = avg_loss
 #TODO: else:
+  input_ids = input_ids.to("cuda")
+  attention_mask = attention_mask.to("cuda")
   outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids)
   loss = outputs.loss # Perform backward pass on the original outputs.loss tensor
   loss.backward()
