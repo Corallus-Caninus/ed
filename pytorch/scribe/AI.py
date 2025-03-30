@@ -135,7 +135,6 @@ def closure(): # Define closure here, outside the if block
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
-  del cache
   del outputs
   torch.cuda.empty_cache()
   return loss
