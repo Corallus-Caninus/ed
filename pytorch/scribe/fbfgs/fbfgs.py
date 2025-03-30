@@ -192,7 +192,7 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
         avg_segment_length = segment_lengths.float().mean() if segment_lengths.numel() > 0 else torch.tensor(0.0)
         max_segment_length = segment_lengths.max() if segment_lengths.numel() > 0 else torch.tensor(0)
         min_segment_length = segment_lengths.min() if segment_lengths.numel() > 0 else torch.tensor(0)
-        print(f"Average segment length: {avg_segment_length:.4f}, Max segment length: {max_segment_length}, Min segment length: {min_segment_length}, Unit indices count: {unit_indices_local.numel()}")
+        print(f"Average segment length: {avg_segment_length:.4f}, Max segment length: {max_segment_length}, Min segment length: {min_segment_length}, Unit indices count: {unit_indices_local.numel()}, Segments count: {starts_local.numel()}")
 
 
         # 1. Generate segment indices without loops - vectorized approach
