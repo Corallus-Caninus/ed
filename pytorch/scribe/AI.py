@@ -146,7 +146,6 @@ while True:
     torch.cuda.empty_cache()
     return loss
 
-  optimizer.step(closure)
   step_count += 1
 
   if step_count % 10 == 0:
