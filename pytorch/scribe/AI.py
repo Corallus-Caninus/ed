@@ -88,7 +88,7 @@ while True:
   batch_train = get_random_streaming_item(dataset, random_index)['code'] # Access data using random index
 
   tokens = tokenizer(batch_train,truncation=True, max_length=200,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
-  input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
+  input_ids, attention_mask = (tokens.input_ids.to("cuda"), tokens.attention_mask.to("cuda"))
   print("got num_tokens: " + str(input_ids.size(1)))
 
   print("-----------------------step---------------------")
