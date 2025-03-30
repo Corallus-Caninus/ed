@@ -65,8 +65,8 @@ if os.path.exists("c_code_dataset.ds"):
 else:
     dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
 dataset = dataset.take(range(1000000)) # Limit dataset size to 1,000,000
-dataset = DataLoader(dataset.take(100), batch_size=8)
-#dataset.save_to_disk("c_code_dataset.ds")
+dataloader = DataLoader(dataset.take(100), batch_size=8)
+#dataloader.save_to_disk("c_code_dataset.ds")
 model.train()
 
 batch_train = None
@@ -94,7 +94,7 @@ def closure():
       end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
       cur_input_ids = input_ids[:, i:end_idx]
       cur_attention_mask = attention_mask[:, i:end_idx]
-  
+
       if cache is not None:
   #      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
   #      outputs.loss.backward()
