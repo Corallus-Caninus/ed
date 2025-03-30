@@ -26,7 +26,7 @@ pkgs.mkShell {
     export LD_LIBRARY_PATH=${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.gcc12}/lib
 #    export LD_LIBRARY_PATH=${pkgs.gcc11}/lib
     export EXTRA_LD_FLAGS="-L\/lib -L${pkgs.linuxPackages.nvidia_x11_legacy470}\/lib"
-    export LD_LIBRARY_PATH=${pkgs.linuxPackages.nvidia_x11_legacy470}/lib:${pkgs.cudatoolkit_11}/lib64:$LD_LIBRARY_PATH  
+    export LD_LIBRARY_PATH=${pkgs.linuxPackages.nvidia_x11_legacy470}/lib:${pkgs.cudaPackages.cudatoolkit}/lib64:$LD_LIBRARY_PATH  
     alias gcc="${pkgs.gcc12}/bin/gcc"
   '';
 }
