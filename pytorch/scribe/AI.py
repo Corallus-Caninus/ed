@@ -138,7 +138,7 @@ def closure():
 num_iters = 1000
 step_count = 0
 #dataset_size = len(dataset) # Get dataset size outside the loop
-dataset_size = 1000000
+dataset_size = 1000
 
 while True:
   random_index = torch.randint(0, dataset_size, (1,)).item() # Generate a random index
