@@ -753,7 +753,6 @@ class FBFGS(Optimizer):
         return d
 
     @torch.no_grad()
-    @torch.no_grad()
     def step(self, closure):
       """Perform a single optimization step.
 
