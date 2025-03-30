@@ -124,9 +124,12 @@ def closure(): # Define closure here, outside the if block
     outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
     last_chunk_loss = outputs.loss.item()
     avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
-    avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
-    outputs.loss.item = avg_loss
-#TODO: else:
+    if num_steps > 0:
+      avg_loss = avg_loss / (num_steps) # Calculate average loss (including last chunk)
+      outputs.loss.item = avg_loss
+    # If num_steps is 0, avg_loss remains 0, or you can handle it differently if needed.
+    # For now, we assume that if no chunks were processed, the loss is just the last chunk loss (or the full loss if no chunking at all).
+
   input_ids = input_ids.to("cuda")
   attention_mask = attention_mask.to("cuda")
   outputs = model(input_ids, attention_mask=attention_mask,labels = input_ids)
