@@ -752,6 +752,66 @@ class FBFGS(Optimizer):
 #        del mask # DEL 9: mask is no longer needed
         return d
 
+    @torch.jit.script
+    def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
+        num_old = len(old_dirs)
+        hit_miss = str("")
+        similarity = 0.
+#TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
+        if t < 1:
+          similarity = similarity/t
+        q = flat_grad.neg().to("cuda")
+        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
+        q = q.div_(total_norm)
+#        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
+
+        al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
+        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
+
+        for i in range(num_old - 1, -1, -1):
+            direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Convert to dense here
+            aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
+            direction_alignment_mask[i] = aligned
+            if direction_alignment_mask[i]:
+              al[i] = direction_similarity * ro[i].item() # Use direction_similarity which is now computed with SparseFlatTensor
+              q = q + (old_dirs[i].to("cuda") * ((-al[i]))) # Dense addition
+              hit_miss = hit_miss + str("| ")
+# TODO: prevent over-alignment to keep the direction multipathed?
+# Prevent over-alignment by considering the expansion of near-orthogonal entries
+#              if direction_similarity < 1 and direction_similarity > -1:
+##TODO: over-alignment hyperparameter (last one I swear this one is really necessary)
+#                similarity += 0.1*similarity*(1 - abs(direction_similarity)) #TODO: we assume worst case which is variance has doubled ?  We can calculate this based on the alignment. the less aligned the more variance in the solution.
+#              else:
+#                similarity += 5e-8 #TODO: a better way to prevent PowerPoints
+#              similarity += 0.1*similarity
+            else:
+              hit_miss = hit_miss + str("_ ")
+
+        d = q.mul(H_diag)
+        be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
+        del q
+
+#TODO: vectorize alignment mask here since its immutable
+        for i in range(num_old):
+            if direction_alignment_mask[i]:
+              be_i.copy_((old_dirs[i].to("cuda") * d))
+              alpha_val = al[i] - be_i.sum() * ro[i].item()
+              d = d + (old_stps[i].to("cuda") * (alpha_val)) # Dense addition
+
+
+        print(hit_miss)
+#TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
+        total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
+        d = d.div_(total_norm)
+#        direction = d
+#        mask = torch.logical_and(direction > -clop, direction < clop) #TODO: extract to sub_variance hyperparameter
+#        direction[mask] = 0
+#        d = direction.to_sparse()
+#        print("direction elements: " + str((direction != 0).sum()) )
+#        del mask # DEL 9: mask is no longer needed
+        return d
+
+
     @torch.no_grad()
     def step(self, closure):
       """Perform a single optimization step.
