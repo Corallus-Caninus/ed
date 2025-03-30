@@ -1032,8 +1032,8 @@ class FBFGS(Optimizer):
                   old_dirs.append(y.to(self.direction_device)) # Store y as SparseFlatTensor
                   old_stps.append(s.to(self.direction_device)) # Store s as SparseFlatTensor
                 else:
-                  old_dirs.append(y) # Store y as dense Tensor
-                  old_stps.append(s) # Store s as dense Tensor
+                  old_dirs.append(y.to(self.direction_device)) # Store y as dense Tensor
+                  old_stps.append(s.to(self.direction_device)) # Store s as dense Tensor
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
               if n_iter > max_iter:
                 break
@@ -1054,18 +1054,6 @@ class FBFGS(Optimizer):
 
               gc.collect()
               if self.clop == 0:
-                dense_old_stps = []
-                dense_old_dirs = []
-                for s in old_stps:
-                  if isinstance(s, SparseFlatTensor):
-                    dense_old_stps.append(s.to_dense())
-                  else:
-                    dense_old_stps.append(s)
-                for d_ in old_dirs:
-                  if isinstance(d_, SparseFlatTensor):
-                    dense_old_dirs.append(d_.to_dense())
-                  else:
-                    dense_old_dirs.append(d_)
                 d = self.dense_direction_approximate(dense_old_stps, dense_old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
               else:
                 d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cpu", t=t,  clop=self.clop, norm=norm)
