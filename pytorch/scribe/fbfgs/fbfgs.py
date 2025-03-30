@@ -9,7 +9,7 @@ import time
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
-#TODO: add a tensor for unit-indices to save lots of memory
+#TODO: implement sparse operations where we currently perform dense ops
 class SparseFlatTensor:
     def __init__(self, starts, ends, values, total_size, unit_indices=None, unit_values=None):
         """
