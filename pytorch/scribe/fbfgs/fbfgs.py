@@ -766,14 +766,14 @@ class FBFGS(Optimizer):
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
-        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
+        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device="cuda")
 
         for i in range(num_old - 1, -1, -1):
             direction_similarity = (old_dirs[i].to("cuda") * q).sum().item() # Convert to dense here
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
-              al[i] = direction_similarity * ro[i].item() # Use direction_similarity which is now computed with SparseFlatTensor
+              al[i] = direction_similarity * ro[i].item().to("cuda") # Use direction_similarity which is now computed with SparseFlatTensor
               q = q + (old_dirs[i].to("cuda") * ((-al[i]))) # Dense addition
               hit_miss = hit_miss + str("| ")
 # TODO: prevent over-alignment to keep the direction multipathed?
@@ -795,7 +795,7 @@ class FBFGS(Optimizer):
         for i in range(num_old):
             if direction_alignment_mask[i]:
               be_i.copy_((old_dirs[i].to("cuda") * d))
-              alpha_val = al[i] - be_i.sum() * ro[i].item()
+              alpha_val = al[i] - be_i.sum() * ro[i].item().to("cuda")
               d = d + (old_stps[i].to("cuda") * (alpha_val)) # Dense addition
 
 
