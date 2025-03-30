@@ -100,7 +100,9 @@ class SparseFlatTensor:
         including unit indices.
         """
         multiplied_values = self.values * scalar
-        return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size)
+        return SparseFlatTensor(
+            self.starts, self.ends, multiplied_values, self.total_size, self.unit_indices, self.unit_values
+        )
 
     def __mul__(self, scalar):
         """
