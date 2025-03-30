@@ -61,12 +61,19 @@ if os.path.exists(filename): # Load optimizer history if checkpoint exists
 
 datalist = []
 if os.path.exists("c_code_dataset.ds"):
-    dataset = datasets.load_from_disk("c_code_dataset.ds")
+    dataset = datasets.load_from_disk("c_code_dataset.ds",streaming=True)
 else:
-    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all")
+    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
 dataset = dataset.take(range(1000000)) # Limit dataset size to 1,000,000
 dataloader = DataLoader(dataset.take(100), batch_size=8)
 #dataloader.save_to_disk("c_code_dataset.ds")
+
+def get_random_streaming_item(dataset, index):
+    """Efficiently get an item from a streaming dataset by index."""
+    iterator = iter(dataset)
+    for _ in range(index + 1):
+        item = next(iterator)
+    return item
 model.train()
 
 batch_train = None
@@ -135,7 +142,7 @@ dataset_size = 1000000
 
 while True:
   random_index = torch.randint(0, dataset_size, (1,)).item() # Generate a random index
-  batch_train = dataset[random_index]['text'] # Access data using random index
+  batch_train = get_random_streaming_item(dataset, random_index)['text'] # Access data using random index
 
   tokens = tokenizer(batch_train,truncation=True, max_length=200,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
