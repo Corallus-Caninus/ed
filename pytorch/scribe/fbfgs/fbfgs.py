@@ -81,7 +81,6 @@ class SparseFlatTensor:
         return torch.dot(dense_self, dense_other)
 
     def __mul__(self, other):
-        """
         segment_lengths = (self.ends - self.starts).to(torch.long)
         segment_indices_offsets = torch.repeat_interleave(self.starts.to(torch.long), segment_lengths)
         indices = torch.arange(segment_lengths.sum(), device=self.starts.device).to(torch.long)
@@ -103,7 +102,6 @@ class SparseFlatTensor:
         )
 
     def __mul__(self, scalar):
-        """
         multiplied_values = self.values * scalar
         return SparseFlatTensor(self.starts, self.ends, multiplied_values, self.total_size, self.unit_indices, self.unit_values)
 
