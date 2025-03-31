@@ -89,7 +89,7 @@ def closure(): # Define closure here, outside the if block
   i = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   chunk_size=1000 #1000
-  grad_vector_size = 10 #5
+  grad_vector_size = 100 #5
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
