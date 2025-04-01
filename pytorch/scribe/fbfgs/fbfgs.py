@@ -10,6 +10,7 @@ import time
 from torch.optim.optimizer import Optimizer, ParamsT
 
 #TODO: implement sparse operations where we currently perform dense ops
+@torch.jit.script
 class SparseFlatTensor:
     def __init__(self, starts, ends, values, total_size, unit_indices=None, unit_values=None):
         """
@@ -1058,7 +1059,7 @@ class FBFGS(Optimizer):
                   old_dirs.append(y.to(self.direction_device)) # Store y as dense Tensor
                   old_stps.append(s.to(self.direction_device)) # Store s as dense Tensor
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
-              if n_iter > max_iter:
+              if n_iter > max_iter or loss == 0:
                 break
 #TODO: break here on n_iters
               # update scale of initial Hessian approximation
@@ -1183,7 +1184,7 @@ class FBFGS(Optimizer):
                           best_needle_loss = current_needle_loss
                           best_needle_t = needle_t.clone()
 #TODO: try a exponential scaling here of 2**n. exponential may not be right but we need something more efficient like interpolation. we may be able to just guess how far by the convergence rate
-                          needle_t = 2*needle_t  # Increase t for next iteration
+                          needle_t = needle_t ** 2  # Increase t for next iteration
                       else:
                           break # Stop if loss no longer decreasing
 
@@ -1250,8 +1251,8 @@ class FBFGS(Optimizer):
           ############################################################
           # check conditions
           ############################################################
-          if n_iter == max_iter or loss == 0:
-              break
+#          if n_iter == max_iter or loss == 0:
+#              break
 
 #          if current_evals >= max_eval:
 #              break
