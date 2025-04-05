@@ -267,6 +267,7 @@ def _strong_wolfe(
     done = False
     ls_iter = 0
 
+#TODO: this can hit to NaN pretty easily
     t_best = t
     t = torch.tensor(t) # Ensure t is a tensor before the loop
     device = gtd.device
@@ -340,7 +341,8 @@ def _strong_wolfe(
 #        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
 #TODO: armijo in relaxed wolfe condition
 #        if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
-        if (f_new > (f + c1 * t * gtd))  and done != True:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+        if (f_new > (f + c1 * t * gtd))  and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+#NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
           success = True
           stall_wolfe = 0
           t_best = t
@@ -463,7 +465,7 @@ def _strong_wolfe(
 #            cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
 #            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
-            if (f_new > (f + c1 * t * gtd)) and done != True:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
     #          print("---GOT NEW WOLFE PACK---")
               success = True
               stall_wolfe = 0
