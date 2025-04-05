@@ -338,7 +338,9 @@ def _strong_wolfe(
         ls_iter += 1
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
-        if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+#TODO: armijo in relaxed wolfe condition
+#        if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+        if (f_new > (f + c1 * t * gtd))  and done != True:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
           success = True
           stall_wolfe = 0
           t_best = t
@@ -460,7 +462,8 @@ def _strong_wolfe(
     #        cur_c1 = (f + t*gtd) - f_new
 #            cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
-            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+#            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+            if (f_new > (f + c1 * t * gtd)) and done != True:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
     #          print("---GOT NEW WOLFE PACK---")
               success = True
               stall_wolfe = 0
@@ -478,7 +481,8 @@ def _strong_wolfe(
         stall_wolfe += 1
         if stall_wolfe >= 5:
           print("STALL WOLFE")
-        if ls_iter >= max_ls: # Return Wolfe pack if max ls reached in zoom phase
+#TODO: there is still a potential but unlikely bug here where we need to account for if loss isnt reduced. Likely we should consider the Armijo in relaxed wolfe
+        if ls_iter >= max_ls and done != True: # Return Wolfe pack if max ls reached in zoom phase
           print("WOLFE PACK MAX LS")
           return success, f_best, g_best.to("cuda"), t_best, ls_func_evals
 
@@ -706,6 +710,9 @@ class FBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
+#TODO: we can still get NaNd. Probably due to ro exploding. Check for what isnt normalized and ensure this isnt the gradient vanishing (which is probably more likely). If its vanishing gradient just batch em if we dont calculate dense gradients should be sufficient
+#TODO: if loss is the same we are going to get NaN. We can reset the Hessian or something if this happens (should probably just ensure this doesnt happen)
+#TODO: Update, this happened on a max_ls Strong wolfe. If we get a strong wolfe given armijo we should not have loss be equivalent. Check relaxed wolfe routines thats probably where the NaNd is.
     @torch.jit.script
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
         num_old = len(old_dirs)

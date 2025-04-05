@@ -53,7 +53,8 @@ print("num parameters: " + str(pytorch_total_params))
 
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=0.75, clop=5e-11, c1=3e-4, c2=0.9,direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-7, c1=3e-4, c2=1/3,direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
+#NOTE: mathematically optimized wolfe condition for exponential decay
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -147,7 +148,7 @@ while True:
   random_index = torch.randint(0, len(dataset), (1,)).item() # Generate a random index
   batch_train = dataset[random_index]['python_code'] # Access data using random index
 
-  tokens = tokenizer(batch_train,truncation=True, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+  tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
   print("got num_tokens: " + str(input_ids.size(1)))
 
