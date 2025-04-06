@@ -20,7 +20,7 @@ runAI = do
   Debug.trace "runAI: CPython initialized." $ return ()
   putStrLn "CPython initialized."
   Debug.trace "runAI: Importing AI module..." $ return ()
-  aiModule <- importModule (pack "AI") --`catch` \(e :: SomeException) -> (do
+  aiModule <- importModule (pack "Hello") --`catch` \(e :: SomeException) -> (do
 --    Debug.trace "runAI: SomeException caught!" $ return ()
 --    putStrLn "SomeException caught!"
 --    putStrLn $ "Error message: " ++ show e
