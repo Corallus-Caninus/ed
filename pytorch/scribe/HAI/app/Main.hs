@@ -8,15 +8,14 @@ import           System.IO (hFlush, stdout)
 
 main :: IO ()
 main = do
-  maybeAIModule <- importModule (pack "AI")
-  case maybeAIModule of
-    Just aiModule -> do {
+  maybeAIModule <- importModule (pack "AI") 
+  case maybeAIModule of 
+    Just aiModule -> do { 
         putStrLn "AI module imported successfully.";
         result <- call aiModule (pack "closure") [] ;
         print result
       }
-    Nothing -> putStrLn "Failed to import AI module."
-   Nothing -> putStrLn "Failed to import AI module."
+    Nothing -> putStrLn "Failed to import AI module." 
 
 {-
 main :: IO ()
