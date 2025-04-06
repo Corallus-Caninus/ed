@@ -103,8 +103,12 @@ current_index = 0 # Initialize current_index to 0
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
 cache = None # Initialize cache here
-def closure(batch_input_ids_list, batch_attention_mask_list): # Define closure here, outside the if block
+batch_input_ids_list = [] # Initialize batch_input_ids_list as a global variable
+batch_attention_mask_list = [] # Initialize batch_attention_mask_list as a global variable
+def closure(): # Define closure here, outside the if block
   global  cache # Declare cache as global
+  global batch_input_ids_list # Declare batch_input_ids_list as global
+  global batch_attention_mask_list # Declare batch_attention_mask_list as global
   total_loss= 0
   start_time = time.time()
   loss = 0
@@ -161,61 +165,60 @@ def closure(batch_input_ids_list, batch_attention_mask_list): # Define closure h
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
-  del outputs
   return loss
 
 
 while True:
-  if not dataset_shuffled_indices: # Reshuffle if indices are empty (all seen)
-      dataset_shuffled_indices = list(range(dataset_size)) # Recreate full list of indices
-      random.shuffle(dataset_shuffled_indices) # Reshuffle
-      seen_indices = [] # Reset seen indices when reshuffling all
+    if not dataset_shuffled_indices: # Reshuffle if indices are empty (all seen)
+        dataset_shuffled_indices = list(range(dataset_size)) # Recreate full list of indices
+        random.shuffle(dataset_shuffled_indices) # Reshuffle
+        seen_indices = [] # Reset seen indices when reshuffling all
 
-  if not dataset_shuffled_indices: # Double check in case dataset is empty
-      print("Dataset is empty, stopping training for this dataset.")
-      break # Exit loop if dataset is empty
+    if not dataset_shuffled_indices: # Double check in case dataset is empty
+        print("Dataset is empty, stopping training for this dataset.")
+        break # Exit loop if dataset is empty
 
-  dataset_idx = dataset_shuffled_indices.pop() # Get and remove last index (more efficient than pop(0))
-  while dataset_idx in seen_indices and dataset_shuffled_indices: # Skip if index already seen and there are more indices
-      dataset_idx = dataset_shuffled_indices.pop() # Get next index
-  if dataset_idx in seen_indices: # If still seen (dataset exhausted or all seen), reshuffle and continue
-      print("All indices seen, reshuffling and continuing.")
-      dataset_shuffled_indices = list(range(dataset_size))
-      random.shuffle(dataset_shuffled_indices)
-      seen_indices = []
-      continue # Go to the next iteration with reshuffled indices
+    dataset_idx = dataset_shuffled_indices.pop() # Get and remove last index (more efficient than pop(0))
+    while dataset_idx in seen_indices and dataset_shuffled_indices: # Skip if index already seen and there are more indices
+        dataset_idx = dataset_shuffled_indices.pop() # Get next index
+    if dataset_idx in seen_indices: # If still seen (dataset exhausted or all seen), reshuffle and continue
+        print("All indices seen, reshuffling and continuing.")
+        dataset_shuffled_indices = list(range(dataset_size))
+        random.shuffle(dataset_shuffled_indices)
+        seen_indices = []
+        continue # Go to the next iteration with reshuffled indices
 
-  batch_input_ids_list = [] # Initialize lists for the new batch
-  batch_attention_mask_list = []
-  for _ in range(batch_size): # Collect batch_size datapoints
-    if not dataset_shuffled_indices: # Check if indices are exhausted during batch collection
-        break # Break inner loop if no more indices
-    dataset_idx = dataset_shuffled_indices.pop()
-    while dataset_idx in seen_indices and dataset_shuffled_indices:
+    batch_input_ids_list = [] # Initialize lists for the new batch
+    batch_attention_mask_list = []
+    for _ in range(batch_size): # Collect batch_size datapoints
+        if not dataset_shuffled_indices: # Check if indices are exhausted during batch collection
+            break # Break inner loop if no more indices
         dataset_idx = dataset_shuffled_indices.pop()
-    if dataset_idx in seen_indices: # If still seen after trying to find unseen, break batch collection
-        print("All indices seen, ending batch collection early.")
-        break # Break inner loop if no more unseen indices
+        while dataset_idx in seen_indices and dataset_shuffled_indices:
+            dataset_idx = dataset_shuffled_indices.pop()
+        if dataset_idx in seen_indices: # If still seen after trying to find unseen, break batch collection
+            print("All indices seen, ending batch collection early.")
+            break # Break inner loop if no more unseen indices
 
-    seen_indices.append(dataset_idx) # Mark index as seen
-    print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
-    batch_train = dataset[dataset_idx]['code']
-    print(str(batch_train))
-    dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now
-    if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now
-        dataset_index = 0 # Reset dataset_index - not used anymore, but keep for now
+        seen_indices.append(dataset_idx) # Mark index as seen
+        print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
+        batch_train = dataset[dataset_idx]['code']
+        print(str(batch_train))
+        dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now
+        if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now
+            dataset_index = 0 # Reset dataset_index - not used anymore, but keep for now
 
-    tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
-    input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
-    print("got num_tokens: " + str(input_ids.size(1)))
-    if input_ids.size(1) < 500:
-      print("Skipping datapoint with less than 500 tokens.")
-      continue
-    batch_input_ids_list.append(input_ids)
-    batch_attention_mask_list.append(attention_mask)
+        tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+        input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
+        print("got num_tokens: " + str(input_ids.size(1)))
+        if input_ids.size(1) < 500:
+            print("Skipping datapoint with less than 500 tokens.")
+            continue
+        batch_input_ids_list.append(input_ids)
+        batch_attention_mask_list.append(attention_mask)
 
   print("-----------------------step---------------------")
-  optimizer.step(lambda: closure(batch_input_ids_list, batch_attention_mask_list))
+  optimizer.step(closure)
 
   step_count += 1
   if step_count % 10 == 0:
