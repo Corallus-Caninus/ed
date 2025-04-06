@@ -4,7 +4,6 @@
 module AI where
 
 import           CPython
-import           CPython.Types (PyObject)
 import           CPython.Types
 import           System.IO.Unsafe (unsafePerformIO)
 
@@ -59,5 +58,3 @@ runAI = do
       putStrLn $ "Result from Python: " ++ strResult
       pyDecref pyObj
     Nothing -> putStrLn "Failed to call Python function."
-
-
