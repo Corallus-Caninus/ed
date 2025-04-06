@@ -60,6 +60,7 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 
+batch_size = 2 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
@@ -94,7 +95,9 @@ dataset_size = len(dataset)
 dataset_shuffled_indices = list(range(dataset_size)) # Shuffle indices for each epoch
 #random.shuffle(dataset_shuffled_indices) # Shuffle indices - moved to inside the loop
 input_ids = None
+batch_input_ids_list = []
 attention_mask = None
+batch_attention_mask_list = []
 current_dataset_filename = dataset_filename # Define current dataset filename
 current_index = 0 # Initialize current_index to 0
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
@@ -182,27 +185,39 @@ while True:
       seen_indices = []
       continue # Go to the next iteration with reshuffled indices
 
-  seen_indices.append(dataset_idx) # Mark index as seen
-  print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
-  batch_train = dataset[dataset_idx]['code']
-  print(str(batch_train))
-  dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now - consider removing
-  if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now - consider removing
-      dataset_index = 0 # Reset dataset_index - not used anymore, but keep for now - consider removing
+  batch_input_ids_list = [] # Initialize lists for the new batch
+  batch_attention_mask_list = []
+  for _ in range(batch_size): # Collect batch_size datapoints
+    if not dataset_shuffled_indices: # Check if indices are exhausted during batch collection
+        break # Break inner loop if no more indices
+    dataset_idx = dataset_shuffled_indices.pop()
+    while dataset_idx in seen_indices and dataset_shuffled_indices:
+        dataset_idx = dataset_shuffled_indices.pop()
+    if dataset_idx in seen_indices: # If still seen after trying to find unseen, break batch collection
+        print("All indices seen, ending batch collection early.")
+        break # Break inner loop if no more unseen indices
 
-  tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
-  input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
-  print("got num_tokens: " + str(input_ids.size(1)))
-  if input_ids.size(1) < 500:
-    print("Skipping datapoint with less than 500 tokens.")
-    continue
+    seen_indices.append(dataset_idx) # Mark index as seen
+    print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
+    batch_train = dataset[dataset_idx]['code']
+    print(str(batch_train))
+    dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now
+    if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now
+        dataset_index = 0 # Reset dataset_index - not used anymore, but keep for now
 
+    tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+    input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
+    print("got num_tokens: " + str(input_ids.size(1)))
+    if input_ids.size(1) < 500:
+      print("Skipping datapoint with less than 500 tokens.")
+      continue
+    batch_input_ids_list.append(input_ids)
+    batch_attention_mask_list.append(attention_mask)
 
   print("-----------------------step---------------------")
   optimizer.step(closure)
 
   step_count += 1
-
   if step_count % 10 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
