@@ -7,7 +7,6 @@ import           Debug.Trace as Debug
 import           System.IO (hFlush, stdout)
 
 main :: IO ()
-main :: IO ()
 main = do
   -- Import the AI module
   maybeAIModule <- importModule (pack "AI")
