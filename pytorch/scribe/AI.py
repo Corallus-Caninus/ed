@@ -103,7 +103,7 @@ current_index = 0 # Initialize current_index to 0
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
 cache = None # Initialize cache here
-def closure(): # Define closure here, outside the if block
+def closure(batch_input_ids_list, batch_attention_mask_list): # Define closure here, outside the if block
   global  cache # Declare cache as global
   total_loss= 0
   start_time = time.time()
@@ -215,7 +215,7 @@ while True:
     batch_attention_mask_list.append(attention_mask)
 
   print("-----------------------step---------------------")
-  optimizer.step(closure)
+  optimizer.step(lambda: closure(batch_input_ids_list, batch_attention_mask_list))
 
   step_count += 1
   if step_count % 10 == 0:
