@@ -67,7 +67,7 @@ executable HAI
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.18.2.1, cpython, text
+    build-depends:    base ^>=4.18.2.1, cpython, text, cpython-simple
 
     -- Directories containing source files.
     hs-source-dirs:   app

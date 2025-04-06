@@ -3,7 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 module AI where
 
-import           CPython.Simple
+import           CPython.Simple (initialize, pyExec, pyImport, call, FromPy(fromPy))
 import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Initialize the Python interpreter (only once).
@@ -24,7 +24,7 @@ pyRun cmd = do
     Right _  -> return ()
 
 -- | Call a Python function.
-pyCall :: String -> String -> IO (Maybe String)
+pyCall :: String -> String -> IO (Maybe String) -- Changed return type to Maybe String
 pyCall moduleName functionName = do
   pyImport moduleName >>= \case
     Left err -> do
@@ -52,6 +52,6 @@ runAI = do
   -- Example: Call a Python function
   result <- pyCall "AI" "main_loop"
   case result of
-    Just strResult -> do
+    Just strResult -> do -- Handle Maybe String result
       putStrLn $ "Result from Python: " ++ strResult
-    Nothing -> putStrLn "Failed to call Python function."
+    Nothing -> putStrLn "Failed to call Python function." -- Handle Nothing case
