@@ -13,11 +13,11 @@ main = do
   --Debug.trace "Main: AI.runAI call finished." $ return ()
   putStrLn "Starting Main.main"
   hFlush stdout
-  aiModule <- importModule (pack "AI")
-  case aiModule of
-    Just module -> do
+  aiMod <- importModule (pack "AI")
+  case aiMod of
+    Just mod -> do
       putStrLn "AI module imported successfully."
-      runAIResult <- call module (pack "runAI") ([], [])
+      runAIResult <- call mod (pack "runAI") ([], [])
       case runAIResult of
         Just result -> do
           putStrLn "AI.runAI call finished successfully."
