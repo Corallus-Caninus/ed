@@ -29,6 +29,7 @@ filename = "AI_Checkpoint.ai"
 import time
 #model_id = "state-spaces/mamba2-130m"
 model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
+dataset_filename = "haskell_code_dataset.ds"
 #model_id = "hanzla/Falcon3-Mamba-R1-v0"
 history_filename = "fbfgs_history.pth"
 #tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
@@ -42,7 +43,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     checkpoint = torch.load(filename)
     model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     dataset_indices = checkpoint.get('dataset_indices', {}) # Load dataset_indices, default to empty dict
-    current_dataset_filename = "haskell_code_dataset.ds" # Define current dataset filename
+    current_dataset_filename = dataset_filename # Define current dataset filename
     current_index = dataset_indices.get(current_dataset_filename, 0) # Get index for current dataset, default to 0
     print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} from index {current_index}")
 
@@ -51,7 +52,7 @@ else:
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda")
     dataset_indices = {} # Initialize dataset_indices for new run
-    current_dataset_filename = "haskell_code_dataset.ds" # Define current dataset filename
+    current_dataset_filename = dataset_filename # Define current dataset filename
     current_index = 0 # Initialize current_index to 0 for new runs
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
@@ -66,14 +67,14 @@ if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
 
 datalist = []
-if os.path.exists("haskell_code_dataset.ds"):
-    if os.path.exists("haskell_code_dataset.ds"):
-      dataset = datasets.load_from_disk("haskell_code_dataset.ds")
+if os.path.exists(dataset_filename):
+    if os.path.exists(dataset_filename):
+      dataset = datasets.load_from_disk(dataset_filename)
 else:
     #dataset = load_dataset("kye/all-torvalds-c-code-1", split="train", name="default")
     dataset = load_dataset("codeparrot/github-code", split="train", name="Haskell-all", streaming=False)
     #dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
-    dataset.save_to_disk("haskell_code_dataset.ds")
+    dataset.save_to_disk(dataset_filename)
 
 model.train()
 
@@ -89,7 +90,7 @@ dataset_shuffled_indices = list(range(dataset_size)) # Renamed to avoid confusio
 random.shuffle(dataset_shuffled_indices) # Shuffle indices
 input_ids = None
 attention_mask = None
-current_dataset_filename = "haskell_code_dataset.ds" # Define current dataset filename
+current_dataset_filename = dataset_filename # Define current dataset filename
 # current_index is now loaded from checkpoint or initialized above
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
@@ -186,7 +187,7 @@ while True:
 
   if step_count % 10 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
-      current_dataset_filename = "haskell_code_dataset.ds" # Define current dataset filename
+      current_dataset_filename = dataset_filename # Define current dataset filename
       dataset_indices[current_dataset_filename] = current_index # Update current dataset index
       checkpoint = {
           'model_state_dict': unwrapped_model.state_dict(),
