@@ -10,10 +10,11 @@ import           CPython.Simple (initialize, importModule, call, FromPy(fromPy),
 import           CPython.Simple.Instances () -- Import instances for using 'arg'
 import           Data.Text (Text, pack)
 import qualified CPython.Simple.Instances as CPythonInstances
+import           CPython.Types (PyObject)
 import           Data.Text (Text, pack)
 
 -- | Run a Python command.
-pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
+pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return () :: IO PyObject
 -- | The main function that runs the AI loop.
 
 runAI :: IO ()
