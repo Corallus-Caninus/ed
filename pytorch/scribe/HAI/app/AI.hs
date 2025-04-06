@@ -21,12 +21,12 @@ callPythonFunction moduleName functionName = do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
     Right pyModule -> do
-      result <- call pyModule (pack functionName) [] []
-  case result of
-    Right str -> return (Just str)
-    Left err -> do
-      putStrLn $ "Python function error: " ++ err
-      return Nothing
+      result <- call pyModule (pack functionName) [] [] -- Call the Python function
+      case result of
+        Right str -> return (Just str) -- Handle the successful result
+        Left err -> do
+          putStrLn $ "Python function error: " ++ err -- Handle the error
+          return Nothing
 
 
 initPython :: IO ()
