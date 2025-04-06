@@ -9,7 +9,7 @@ import           CPython.Types.Module (Module)
 import           CPython.Simple (initialize, importModule, call, FromPy(fromPy), arg)
 import           CPython.Simple.Instances () -- Import instances for using 'arg'
 import           Data.Text (Text, pack)
-import           CPython.Simple (PyObject)
+import           CPython.Types (PyObject)
 import qualified CPython.Simple.Instances as CPythonInstances
 import           Data.Text (Text, pack)
 
