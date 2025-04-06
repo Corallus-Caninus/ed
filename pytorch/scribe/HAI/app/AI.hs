@@ -21,23 +21,9 @@ initPython = do
   pyRun $ "sys.path.append('" ++ cwd ++ "')" -- Use cwd as String
 
 -- | Run a Python command.
--- | Call a Python function and return the result as a String.
-callPythonFunction :: String -> String -> IO (Maybe String)
-callPythonFunction moduleName functionName = do
-  eitherPyModule <- importModule (pack moduleName)
-  case eitherPyModule of
-    Left err -> do
-      putStrLn $ "Error importing module: " ++ err
-      return Nothing
-    Right pyModule -> do
-      eitherResult <- call pyModule (pack functionName) [] []
-      case eitherResult of
-        Right str -> return $ Just str
-        Left err -> do
-          putStrLn $ "Python function error: " ++ err
-          return Nothing
+import           System.IO.Unsafe (unsafePerformIO)
 
-pyRun :: String -> IO () -- Removed error handling
+-- | Initialize the Python interpreter (only once).
 pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
 -- | The main function that runs the AI loop.
 runAI :: IO ()
