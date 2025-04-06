@@ -8,7 +8,7 @@ module AI where
 import           CPython.Types.Module (Module)
 import           CPython.Simple (initialize, call, arg)
 import           CPython.Simple.Instances () -- Import instances for using 'arg'
-import           Data.Text (pack)
+import           Data.Text (Text, pack)
 
 -- | Run a Python command.
 pyRun :: Text -> IO ()
