@@ -106,62 +106,63 @@ cache = None # Initialize cache here
 batch_input_ids_list = [] # Initialize batch_input_ids_list as a global variable
 batch_attention_mask_list = [] # Initialize batch_attention_mask_list as a global variable
 def closure(): # Define closure here, outside the if block
-  global  cache # Declare cache as global
   global batch_input_ids_list # Declare batch_input_ids_list as global
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
+  global cache
   total_loss= 0
   start_time = time.time()
   loss = 0
   i = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
 #TODO iterate the minibatch with a for loop here
-  chunk_size=100 #1000
-  grad_vector_size = 10 #5
-  num_tokens = input_ids.size(1)
-  num_steps = 0
-  avg_loss = 0.
-  if num_tokens == chunk_size+1:
-    chunk_size += 1
-  if chunk_size > 0:
-    for i in range(0, num_tokens - grad_vector_size, chunk_size):
-      end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
-      cur_input_ids = input_ids[:, i:end_idx]
-      cur_attention_mask = attention_mask[:, i:end_idx]
-
-      if cache is not None:
-  #      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
-  #      outputs.loss.backward()
-        if i == 0:
-          cache.reset()
-        with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
-      else:
-  #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-        with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
-  #      outputs.loss.backward()
-      cache = outputs.cache_params
-      num_steps += 1
-      current_loss = outputs.loss
-      avg_loss += current_loss # Accumulate loss values
-
-    outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
-#    last_chunk_loss = outputs.loss
-#    avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
-    # If num_steps is 0, avg_loss remains 0, or you can handle it differently if needed.
-    # For now, we assume that if no chunks were processed, the loss is just the last chunk loss (or the full loss if no chunking at all).
-
-#  input_ids_grad = input_ids[:, -grad_vector_size:].to("cuda")
-#  attention_mask_grad = attention_mask[:, -grad_vector_size:].to("cuda")
-#  outputs = model(input_ids_grad, attention_mask=attention_mask_grad, labels=input_ids_grad, cache_params = cache, cache_position=[i]) # Use cache for grad section
-  print(str(outputs.loss.item()))
-  print(str(avg_loss))
-#  if num_steps > 0:
-#    avg_loss = avg_loss / num_steps 
-#    outputs.loss = avg_loss/(0.1*num_tokens) + outputs.loss
-  print(str(outputs.loss))
-  loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
-  loss.backward()
+  for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
+    chunk_size=100 #1000
+    grad_vector_size = 10 #5
+    num_tokens = input_ids.size(1)
+    num_steps = 0
+    avg_loss = 0.
+    if num_tokens == chunk_size+1:
+      chunk_size += 1
+    if chunk_size > 0:
+      for i in range(0, num_tokens - grad_vector_size, chunk_size):
+        end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
+        cur_input_ids = input_ids[:, i:end_idx]
+        cur_attention_mask = attention_mask[:, i:end_idx]
+  
+        if cache is not None:
+    #      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
+    #      outputs.loss.backward()
+          if i == 0:
+            cache.reset()
+          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
+        else:
+    #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
+    #      outputs.loss.backward()
+        cache = outputs.cache_params
+        num_steps += 1
+        current_loss = outputs.loss
+        avg_loss += current_loss # Accumulate loss values
+  
+      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
+  #    last_chunk_loss = outputs.loss
+  #    avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
+      # If num_steps is 0, avg_loss remains 0, or you can handle it differently if needed.
+      # For now, we assume that if no chunks were processed, the loss is just the last chunk loss (or the full loss if no chunking at all).
+  
+  #  input_ids_grad = input_ids[:, -grad_vector_size:].to("cuda")
+  #  attention_mask_grad = attention_mask[:, -grad_vector_size:].to("cuda")
+  #  outputs = model(input_ids_grad, attention_mask=attention_mask_grad, labels=input_ids_grad, cache_params = cache, cache_position=[i]) # Use cache for grad section
+    print(str(outputs.loss.item()))
+    print(str(avg_loss))
+  #  if num_steps > 0:
+  #    avg_loss = avg_loss / num_steps 
+  #    outputs.loss = avg_loss/(0.1*num_tokens) + outputs.loss
+    print(str(outputs.loss))
+    loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+    loss.backward()
 
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
