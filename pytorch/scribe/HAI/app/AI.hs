@@ -36,8 +36,11 @@ runAI = do
   -- No need to explicitly call a main function in AI.py for simple execution
   result <- call aiModule (pack "add_numbers") [arg @Int 5, arg @Int 3]
   case result of
-    Just value -> do
-      putStrLn $ "Result from Python: " ++ show value
+    Just pyObj -> do
+      fromPyResult <- Simple.fromPy pyObj
+      case fromPyResult of
+        Just intValue -> putStrLn $ "Result from Python: " ++ show intValue
+        Nothing -> putStrLn "Failed to convert Python object to Haskell Int."
     Nothing -> putStrLn "Failed to get result from Python."
   putStrLn "AI.py execution finished (if it had top-level code)."
   Debug.trace "runAI: AI.py execution finished." $ return ()
