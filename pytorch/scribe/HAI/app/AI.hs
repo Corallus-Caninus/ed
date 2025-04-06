@@ -10,6 +10,10 @@ import           CPython.Simple (initialize, importModule, call, FromPy(fromPy),
 import           CPython.Simple.Instances () -- Import instances for using 'arg'
 import           Data.Text (Text, pack)
 
+import           CPython.Types.Module (Module)
+import           CPython.Simple (importModule, call, FromPy(fromPy), arg)
+import           Data.Text (Text, pack)
+
 -- | Initialize the Python interpreter (only once).
 initPython :: IO ()
 initPython = do
@@ -20,8 +24,6 @@ initPython = do
   pyRun $ "sys.path.append('" ++ cwd ++ "')" -- Use cwd as String
 
 -- | Run a Python command.
--- | Initialize the Python interpreter (only once).
--- | Initialize the Python interpreter (only once).
 pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
 -- | The main function that runs the AI loop.
 runAI :: IO ()
