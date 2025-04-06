@@ -96,7 +96,7 @@ dataset_shuffled_indices = list(range(dataset_size)) # Shuffle indices for each 
 input_ids = None
 attention_mask = None
 current_dataset_filename = dataset_filename # Define current dataset filename
-# current_index is now loaded from checkpoint or initialized above # No longer needed
+current_index = 0 # Initialize current_index to 0
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
 cache = None # Initialize cache here
