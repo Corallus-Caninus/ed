@@ -12,21 +12,21 @@ import           Data.Text (Text, pack)
 import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Initialize the Python interpreter (only once).
+
 -- | Call a Python function and return the result as a String.
 callPythonFunction :: String -> String -> IO (Maybe String)
 callPythonFunction moduleName functionName = do
-  moduleOrError <- importModule (pack moduleName)
-  case moduleOrError of
+  pyModule <- importModule (pack moduleName)
+  result <- case pyModule of
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
+      return (Left err)
+    Right pyModule -> call pyModule (pack functionName) [] []
+  case result of
+    Right str -> return (Just str)
+    Left err -> do
+      putStrLn $ "Python function error: " ++ err
       return Nothing
-    Right pyModule -> do
-      result <- call pyModule (pack functionName) [] []
-      case result of
-        Right str -> return (Just str)
-        Left err -> do
-          putStrLn $ "Python function error: " ++ err
-          return Nothing
 
 
 initPython :: IO ()
@@ -38,12 +38,8 @@ initPython = do
   pyRun $ "sys.path.append('" ++ cwd ++ "')" -- Use cwd as String
 
 -- | Run a Python command.
-pyRun :: String -> IO ()
-pyRun cmd = do
-  result <- call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)]
-  case result of
-    Left err -> putStrLn $ "Python error: " ++ err
-    Right _  -> return ()
+pyRun :: String -> IO () -- Removed error handling
+pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
 -- | The main function that runs the AI loop.
 runAI :: IO ()
 runAI = do
