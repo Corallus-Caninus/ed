@@ -34,7 +34,7 @@ pyCall moduleName functionName = do
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
-    Right pyModule -> do
+    Right pyModule {- :: CPython.Types.Module.Module -} -> do
       result <- call pyModule (pack functionName) [] []
       case result of
         Right str -> return (Just str)
