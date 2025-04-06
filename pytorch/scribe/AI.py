@@ -158,6 +158,9 @@ while True:
   tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
   print("got num_tokens: " + str(input_ids.size(1)))
+  if input_ids.size(1) < 500:
+    print("Skipping datapoint with less than 500 tokens.")
+    continue
 
 
   print("-----------------------step---------------------")
