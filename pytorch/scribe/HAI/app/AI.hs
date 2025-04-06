@@ -3,8 +3,8 @@
 {-# LANGUAGE LambdaCase #-}
 module AI where
 
+import           CPython.Types (PyObject)
 import           CPython
-import           CPython.Types
 import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Initialize the Python interpreter (only once).
