@@ -24,7 +24,7 @@ callPythonFunction moduleName functionName = do
     Right pyModule -> do
       result <- call pyModule (pack functionName) [] []
       case result of
-        Right str -> return (Just str)
+        Right str -> return $ Just str
         Left err -> do
           putStrLn $ "Python function error: " ++ err
           return Nothing
