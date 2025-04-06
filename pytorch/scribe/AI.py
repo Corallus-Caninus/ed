@@ -47,8 +47,9 @@ if os.path.exists(filename): # Load model weights and optimizer history
         model.load_state_dict(checkpoint, strict=False) # Load directly if 'model_state_dict' key is missing
     dataset_indices = checkpoint.get('dataset_indices', {}) # Load dataset_indices, default to empty dict
     current_dataset_filename = dataset_filename # Define current dataset filename
-    current_index = dataset_indices.get(current_dataset_filename, 0) # Get index for current dataset, default to 0
-    print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} from index {current_index}")
+    seen_indices = dataset_indices.get(current_dataset_filename, []) # Load seen_indices, default to empty list
+    #current_index = dataset_indices.get(current_dataset_filename, 0) # No longer needed
+    print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
 
 else:
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
@@ -56,7 +57,8 @@ else:
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda")
     dataset_indices = {} # Initialize dataset_indices for new run
     current_dataset_filename = dataset_filename # Define current dataset filename
-    current_index = 0 # Initialize current_index to 0 for new runs
+    seen_indices = [] # Initialize seen_indices for new run
+    #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
@@ -89,12 +91,12 @@ step_count = 0
 import random
 
 dataset_size = len(dataset)
-dataset_shuffled_indices = list(range(dataset_size)) # Renamed to avoid confusion
-random.shuffle(dataset_shuffled_indices) # Shuffle indices
+dataset_shuffled_indices = list(range(dataset_size)) # Shuffle indices for each epoch
+#random.shuffle(dataset_shuffled_indices) # Shuffle indices - moved to inside the loop
 input_ids = None
 attention_mask = None
 current_dataset_filename = dataset_filename # Define current dataset filename
-# current_index is now loaded from checkpoint or initialized above
+# current_index is now loaded from checkpoint or initialized above # No longer needed
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
 cache = None # Initialize cache here
@@ -161,19 +163,32 @@ def closure(): # Define closure here, outside the if block
 
 
 while True:
-  if current_index >= dataset_size: # Reshuffle indices if all have been used
+  if not dataset_shuffled_indices: # Reshuffle if indices are empty (all seen)
+      dataset_shuffled_indices = list(range(dataset_size)) # Recreate full list of indices
+      random.shuffle(dataset_shuffled_indices) # Reshuffle
+      seen_indices = [] # Reset seen indices when reshuffling all
+
+  if not dataset_shuffled_indices: # Double check in case dataset is empty
+      print("Dataset is empty, stopping training for this dataset.")
+      break # Exit loop if dataset is empty
+
+  dataset_idx = dataset_shuffled_indices.pop() # Get and remove last index (more efficient than pop(0))
+  while dataset_idx in seen_indices and dataset_shuffled_indices: # Skip if index already seen and there are more indices
+      dataset_idx = dataset_shuffled_indices.pop() # Get next index
+  if dataset_idx in seen_indices: # If still seen (dataset exhausted or all seen), reshuffle and continue
+      print("All indices seen, reshuffling and continuing.")
+      dataset_shuffled_indices = list(range(dataset_size))
       random.shuffle(dataset_shuffled_indices)
-      current_index = 0
+      seen_indices = []
+      continue # Go to the next iteration with reshuffled indices
 
-  dataset_idx = dataset_shuffled_indices[current_index] # Use shuffled indices
-  print(f"Processing dataset index: {current_index}/{dataset_size}, original index: {dataset_idx}") # Print shuffled and original index
-  batch_train = dataset[dataset_idx]['code'] # Access data using shuffled index
+  seen_indices.append(dataset_idx) # Mark index as seen
+  print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
+  batch_train = dataset[dataset_idx]['code']
   print(str(batch_train))
-  current_index += 1 # Increment shuffled index
-  dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now
-
-  if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now
-      dataset_index = 0
+  dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now - consider removing
+  if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now - consider removing
+      dataset_index = 0 # Reset dataset_index - not used anymore, but keep for now - consider removing
 
   tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
   input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
@@ -191,7 +206,7 @@ while True:
   if step_count % 10 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
-      dataset_indices[current_dataset_filename] = current_index # Update current dataset index
+      dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
       checkpoint = {
           'model_state_dict': unwrapped_model.state_dict(),
           'dataset_indices': dataset_indices, # Save dataset_indices dictionary
