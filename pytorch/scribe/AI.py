@@ -41,7 +41,10 @@ if os.path.exists(filename): # Load model weights and optimizer history
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda") # Load initial weights using config, ignoring size mismatches
     checkpoint = torch.load(filename)
-    model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    else:
+        model.load_state_dict(checkpoint, strict=False) # Load directly if 'model_state_dict' key is missing
     dataset_indices = checkpoint.get('dataset_indices', {}) # Load dataset_indices, default to empty dict
     current_dataset_filename = dataset_filename # Define current dataset filename
     current_index = dataset_indices.get(current_dataset_filename, 0) # Get index for current dataset, default to 0
