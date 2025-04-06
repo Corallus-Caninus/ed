@@ -4,7 +4,7 @@
 
 module AI where
 
-import           CPython.Simple (initialize, pyExec, pyImport, call, FromPy(fromPy))
+import           CPython.Simple (initialize, rawPyExec, importModule, call, FromPy(fromPy))
 import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Initialize the Python interpreter (only once).
@@ -19,7 +19,7 @@ initPython = do
 -- | Run a Python command.
 pyRun :: String -> IO ()
 pyRun cmd = do
-  result <- pyExec cmd
+  result <- rawPyExec cmd
   case result of
     Left err -> putStrLn $ "Python error: " ++ err
     Right _  -> return ()
@@ -27,7 +27,7 @@ pyRun cmd = do
 -- | Call a Python function.
 pyCall :: String -> String -> IO (Maybe String)
 pyCall moduleName functionName = do
-  pyImport moduleName >>= \case
+  importModule moduleName >>= \case
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
