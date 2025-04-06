@@ -1,6 +1,5 @@
 module Main where
 
---import           AI
 import           CPython.Types.Module (Module)
 import           CPython.Simple (importModule, call, FromPy(fromPy), arg)
 import           Data.Text (Text, pack)
@@ -12,5 +11,5 @@ main = do
   --AI.runAI
   --Debug.trace "Main: AI.runAI call finished." $ return ()
   putStrLn "Starting Main.main"
-  runAI
+--  runAI
   putStrLn "Finished Main.main"
