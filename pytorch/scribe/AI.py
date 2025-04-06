@@ -217,7 +217,7 @@ while True:
         batch_input_ids_list.append(input_ids)
         batch_attention_mask_list.append(attention_mask)
 
-  print("-----------------------step---------------------")
+    print("-----------------------step---------------------")
   optimizer.step(closure)
 
   step_count += 1
