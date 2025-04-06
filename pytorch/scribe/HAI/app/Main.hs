@@ -4,6 +4,7 @@ import           CPython.Types.Module (Module)
 import           CPython.Simple (importModule, call, FromPy(fromPy), arg)
 import           Data.Text (Text, pack)
 import           Debug.Trace as Debug
+import           System.IO (hFlush, stdout)
 
 main :: IO ()
 main = do
@@ -11,5 +12,16 @@ main = do
   --AI.runAI
   --Debug.trace "Main: AI.runAI call finished." $ return ()
   putStrLn "Starting Main.main"
---  runAI
+  hFlush stdout
+  aiModule <- importModule (pack "AI")
+  case aiModule of
+    Just module -> do
+      putStrLn "AI module imported successfully."
+      runAIResult <- call module (pack "runAI") ([], [])
+      case runAIResult of
+        Just result -> do
+          putStrLn "AI.runAI call finished successfully."
+          -- You might want to do something with the result here
+        Nothing -> putStrLn "Error calling AI.runAI."
+    Nothing -> putStrLn "Failed to import AI module."
   putStrLn "Finished Main.main"
