@@ -9,6 +9,8 @@ module AI where
 import           CPython.Types.Module (Module)
 import           CPython.Simple (initialize, call, arg, PyCastException, importModule)
 import           CPython.Simple.Instances () -- Import instances for using 'arg'
+import           CPython.Types (PyObject)
+import qualified CPython.Simple as Simple
 import           Debug.Trace as Debug
 import           Control.Exception (catch, SomeException)
 import           Data.Text (Text, pack)
