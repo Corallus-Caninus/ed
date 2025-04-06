@@ -39,7 +39,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda") # Load initial weights using config, ignoring size mismatches
+    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='auto') # Load initial weights using config, ignoring size mismatches
     checkpoint = torch.load(filename)
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -54,7 +54,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 else:
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda")
+    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='auto')
     dataset_indices = {} # Initialize dataset_indices for new run
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
