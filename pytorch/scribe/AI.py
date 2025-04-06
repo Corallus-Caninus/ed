@@ -219,22 +219,20 @@ while True:
 
     print("-----------------------step---------------------")
     step_count += 1
-  if step_count % 10 == 0:
-    unwrapped_model = accelerator.unwrap_model(model)
-    optimizer.step(closure)
+  optimizer.step(closure)
 
   step_count += 1
   if step_count % 10 == 0:
     unwrapped_model = accelerator.unwrap_model(model)
-      current_dataset_filename = dataset_filename # Define current dataset filename
-      dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
-      checkpoint = {
-          'model_state_dict': unwrapped_model.state_dict(),
-          'dataset_indices': dataset_indices, # Save dataset_indices dictionary
-      }
-      torch.save(checkpoint, filename)
-      optimizer.save_history(history_filename)
-      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, dataset index for {current_dataset_filename}: {current_index}")
+    current_dataset_filename = dataset_filename # Define current dataset filename
+    dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
+    checkpoint = {
+        'model_state_dict': unwrapped_model.state_dict(),
+        'dataset_indices': dataset_indices, # Save dataset_indices dictionary
+    }
+    torch.save(checkpoint, filename)
+    optimizer.save_history(history_filename)
+    print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, dataset index for {current_dataset_filename}: {current_index}")
 
   torch.cuda.empty_cache()
   prompt = "--A Haskell file that opens a file and prints it to stdout:"
