@@ -39,13 +39,16 @@ if os.path.exists(filename): # Load model weights and optimizer history
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda") # Load initial weights using config, ignoring size mismatches
-    model.load_state_dict(torch.load(filename, weights_only=True), strict=False) # Load weights, ignoring size mismatches
-    print(f"Model checkpoint loaded successfully from '{filename}'.") # Verification message
+    checkpoint = torch.load(filename)
+    model.load_state_dict(checkpoint['model_state_dict'], strict=False) # Load weights, ignoring size mismatches
+    current_index = checkpoint.get('current_index', 0) # Load current_index, default to 0 if not found
+    print(f"Model checkpoint loaded successfully from '{filename}'. Resuming from dataset index {current_index}") # Verification message
 
 else: # Load initial model weights if no checkpoint exists
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda") # Load initial weights using config, ignoring size mismatches
+    current_index = 0 # Initialize current_index to 0 for new runs
 #model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16,).to("cuda")
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
@@ -180,9 +183,13 @@ while True:
 
   if step_count % 10 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
-      accelerator.save(unwrapped_model.state_dict(), filename)
+      checkpoint = {
+          'model_state_dict': unwrapped_model.state_dict(),
+          'current_index': current_index, # Save current_index
+      }
+      torch.save(checkpoint, filename) # Save checkpoint dictionary
       optimizer.save_history(history_filename)
-      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}")
+      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, current dataset index: {current_index}")
 
   torch.cuda.empty_cache()
   prompt = "--A Haskell file that opens a file and prints it to stdout:"
