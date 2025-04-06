@@ -10,10 +10,9 @@ main :: IO ()
 main = do
   maybeAIModule <- importModule (pack "AI")
   case maybeAIModule of
-    Just aiModule -> do
-      {
+    Just aiModule -> do {
         putStrLn "AI module imported successfully.";
-        result <- call aiModule (pack "closure") [];
+        result <- call aiModule (pack "closure") [] ;
         print result
       }
     Nothing -> putStrLn "Failed to import AI module."
