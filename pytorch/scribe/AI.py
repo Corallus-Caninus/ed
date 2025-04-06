@@ -64,7 +64,9 @@ if os.path.exists("haskell_code_dataset.ds"):
     if os.path.exists("haskell_code_dataset.ds"):
     dataset = datasets.load_from_disk("haskell_code_dataset.ds")
 else:
+    #dataset = load_dataset("kye/all-torvalds-c-code-1", split="train", name="default")
     dataset = load_dataset("codeparrot/github-code", split="train", name="Haskell-all", streaming=False)
+    #dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
     dataset.save_to_disk("haskell_code_dataset.ds")
 
 model.train()
