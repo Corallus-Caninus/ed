@@ -114,6 +114,7 @@ def closure(): # Define closure here, outside the if block
   loss = 0
   i = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
+#TODO iterate the minibatch with a for loop here
   chunk_size=100 #1000
   grad_vector_size = 10 #5
   num_tokens = input_ids.size(1)
@@ -219,28 +220,28 @@ while True:
 
     print("-----------------------step---------------------")
     step_count += 1
-  optimizer.step(closure)
-
-  step_count += 1
-  if step_count % 10 == 0:
+    optimizer.step(closure)
+  
+    step_count += 1
+    if step_count % 10 == 0:
+      unwrapped_model = accelerator.unwrap_model(model)
+      current_dataset_filename = dataset_filename # Define current dataset filename
+      dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
+      checkpoint = {
+          'model_state_dict': unwrapped_model.state_dict(),
+          'dataset_indices': dataset_indices, # Save dataset_indices dictionary
+      }
+      torch.save(checkpoint, filename)
+      optimizer.save_history(history_filename)
+      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, dataset index for {current_dataset_filename}: {current_index}")
+  
+    torch.cuda.empty_cache()
+    prompt = "--A Haskell file that opens a file and prints it to stdout:"
+    input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
+    with torch.no_grad():
+      generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
+      generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+      print(f"Model response: {generated_text}")
+  
     unwrapped_model = accelerator.unwrap_model(model)
-    current_dataset_filename = dataset_filename # Define current dataset filename
-    dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
-    checkpoint = {
-        'model_state_dict': unwrapped_model.state_dict(),
-        'dataset_indices': dataset_indices, # Save dataset_indices dictionary
-    }
-    torch.save(checkpoint, filename)
-    optimizer.save_history(history_filename)
-    print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, dataset index for {current_dataset_filename}: {current_index}")
-
-  torch.cuda.empty_cache()
-  prompt = "--A Haskell file that opens a file and prints it to stdout:"
-  input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
-  with torch.no_grad():
-    generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
-    generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    print(f"Model response: {generated_text}")
-
-unwrapped_model = accelerator.unwrap_model(model)
-accelerator.save(unwrapped_model.state_dict(), filename)
+    accelerator.save(unwrapped_model.state_dict(), filename)
