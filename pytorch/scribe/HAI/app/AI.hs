@@ -12,6 +12,23 @@ import           Data.Text (Text, pack)
 import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Initialize the Python interpreter (only once).
+-- | Call a Python function and return the result as a String.
+callPythonFunction :: String -> String -> IO (Maybe String)
+callPythonFunction moduleName functionName = do
+    moduleOrError <- importModule (pack moduleName)
+    case moduleOrError of
+        Left err -> do
+            putStrLn $ "Error importing module: " ++ err
+            return Nothing
+        Right pyModule -> do
+            result <- call (pack moduleName) (pack functionName) [] []
+            case result of
+                Right str -> return (Just str)
+                Left err -> do
+                    putStrLn $ "Python function error: " ++ err
+                    return Nothing
+
+
 initPython :: IO ()
 initPython = do
   initialize
@@ -27,29 +44,12 @@ pyRun cmd = do
   case result of
     Left err -> putStrLn $ "Python error: " ++ err
     Right _  -> return ()
-
--- | Call a Python function.
-pyCall :: String -> String -> IO (Maybe String)
-pyCall moduleName functionName = do
-  moduleOrError <- importModule (pack moduleName)
-  case moduleOrError :: Either String CPython.Types.Module.Module of
-    Left err -> do
-      putStrLn $ "Error importing module: " ++ err
-      return Nothing
-    Right pyModule -> do
-      result <- call (pack moduleName) (pack functionName) [] []
-      case result of
-        Right str -> return (Just str)
-        Left err -> do
-          putStrLn $ "Python function error: " ++ err
-          return Nothing
-
 -- | The main function that runs the AI loop.
 runAI :: IO ()
 runAI = do
   initPython
   -- Example: Call a Python function
-  result <- pyCall "AI" "main_loop"
+  result <- callPythonFunction "AI" "main_loop"
   case result of
     Just strResult -> do -- Handle Maybe String result
       putStrLn $ "Result from Python: " ++ strResult
