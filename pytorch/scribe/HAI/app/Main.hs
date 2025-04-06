@@ -1,4 +1,6 @@
 module Main where
 
+import           AI
+
 main :: IO ()
-main = putStrLn "Hello, Haskell!"
+main = runAI
