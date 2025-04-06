@@ -9,7 +9,6 @@ import           CPython.Types.Module (Module)
 import           CPython.Simple (initialize, importModule, call, FromPy(fromPy), arg)
 import           CPython.Simple.Instances () -- Import instances for using 'arg'
 import           Data.Text (Text, pack)
-import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Initialize the Python interpreter (only once).
 initPython :: IO ()
@@ -21,8 +20,6 @@ initPython = do
   pyRun $ "sys.path.append('" ++ cwd ++ "')" -- Use cwd as String
 
 -- | Run a Python command.
-import           System.IO.Unsafe (unsafePerformIO)
-
 -- | Initialize the Python interpreter (only once).
 -- | Initialize the Python interpreter (only once).
 pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
