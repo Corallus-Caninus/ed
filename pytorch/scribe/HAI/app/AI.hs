@@ -10,7 +10,7 @@ import           CPython.Simple (initialize, importModule, call, FromPy(fromPy),
 import           CPython.Simple.Instances () -- Import instances for using 'arg'
 import           Data.Text (Text, pack)
 import qualified CPython.Simple.Instances as CPythonInstances
-import           CPython.Simple (PyObject)
+import           CPython.Types (PyObject)
 import           Data.Text (Text, pack)
 
 -- | Run a Python command.
