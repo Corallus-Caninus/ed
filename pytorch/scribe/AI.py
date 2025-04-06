@@ -192,9 +192,12 @@ while True:
 
     batch_input_ids_list = [] # Initialize lists for the new batch
     batch_attention_mask_list = []
-    for _ in range(batch_size): # Collect batch_size datapoints
+    batch_count = 0 # Counter for the number of data points in the current batch
+    while batch_count < batch_size: # Continue until batch_size is reached
         if not dataset_shuffled_indices: # Check if indices are exhausted during batch collection
+            print(f"Dataset indices exhausted before filling batch. Current batch size: {batch_count}")
             break # Break inner loop if no more indices
+
         dataset_idx = dataset_shuffled_indices.pop()
         while dataset_idx in seen_indices and dataset_shuffled_indices:
             dataset_idx = dataset_shuffled_indices.pop()
@@ -215,9 +218,10 @@ while True:
         print("got num_tokens: " + str(input_ids.size(1)))
         if input_ids.size(1) < 500:
             print("Skipping datapoint with less than 500 tokens.")
-            continue
+            continue # Skip to the next iteration to find a valid datapoint
         batch_input_ids_list.append(input_ids)
         batch_attention_mask_list.append(attention_mask)
+        batch_count += 1 # Increment batch_count only when a valid datapoint is added
 
     print("-----------------------step---------------------")
     step_count += 1
