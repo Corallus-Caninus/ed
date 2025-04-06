@@ -1,6 +1,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 
 {-# LANGUAGE LambdaCase #-}
+
 module AI where
 
 import           CPython.Simple (initialize, pyExec, pyImport, call, FromPy(fromPy))
@@ -24,26 +25,19 @@ pyRun cmd = do
     Right _  -> return ()
 
 -- | Call a Python function.
-pyCall :: String -> String -> IO (Maybe String) -- Changed return type to Maybe String
+pyCall :: String -> String -> IO (Maybe String)
 pyCall moduleName functionName = do
   pyImport moduleName >>= \case
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
     Right pyModule -> do
-      pyModule `pyCallMethod` functionName []
-      return Nothing -- pyCallMethod returns IO (), we need to return IO (Maybe PyObject)
-                   -- Returning Nothing here as a placeholder, you might want to handle the result properly
-
--- | Get a string from a PyObject.
-pyObjectToString :: PyObject -> IO String
-pyObjectToString obj = do
-  result <- pyStr obj
-  case result of
-    Left err -> do
-      putStrLn $ "Error converting to string: " ++ err
-      return ""
-    Right str -> return str
+      result <- call pyModule functionName [] []
+      case result of
+        Right str -> return (Just str)
+        Left err -> do
+          putStrLn $ "Python function error: " ++ err
+          return Nothing
 
 -- | The main function that runs the AI loop.
 runAI :: IO ()
