@@ -11,10 +11,6 @@ import           CPython.Simple.Instances () -- Import instances for using 'arg'
 import           Data.Text (Text, pack)
 import qualified CPython.Simple.Instances as CPythonInstances
 
-import           CPython.Types.Module (Module)
-import           CPython.Simple (importModule, call, FromPy(fromPy), arg)
-import           Data.Text (Text, pack)
-
 -- | Initialize the Python interpreter (only once).
 initPython :: IO ()
 initPython = do
@@ -22,7 +18,7 @@ initPython = do
   -- Add the current directory to the Python path so it can find AI.py
   let cwd = "." -- Or use a more robust way to get the current working directory
   pyRun $ "import sys"
-  pyRun $ "sys.path.append('" ++ cwd ++ "')" -- Use cwd as String
+  pyRun $ "sys.path.append('" ++ cwd ++ "')"
 
 -- | Run a Python command.
 pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
@@ -31,3 +27,4 @@ pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> 
 runAI :: IO ()
 runAI = do
   initPython
+  -- Example: Call a Python function
