@@ -36,7 +36,7 @@ pyCall moduleName functionName = do
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
-    Right pyModule -> do -- pyModule is already of type Module
+    Right pyModule -> do
       result <- call (pack moduleName) (pack functionName) [] []
       case result of
         Right str -> return (Just str)
