@@ -40,16 +40,19 @@ if os.path.exists(filename): # Load model weights and optimizer history
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda") # Load initial weights using config, ignoring size mismatches
     checkpoint = torch.load(filename)
-    model.load_state_dict(checkpoint['model_state_dict'], strict=False) # Load weights, ignoring size mismatches
-    current_index = checkpoint.get('current_index', 0) # Load current_index, default to 0 if not found
-    print(f"Model checkpoint loaded successfully from '{filename}'. Resuming from dataset index {current_index}") # Verification message
+    model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    dataset_indices = checkpoint.get('dataset_indices', {}) # Load dataset_indices, default to empty dict
+    current_dataset_filename = "haskell_code_dataset.ds" # Define current dataset filename
+    current_index = dataset_indices.get(current_dataset_filename, 0) # Get index for current dataset, default to 0
+    print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} from index {current_index}")
 
-else: # Load initial model weights if no checkpoint exists
+else:
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
-    config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda") # Load initial weights using config, ignoring size mismatches
+    config = MambaConfig.from_pretrained(model_id, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True).to("cuda")
+    dataset_indices = {} # Initialize dataset_indices for new run
+    current_dataset_filename = "haskell_code_dataset.ds" # Define current dataset filename
     current_index = 0 # Initialize current_index to 0 for new runs
-#model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16,).to("cuda")
 
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
@@ -81,12 +84,13 @@ step_count = 0
 #dataset_size = len(dataset) # Get dataset size outside the loop
 import random
 
-dataset_size = len(dataset) # Get dataset size outside the loop
-dataset_indices = list(range(dataset_size)) # Create a list of dataset indices
-random.shuffle(dataset_indices) # Shuffle the indices
-current_index = 0 # Initialize index for shuffled indices
+dataset_size = len(dataset)
+dataset_shuffled_indices = list(range(dataset_size)) # Renamed to avoid confusion
+random.shuffle(dataset_shuffled_indices) # Shuffle indices
 input_ids = None
 attention_mask = None
+current_dataset_filename = "haskell_code_dataset.ds" # Define current dataset filename
+# current_index is now loaded from checkpoint or initialized above
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
 cache = None # Initialize cache here
@@ -154,18 +158,17 @@ def closure(): # Define closure here, outside the if block
 
 while True:
   if current_index >= dataset_size: # Reshuffle indices if all have been used
-      random.shuffle(dataset_indices)
+      random.shuffle(dataset_shuffled_indices)
       current_index = 0
 
-  dataset_idx = dataset_indices[current_index] # Get the dataset index from shuffled list
+  dataset_idx = dataset_shuffled_indices[current_index] # Use shuffled indices
   print(f"Processing dataset index: {current_index}/{dataset_size}, original index: {dataset_idx}") # Print shuffled and original index
   batch_train = dataset[dataset_idx]['code'] # Access data using shuffled index
   print(str(batch_train))
-#  batch_train = dataset[dataset_index]['python_code'] # Access data using index
   current_index += 1 # Increment shuffled index
   dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now
 
-  if dataset_index >= dataset_size: # Reset index if end of dataset is reached - not used anymore, but keep for now
+  if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now
       dataset_index = 0
 
   tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
@@ -183,13 +186,15 @@ while True:
 
   if step_count % 10 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
+      current_dataset_filename = "haskell_code_dataset.ds" # Define current dataset filename
+      dataset_indices[current_dataset_filename] = current_index # Update current dataset index
       checkpoint = {
           'model_state_dict': unwrapped_model.state_dict(),
-          'current_index': current_index, # Save current_index
+          'dataset_indices': dataset_indices, # Save dataset_indices dictionary
       }
-      torch.save(checkpoint, filename) # Save checkpoint dictionary
+      torch.save(checkpoint, filename)
       optimizer.save_history(history_filename)
-      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, current dataset index: {current_index}")
+      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, dataset index for {current_dataset_filename}: {current_index}")
 
   torch.cuda.empty_cache()
   prompt = "--A Haskell file that opens a file and prints it to stdout:"
