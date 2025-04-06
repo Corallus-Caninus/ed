@@ -5,11 +5,10 @@
 module AI where
 
 import           CPython.Types.Module (Module)
-import           CPython.Simple (initialize, importModule, call, FromPy(fromPy), arg, PyObject)
+import           CPython.Simple (initialize, importModule, call, FromPy(fromPy), arg)
 import           CPython.Simple.Instances () -- Import instances for using 'arg'
 import           Data.Text (Text, pack)
 import qualified CPython.Simple.Instances as CPythonInstances
-import           Data.Text (Text, pack)
 
 -- | Run a Python command.
 pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return () :: IO PyObject
