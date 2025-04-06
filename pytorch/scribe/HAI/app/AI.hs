@@ -4,7 +4,7 @@
 
 module AI where
 
-import           CPython.Simple (initialize, pyExec, importModule, call, FromPy(fromPy))
+import           CPython.Simple (initialize, pyRawExec, importModule, call, FromPy(fromPy))
 import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Initialize the Python interpreter (only once).
@@ -19,7 +19,7 @@ initPython = do
 -- | Run a Python command.
 pyRun :: String -> IO ()
 pyRun cmd = do
-  result <- pyExec cmd
+  result <- pyRawExec cmd
   case result of
     Left err -> putStrLn $ "Python error: " ++ err
     Right _  -> return ()
