@@ -218,6 +218,9 @@ while True:
         batch_attention_mask_list.append(attention_mask)
 
     print("-----------------------step---------------------")
+  step_count += 1
+  if step_count % 10 == 0:
+      unwrapped_model = accelerator.unwrap_model(model)
     optimizer.step(closure)
 
   step_count += 1
