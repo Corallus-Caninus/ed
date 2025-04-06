@@ -175,7 +175,7 @@ while True:
       print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}")
 
   torch.cuda.empty_cache()
-  prompt = "import"
+  prompt = "--A Haskell file that opens a file and prints it to stdout:"
   input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
   with torch.no_grad():
     generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
