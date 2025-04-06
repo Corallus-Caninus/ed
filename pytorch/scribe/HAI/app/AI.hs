@@ -21,15 +21,12 @@ initPython = do
   pyRun $ "sys.path.append('" ++ cwd ++ "')" -- Use cwd as String
 
 -- | Run a Python command.
+import           System.IO.Unsafe (unsafePerformIO)
+
+-- | Initialize the Python interpreter (only once).
 -- | Initialize the Python interpreter (only once).
 pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
 -- | The main function that runs the AI loop.
 runAI :: IO ()
 runAI = do
   initPython
-  -- Example: Call a Python function
-  result <- callPythonFunction "AI" "main_loop"
-  case result of
-    Just strResult -> do -- Handle Maybe String result
-      putStrLn $ "Result from Python: " ++ strResult
-    Nothing -> putStrLn "Failed to call Python function." -- Handle Nothing case
