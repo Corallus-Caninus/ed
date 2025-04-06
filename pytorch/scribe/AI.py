@@ -62,7 +62,7 @@ if os.path.exists(filename): # Load optimizer history if checkpoint exists
 datalist = []
 if os.path.exists("haskell_code_dataset.ds"):
     if os.path.exists("haskell_code_dataset.ds"):
-    dataset = datasets.load_from_disk("haskell_code_dataset.ds")
+      dataset = datasets.load_from_disk("haskell_code_dataset.ds")
 else:
     #dataset = load_dataset("kye/all-torvalds-c-code-1", split="train", name="default")
     dataset = load_dataset("codeparrot/github-code", split="train", name="Haskell-all", streaming=False)
@@ -147,7 +147,9 @@ def closure(): # Define closure here, outside the if block
 
 while True:
   print(f"Processing dataset index: {dataset_index}/{dataset_size}") # Print dataset index
-  batch_train = dataset[dataset_index]['python_code'] # Access data using index
+  batch_train = dataset[dataset_index]['code']
+  print(str(batch_train))
+#  batch_train = dataset[dataset_index]['python_code'] # Access data using index
   dataset_index += 1 # Increment dataset index
 
   if dataset_index >= dataset_size: # Reset index if end of dataset is reached
@@ -170,7 +172,7 @@ while True:
       print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}")
 
   torch.cuda.empty_cache()
-  prompt = "#include"
+  prompt = "import"
   input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
   with torch.no_grad():
     generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
