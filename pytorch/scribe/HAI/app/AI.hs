@@ -11,7 +11,7 @@ import           Data.Text (Text, pack)
 import qualified CPython.Simple.Instances as CPythonInstances
 
 -- | Run a Python command.
-pyRun cmd = call (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
+pyRun cmd = call @() (pack "builtins") (pack "exec") [] [(pack "code", arg cmd)] >> return ()
 -- | The main function that runs the AI loop.
 
 runAI :: IO ()
