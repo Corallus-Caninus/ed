@@ -32,7 +32,7 @@ runAI = do
   putStrLn "Running AI.py..."
   Debug.trace "runAI: Executing AI.py top-level code..." $ return ()
   -- No need to explicitly call a main function in AI.py for simple execution
-  result <- call (pack "add") (pack "add_numbers") [arg @Int 5, arg @Int 3]
+  result <- call aiModule (pack "add_numbers") [arg @Int 5, arg @Int 3]
   case result of
     Just value -> do
       putStrLn $ "Result from Python: " ++ show value
