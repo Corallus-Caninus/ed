@@ -15,9 +15,9 @@ main = do
   hFlush stdout
   aiMod <- importModule (pack "AI")
   case aiMod of
-    Just mod -> do
+    Just ai_module -> do
       putStrLn "AI module imported successfully."
-      runAIResult <- call mod (pack "runAI") ([], [])
+      runAIResult <- call ai_module (pack "runAI") []
       case runAIResult of
         Just result -> do
           putStrLn "AI.runAI call finished successfully."
