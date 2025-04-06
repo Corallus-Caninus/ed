@@ -220,12 +220,12 @@ while True:
     print("-----------------------step---------------------")
     step_count += 1
   if step_count % 10 == 0:
-      unwrapped_model = accelerator.unwrap_model(model)
+    unwrapped_model = accelerator.unwrap_model(model)
     optimizer.step(closure)
 
   step_count += 1
   if step_count % 10 == 0:
-      unwrapped_model = accelerator.unwrap_model(model)
+    unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
       dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
       checkpoint = {
