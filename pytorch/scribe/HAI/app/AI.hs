@@ -5,6 +5,7 @@ module AI where
 
 import           CPython
 import           CPython.Types
+import           CPython.Types
 import           System.IO.Unsafe (unsafePerformIO)
 
 -- | Initialize the Python interpreter (only once).
@@ -27,12 +28,14 @@ pyRun cmd = do
 -- | Call a Python function.
 pyCall :: String -> String -> IO (Maybe PyObject)
 pyCall moduleName functionName = do
-  result <- pyImport moduleName >>= \case
+  pyImport moduleName >>= \case
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
     Right pyModule -> do
       pyModule `pyCallMethod` functionName []
+      return Nothing -- pyCallMethod returns IO (), we need to return IO (Maybe PyObject)
+                   -- Returning Nothing here as a placeholder, you might want to handle the result properly
 
 -- | Get a string from a PyObject.
 pyObjectToString :: PyObject -> IO String
