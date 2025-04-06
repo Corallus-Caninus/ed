@@ -54,7 +54,7 @@ extra-doc-files:    CHANGELOG.md
     -- Source files to be included in the package
     hs-source-dirs:   app
     other-modules:    AI
-    build-depends:    base ^>=4.18.2.1, cpython
+    build-depends:    base ^>=4.18.2.1 cpython
     default-language: Haskell2010
 
 common warnings
