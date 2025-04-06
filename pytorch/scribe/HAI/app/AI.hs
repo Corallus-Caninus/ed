@@ -4,7 +4,7 @@
 module AI where
 
 import           CPython
-import           CPython.Types
+import           CPython.Types (PyObject)
 import           CPython.Types
 import           System.IO.Unsafe (unsafePerformIO)
 
