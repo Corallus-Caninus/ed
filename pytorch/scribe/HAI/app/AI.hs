@@ -1,5 +1,6 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 
+{-# LANGUAGE LambdaCase #-}
 module AI where
 
 import           CPython

@@ -64,6 +64,7 @@ executable HAI
     -- Import common warning flags.
     import:           warnings
 
+    other-modules:    AI
     hs-source-dirs:   app
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs
