@@ -26,6 +26,6 @@ initPython = do
   initialize
   -- Add the current directory to the Python path so it can find AI.py
   let cwd = "." -- Or use a more robust way to get the current working directory
-  pyRun $ "import sys"
-  pyRun $ "sys.path.append('" ++ cwd ++ "')"
+  pyRun $ pack "import sys"
+  pyRun $ pack $ "sys.path.append('" ++ cwd ++ "')"
   -- Example: Call a Python function
