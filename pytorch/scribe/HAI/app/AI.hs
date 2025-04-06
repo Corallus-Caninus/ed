@@ -29,7 +29,8 @@ pyRun cmd = do
 -- | Call a Python function.
 pyCall :: String -> String -> IO (Maybe String)
 pyCall moduleName functionName = do
-  importModule (pack moduleName) >>= \case
+  moduleOrError <- importModule (pack moduleName)
+  case moduleOrError of
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
