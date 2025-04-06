@@ -67,7 +67,7 @@ print("num parameters: " + str(pytorch_total_params))
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=0.75, clop=5e-11, c1=3e-4, c2=0.9,direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
 #NOTE: mathematically optimized wolfe condition for exponential decay
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -116,7 +116,7 @@ def closure(): # Define closure here, outside the if block
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
 #TODO iterate the minibatch with a for loop here
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
-    chunk_size=100 #1000
+    chunk_size=1000 #1000
     grad_vector_size = 10 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
