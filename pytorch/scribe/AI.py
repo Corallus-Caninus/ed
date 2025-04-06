@@ -60,7 +60,7 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 
-batch_size = 2 # Define batch size here
+batch_size = 10 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
@@ -110,8 +110,8 @@ def closure(): # Define closure here, outside the if block
   loss = 0
   i = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
-  chunk_size=1000 #1000
-  grad_vector_size = 100 #5
+  chunk_size=100 #1000
+  grad_vector_size = 10 #5
   num_tokens = input_ids.size(1)
   num_steps = 0
   avg_loss = 0.
