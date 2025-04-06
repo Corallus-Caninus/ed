@@ -76,11 +76,15 @@ batch_train = None
 num_iters = 1000
 step_count = 0
 #dataset_size = len(dataset) # Get dataset size outside the loop
-dataset_size = 1000
+import random
+
+dataset_size = len(dataset) # Get dataset size outside the loop
+dataset_indices = list(range(dataset_size)) # Create a list of dataset indices
+random.shuffle(dataset_indices) # Shuffle the indices
+current_index = 0 # Initialize index for shuffled indices
 input_ids = None
 attention_mask = None
-dataset_size = len(dataset) # Get dataset size outside the loop
-dataset_index = 0 # Initialize dataset index
+dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
 cache = None # Initialize cache here
 def closure(): # Define closure here, outside the if block
@@ -146,13 +150,19 @@ def closure(): # Define closure here, outside the if block
 
 
 while True:
-  print(f"Processing dataset index: {dataset_index}/{dataset_size}") # Print dataset index
-  batch_train = dataset[dataset_index]['code']
+  if current_index >= dataset_size: # Reshuffle indices if all have been used
+      random.shuffle(dataset_indices)
+      current_index = 0
+
+  dataset_idx = dataset_indices[current_index] # Get the dataset index from shuffled list
+  print(f"Processing dataset index: {current_index}/{dataset_size}, original index: {dataset_idx}") # Print shuffled and original index
+  batch_train = dataset[dataset_idx]['code'] # Access data using shuffled index
   print(str(batch_train))
 #  batch_train = dataset[dataset_index]['python_code'] # Access data using index
-  dataset_index += 1 # Increment dataset index
+  current_index += 1 # Increment shuffled index
+  dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now
 
-  if dataset_index >= dataset_size: # Reset index if end of dataset is reached
+  if dataset_index >= dataset_size: # Reset index if end of dataset is reached - not used anymore, but keep for now
       dataset_index = 0
 
   tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
