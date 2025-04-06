@@ -16,14 +16,12 @@ import           System.IO.Unsafe (unsafePerformIO)
 -- | Call a Python function and return the result as a String.
 callPythonFunction :: String -> String -> IO (Maybe String)
 callPythonFunction moduleName functionName = do
-  eitherPyModule <- importModule (pack moduleName)
-  case eitherPyModule of
+  eitherPyModule <- importModule (pack moduleName) >>= \case
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
     Right pyModule -> do
-      eitherResult <- call pyModule (pack functionName) [] []
-      case eitherResult of
+      eitherResult <- call pyModule (pack functionName) [] [] >>= \case
         Right str -> return $ Just str
         Left err -> do
           putStrLn $ "Python function error: " ++ err
