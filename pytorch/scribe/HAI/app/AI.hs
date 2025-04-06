@@ -30,12 +30,12 @@ pyRun cmd = do
 pyCall :: String -> String -> IO (Maybe String)
 pyCall moduleName functionName = do
   moduleOrError <- importModule (pack moduleName)
-  case moduleOrError of
+  case moduleOrError :: Either String CPython.Types.Module.Module of
     Left err -> do
       putStrLn $ "Error importing module: " ++ err
       return Nothing
-    Right pyModule {- :: CPython.Types.Module.Module -} -> do
-      result <- call pyModule (pack functionName) [] []
+    Right pyModule -> do
+      result <- call (pyModule :: CPython.Types.Module.Module) (pack functionName) [] []
       case result of
         Right str -> return (Just str)
         Left err -> do
