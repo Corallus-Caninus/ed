@@ -1,6 +1,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeApplications #-}
 
 module AI where
 
