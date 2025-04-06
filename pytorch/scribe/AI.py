@@ -60,15 +60,16 @@ if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
 
 datalist = []
-if os.path.exists("c_code_dataset.ds"):
-    dataset = datasets.load_from_disk("c_code_dataset.ds")
+if os.path.exists("haskell_code_dataset.ds"):
+    dataset = datasets.load_from_disk("haskell_code_dataset.ds")
 else:
-    dataset = load_dataset("kye/all-torvalds-c-code-1", split="train", name="default")
+#    dataset = load_dataset("kye/all-torvalds-c-code-1", split="train", name="default")
+    dataset = load_dataset("codeparrot/github-code", split="train", name="Haskell-all",streaming=False)
 #    dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
 #dataset = dataset.take(1000) # Limit dataset size to 1,000,000 # No longer needed for local dataset
 #dataloader = DataLoader(dataset.take(100), batch_size=8)
-if not os.path.exists("c_code_dataset.ds"):
-    dataset.save_to_disk("c_code_dataset.ds")
+if not os.path.exists("haskell_code_dataset.ds"):
+    dataset.save_to_disk("haskell_code_dataset.ds")
 
 model.train()
 
