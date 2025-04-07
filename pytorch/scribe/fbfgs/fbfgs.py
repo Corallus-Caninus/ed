@@ -724,7 +724,7 @@ class FBFGS(Optimizer):
 
 
             else: #dense path for non-sparse tensors just in case
-                view = update[offset : offset + numel].to("cuda")
+                view = update[offset : offset + numel].to(p.device)
                 # view as to avoid deprecated pointwise semantics
                 p.add_(view.view_as(p), alpha=step_size)
             offset += numel
