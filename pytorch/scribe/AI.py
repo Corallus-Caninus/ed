@@ -116,7 +116,7 @@ def closure(): # Define closure here, outside the if block
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
 #TODO iterate the minibatch with a for loop here
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
-    chunk_size=1000 #1000
+    chunk_size=2000 #1000
     grad_vector_size = 10 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
