@@ -608,14 +608,14 @@ class FBFGS(Optimizer):
     def _gather_flat_grad(self):
         views = []
         for p in self._params:
+            grad_device = p.device # Get the device of the gradient
             torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
-            param_device = p.device  # Get the device of the parameter
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
-                view = p.grad.to(param_device).view(-1) # Move sparse grad to param device
+                view = p.grad.to(self.direction_device).view(-1) # Move sparse grad to direction_device
             else:
-                view = p.grad.to(param_device).view(-1) # Move dense grad to param device
+                view = p.grad.to(self.direction_device).view(-1) # Move dense grad to direction_device
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
