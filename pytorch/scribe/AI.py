@@ -20,6 +20,7 @@ from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
 #from mamba_ssm import Mamba2
 
+
 accelerator = Accelerator()
 filename = "AI_Checkpoint.ai"
 #TODO:  save/load the model and lbfgs history every n number of data iterations.
@@ -39,7 +40,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='auto') # Load initial weights using config, ignoring size mismatches
+    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced') # Load initial weights using config, ignoring size mismatches
     checkpoint = torch.load(filename)
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -54,20 +55,20 @@ if os.path.exists(filename): # Load model weights and optimizer history
 else:
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='auto')
+    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced')
     dataset_indices = {} # Initialize dataset_indices for new run
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 
-batch_size = 10 # Define batch size here
+batch_size = 1 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=0.75, clop=5e-11, c1=3e-4, c2=0.9,direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
 #NOTE: mathematically optimized wolfe condition for exponential decay
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=25, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -113,11 +114,13 @@ def closure(): # Define closure here, outside the if block
   start_time = time.time()
   loss = 0
   i = 0
+  torch.cuda.empty_cache()
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
 #TODO iterate the minibatch with a for loop here
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
-    chunk_size=2000 #1000
-    grad_vector_size = 10 #5
+    torch.cuda.empty_cache()
+    chunk_size=1500 #1000
+    grad_vector_size = 100 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
@@ -161,6 +164,7 @@ def closure(): # Define closure here, outside the if block
   #    avg_loss = avg_loss / num_steps 
   #    outputs.loss = avg_loss/(0.1*num_tokens) + outputs.loss
     print(str(outputs.loss))
+    torch.cuda.empty_cache()
     loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
     loss.backward()
 
@@ -226,6 +230,7 @@ while True:
     print("-----------------------step---------------------")
     step_count += 1
     optimizer.step(closure)
+    torch.cuda.empty_cache()
   
     step_count += 1
     if step_count % 10 == 0:

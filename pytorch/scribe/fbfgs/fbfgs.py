@@ -632,14 +632,14 @@ class FBFGS(Optimizer):
         else:
             views = []
             for p in self._params:
-                grad_device = "cpu" #p.device # Get the device of the gradient
+                grad_device = p.device #p.device # Get the device of the gradient
                 torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
                 if p.grad is None:
                     view = p.new(p.numel()).zero_()
                 elif p.grad.is_sparse:
-                    view = p.grad.to(self.direction_device).view(-1) # Move sparse grad to direction_device
+                    view = p.grad.view(-1) # Move sparse grad to direction_device
                 else:
-                    view = p.grad.to(self.direction_device).view(-1) # Move dense grad to direction_device
+                    view = p.grad.view(-1) # Move dense grad to direction_device
                 if torch.is_complex(view):
                     view = torch.view_as_real(view).view(-1)
                 views.append(view)
@@ -724,14 +724,12 @@ class FBFGS(Optimizer):
 
 
             else: #dense path for non-sparse tensors just in case
-                print(f"Parameter device: {p.device}")
-                print(f"Update slice device (before to(p.device)): {update[offset : offset + numel].device}")
                 view = update[offset : offset + numel].to(p.device)
                 # view as to avoid deprecated pointwise semantics
                 p.add_(view.view_as(p), alpha=step_size)
+                torch.cuda.empty_cache()
             offset += numel
         assert offset == self._numel()
-        torch.cuda.empty_cache()
 
 #TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
     def _clone_param(self):
