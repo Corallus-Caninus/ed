@@ -609,12 +609,13 @@ class FBFGS(Optimizer):
         views = []
         for p in self._params:
             torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+            param_device = p.device  # Get the device of the parameter
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
-              view = p.grad.view(-1)
+                view = p.grad.to(param_device).view(-1) # Move sparse grad to param device
             else:
-                view = p.grad.view(-1)
+                view = p.grad.to(param_device).view(-1) # Move dense grad to param device
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
