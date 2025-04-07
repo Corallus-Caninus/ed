@@ -724,6 +724,8 @@ class FBFGS(Optimizer):
 
 
             else: #dense path for non-sparse tensors just in case
+                print(f"Parameter device: {p.device}")
+                print(f"Update slice device (before to(p.device)): {update[offset : offset + numel].device}")
                 view = update[offset : offset + numel].to(p.device)
                 # view as to avoid deprecated pointwise semantics
                 p.add_(view.view_as(p), alpha=step_size)
