@@ -608,7 +608,7 @@ class FBFGS(Optimizer):
     def _gather_flat_grad(self):
         views = []
         for p in self._params:
-            grad_device = p.device # Get the device of the gradient
+            grad_device = "cpu" #p.device # Get the device of the gradient
             torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
