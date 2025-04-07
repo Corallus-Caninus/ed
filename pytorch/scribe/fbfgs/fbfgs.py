@@ -6,6 +6,7 @@ from torch import Tensor
 import gc
 import psutil
 import time
+import torch.distributed as dist
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
@@ -606,6 +607,48 @@ class FBFGS(Optimizer):
     # gather flat grads with L1 Normalization and without clopping
 #TODO: rename
     def _gather_flat_grad(self):
+        if dist.is_initialized():
+            views = []
+            local_grads = []  # List for local flattened gradients
+            for p in self._params:
+                grad_device = p.device
+                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+                if p.grad is None:
+                    view = p.new(p.numel()).zero_()
+                elif p.grad.is_sparse:
+                    view = p.grad.to(self.direction_device).view(-1)
+                else:
+                    view = p.grad.to(self.direction_device).view(-1)
+                if torch.is_complex(view):
+                    view = torch.view_as_real(view).view(-1)
+                views.append(view)
+                local_grads.append(view)  # Append to local_grads list
+
+            world_size = dist.get_world_size()
+            gathered_grads = [torch.empty_like(local_grads[0]) for _ in range(world_size)]  # List for gathered gradients
+            dist.all_gather(gathered_grads, local_grads[0])  # Perform all_gather
+
+            grad = torch.cat(gathered_grads, 0)  # Concatenate gathered gradients
+        else:
+            views = []
+            for p in self._params:
+                grad_device = "cpu" #p.device # Get the device of the gradient
+                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+                if p.grad is None:
+                    view = p.new(p.numel()).zero_()
+                elif p.grad.is_sparse:
+                    view = p.grad.to(self.direction_device).view(-1) # Move sparse grad to direction_device
+                else:
+                    view = p.grad.to(self.direction_device).view(-1) # Move dense grad to direction_device
+                if torch.is_complex(view):
+                    view = torch.view_as_real(view).view(-1)
+                views.append(view)
+            grad = torch.cat(views, 0)
+        return grad
+
+    # gather flat grads with L1 Normalization and without clopping
+#TODO: rename
+    def _gather_flat_grad_DEPRECATED(self):
         views = []
         for p in self._params:
             grad_device = "cpu" #p.device # Get the device of the gradient
