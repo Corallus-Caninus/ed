@@ -616,9 +616,9 @@ class FBFGS(Optimizer):
                 if p.grad is None:
                     view = p.new(p.numel()).zero_()
                 elif p.grad.is_sparse:
-                    view = p.grad.to(self.direction_device).view(-1)
+                    view = p.grad.view(-1)
                 else:
-                    view = p.grad.to(self.direction_device).view(-1)
+                    view = p.grad.view(-1)
                 if torch.is_complex(view):
                     view = torch.view_as_real(view).view(-1)
                 views.append(view)
@@ -651,7 +651,7 @@ class FBFGS(Optimizer):
     def _gather_flat_grad_DEPRECATED(self):
         views = []
         for p in self._params:
-            grad_device = "cpu" #p.device # Get the device of the gradient
+            grad_device = p.device # Get the device of the gradient
             torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
@@ -726,7 +726,7 @@ class FBFGS(Optimizer):
             else: #dense path for non-sparse tensors just in case
                 view = update[offset : offset + numel]
                 # view as to avoid deprecated pointwise semantics
-                p.add_(view.view_as(p), alpha=step_size)
+                p.to("cuda").add_(view.to("cuda").view_as(p.to("cuda")), alpha=step_size)
             offset += numel
         assert offset == self._numel()
 
@@ -1158,7 +1158,7 @@ class FBFGS(Optimizer):
           # directional derivative
   	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
 #          flat_grad = self._gather_norm_flat_grad(1, True) TODO: is this right?
-          gtd_sparse_product = flat_grad.to("cuda") * d
+          gtd_sparse_product = flat_grad.to("cuda") * d.to("cuda")
           gtd = gtd_sparse_product.sum() # g * d
           del gtd_sparse_product
           prev_flat_grad = prev_flat_grad.to(self.direction_device)
