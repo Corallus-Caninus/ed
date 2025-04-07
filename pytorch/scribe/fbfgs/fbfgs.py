@@ -254,7 +254,7 @@ def _strong_wolfe(
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
-    gtd_new_sparse_product = g_new * d
+    gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
     gtd_new = gtd_new_sparse_product.sum()
     del gtd_new_sparse_product
 #    g_new = g_new#
@@ -333,7 +333,7 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
-        gtd_new_sparse_product = g_new * d
+        gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
         gtd_new = gtd_new_sparse_product.sum()
         del gtd_new_sparse_product
 #        g_new = g_new#
@@ -434,7 +434,7 @@ def _strong_wolfe(
         # Evaluate new point
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
-        gtd_new_sparse_product = g_new * d
+        gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
         gtd_new = gtd_new_sparse_product.sum()
         del gtd_new_sparse_product
 #        g_new = g_new#
@@ -605,7 +605,7 @@ class FBFGS(Optimizer):
         return self._numel_cache
 
     # gather flat grads with L1 Normalization and without clopping
-#TODO: rename
+#TODO: dont gather, just let ops be distributed
     def _gather_flat_grad(self):
         if dist.is_initialized():
             views = []
@@ -724,11 +724,12 @@ class FBFGS(Optimizer):
 
 
             else: #dense path for non-sparse tensors just in case
-                view = update[offset : offset + numel]
+                view = update[offset : offset + numel].to("cuda")
                 # view as to avoid deprecated pointwise semantics
-                p.to("cuda").add_(view.to("cuda").view_as(p.to("cuda")), alpha=step_size)
+                p.add_(view.view_as(p), alpha=step_size)
             offset += numel
         assert offset == self._numel()
+        torch.cuda.empty_cache()
 
 #TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
     def _clone_param(self):
@@ -986,6 +987,7 @@ class FBFGS(Optimizer):
 #TODO: we arent storing the last iteration in history. Consider reworking the last iteration logic for step function
 #      while n_iter < max_iter:
       while True:
+          torch.cuda.empty_cache() # Clear cache before direction calculation
           # keep track of nb of iterations
           gc.collect()
           n_iter += 1
@@ -1204,7 +1206,7 @@ class FBFGS(Optimizer):
               Needle = False
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
-                  t = 1. #Reset t to 1 for after needling
+                  t = 2. #Reset t to 1 for after needling
                   best_needle_loss = float(1.) # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
                   Needle = True
