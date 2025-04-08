@@ -275,6 +275,8 @@ def _strong_wolfe(
 #TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
     f_best = torch.tensor(f, device=device)
     g_best = g
+    g = g.to(direction_device)
+    gc.collect()
     ls_iter=0
     stall_wolfe=0
 
@@ -348,7 +350,7 @@ def _strong_wolfe(
           stall_wolfe = 0
           t_best = t
           f_best = torch.tensor(f_new, device=device)
-          g_best = g_new
+          g_best = g_new.to(direction_device)
 
     # reached max number of iterations?
     if ls_iter == max_ls:
@@ -445,7 +447,7 @@ def _strong_wolfe(
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
-            bracket_g[high_pos] = g_new.clone()  # type: ignore[possibly-undefined]
+            bracket_g[high_pos] = g_new  # type: ignore[possibly-undefined]
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
@@ -472,7 +474,7 @@ def _strong_wolfe(
               stall_wolfe = 0
               t_best = t
               f_best = torch.tensor(f_new, device=device)
-              g_best = g_new
+              g_best = g_new.to(direction_device)
 
             # new point becomes new low
             bracket[low_pos] = t
@@ -607,43 +609,43 @@ class FBFGS(Optimizer):
     # gather flat grads with L1 Normalization and without clopping
 #TODO: dont gather, just let ops be distributed
     def _gather_flat_grad(self):
-        if dist.is_initialized():
-            views = []
-            local_grads = []  # List for local flattened gradients
-            for p in self._params:
-                grad_device = p.device
-                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
-                if p.grad is None:
-                    view = p.new(p.numel()).zero_()
-                elif p.grad.is_sparse:
-                    view = p.grad.view(-1)
-                else:
-                    view = p.grad.view(-1)
-                if torch.is_complex(view):
-                    view = torch.view_as_real(view).view(-1)
-                views.append(view)
-                local_grads.append(view)  # Append to local_grads list
-
-            world_size = dist.get_world_size()
-            gathered_grads = [torch.empty_like(local_grads[0]) for _ in range(world_size)]  # List for gathered gradients
-            dist.all_gather(gathered_grads, local_grads[0])  # Perform all_gather
-
-            grad = torch.cat(gathered_grads, 0)  # Concatenate gathered gradients
-        else:
-            views = []
-            for p in self._params:
-                grad_device = p.device #p.device # Get the device of the gradient
-                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
-                if p.grad is None:
-                    view = p.new(p.numel()).zero_()
-                elif p.grad.is_sparse:
-                    view = p.grad.view(-1) # Move sparse grad to direction_device
-                else:
-                    view = p.grad.view(-1) # Move dense grad to direction_device
-                if torch.is_complex(view):
-                    view = torch.view_as_real(view).view(-1)
-                views.append(view)
-            grad = torch.cat(views, 0)
+#        if dist.is_initialized():
+#            views = []
+#            local_grads = []  # List for local flattened gradients
+#            for p in self._params:
+#                grad_device = p.device
+#                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+#                if p.grad is None:
+#                    view = p.new(p.numel()).zero_()
+#                elif p.grad.is_sparse:
+#                    view = p.grad.view(-1)
+#                else:
+#                    view = p.grad.view(-1)
+#                if torch.is_complex(view):
+#                    view = torch.view_as_real(view).view(-1)
+#                views.append(view)
+#                local_grads.append(view)  # Append to local_grads list
+#
+#            world_size = dist.get_world_size()
+#            gathered_grads = [torch.empty_like(local_grads[0]) for _ in range(world_size)]  # List for gathered gradients
+#            dist.all_gather(gathered_grads, local_grads[0])  # Perform all_gather
+#
+#            grad = torch.cat(gathered_grads, 0)  # Concatenate gathered gradients
+#        else:
+        views = []
+        for p in self._params:
+            grad_device = "cuda" #p.device # Get the device of the gradient
+            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+            if p.grad is None:
+                view = p.new(p.numel()).zero_()
+            elif p.grad.is_sparse:
+                view = p.grad.view(-1) # Move sparse grad to direction_device
+            else:
+                view = p.grad.view(-1) # Move dense grad to direction_device
+            if torch.is_complex(view):
+                view = torch.view_as_real(view).view(-1)
+            views.append(view.to(grad_device))
+        grad = torch.cat(views, 0)
         return grad
 
     # gather flat grads with L1 Normalization and without clopping
@@ -662,7 +664,7 @@ class FBFGS(Optimizer):
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
-        grad = torch.cat(views, 0)
+        grad = torch.cat(views.to("cuda"), 0)
 #        norm_val = torch.linalg.vector_norm(grad, ord=1.)
 #        grad = grad/norm_val
 #        return torch.cat(views, 0).to(self.direction_device)
@@ -1127,6 +1129,10 @@ class FBFGS(Optimizer):
               y = y #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
               ys = ys #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
 
+              del y
+              del s
+              gc.collect()
+
               # compute the approximate (L-BFGS) inverse Hessian
               # multiplied by the gradient
               num_old = len(old_dirs)
@@ -1164,24 +1170,8 @@ class FBFGS(Optimizer):
           gtd = gtd_sparse_product.sum() # g * d
           del gtd_sparse_product
           prev_flat_grad = prev_flat_grad.to(self.direction_device)
-#          if state["n_iter"] != 1:
-#          avg = gtd.abs().mean()
-#          print("got avg: " + str(avg))
-##          t = min(1e16, 1/avg)
-          t = self.t #TODO: this should be set based on an average of step sizes or something. We can track what the learning rate should be to increase the speed of bracket search without missing points at lower step sizes.
-##            t = min(5e5, 5e-5/ avg)
-#          print("got t: " + str(t))
-
-#          flat_grad = flat_grad#
-#          gtd=gtd#
-#          flat_grad = flat_grad#
-#          gtd=gtd
-#          d = d#
-#          d = d
-#          t = t#
-
+          t = self.t 
           # directional derivative is below tolerance
-#NOTE: if we dont break here we are surely going to zoom on the bracket. This is preferable to just skipping until the data point aligns with the hessian but may prefer reseting the hessian instead.
 #          if gtd > -tolerance_change:
 #              break
 
@@ -1198,38 +1188,35 @@ class FBFGS(Optimizer):
                       return self._directional_evaluate(closure, x, t, d)
 
                   gc.collect()
+                  prev_loss = loss
+
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
                       obj_func, self.direction_device, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
-#                      obj_func, x_init, t, d, loss, flat_grad, gtd, c2=(1-1/max_iter)
-#TODO: Another solution is to decrease the norm order if the loss doesnt reduce and only break when decreasing the order does not also decrease the loss
               Needle = False
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   t = 2. #Reset t to 1 for after needling
-                  best_needle_loss = float(1.) # Initialize best_needle_loss here to ensure it's always defined
+                  best_needle_loss = prev_loss # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
                   Needle = True
+                  del flat_grad
+                  gc.collect()
                   first_param = next(self.param_groups[0]['params'].__iter__())
-                  needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
-                  best_needle_t = needle_t.clone()
-#TODO: just use x_init
-#TODO we need to check convergence on the needle
-                  x_init_needle = self._clone_param() # Clone params for needle search
+                  needle_t = torch.tensor(2.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
+                  best_needle_t = needle_t
+#                  x_init_needle = self._clone_param() # Clone params for needle search
+                  x_init_needle = x_init
 
                   # Iteratively increase t until loss no longer decreases
-#TODO: initialize the gtd here instead of the original gtd.
                   flat_grad = self._gather_flat_grad()
                   d_needle = flat_grad.neg()
                   total_norm = torch.linalg.vector_norm(d_needle, ord=1/3)
                   d_needle = d_needle.div_(total_norm)
-#NOTE: I use l1 norm so we converge quickly and dont over apply the needle
                   gtd = d_needle * flat_grad
                   gtd = gtd.sum()
                   while True:
-#TODO: use raw gradients so we dont double norm here
-#TODO: only calculate the d_needle once since we are linesearching it
-#TODO: sharpen routine first before pressure
+                      gc.collect()
                       current_needle_loss, flat_grad= self._needle_directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
                       gtd_needle_sparse_product = flat_grad * d_needle #TODO: use raw gradients so we dont double norm here
                       gtd_needle = gtd_needle_sparse_product.sum() # g * d
@@ -1237,10 +1224,10 @@ class FBFGS(Optimizer):
                       armijo_condition = current_needle_loss <= best_needle_loss + c1 * needle_t * gtd
                       if current_needle_loss <= best_needle_loss and abs(gtd_needle) > -c2 * gtd and armijo_condition: #and abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
                           best_needle_loss = current_needle_loss
-                          best_needle_t = needle_t.clone()
-#TODO: try a exponential scaling here of 2**n. exponential may not be right but we need something more efficient like interpolation. we may be able to just guess how far by the convergence rate
+                          best_needle_t = needle_t
                           needle_t = needle_t ** 2  # Increase t for next iteration
                       else:
+                          best_needle_t = best_needle_t.sqrt() # Stop if loss no longer decreasing
                           break # Stop if loss no longer decreasing
 
 
@@ -1248,7 +1235,12 @@ class FBFGS(Optimizer):
 
                   loss_device = d.device
                   print(f" \n -----------got needle stepsize: {needle_t} and loss: \033[92m{current_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
+                  del prev_flat_grad
+                  del d_needle
+                  del x_init_needle
                   prev_flat_grad = None
+                  torch.cuda.empty_cache()
+                  gc.collect()
 
                 print("\033[91mLinesearch failure, resetting..\033[0m")
                 ls_failed = True
@@ -1278,6 +1270,7 @@ class FBFGS(Optimizer):
             d = d.to(first_param.device)
             self._add_grad(t, d)
             loss_device = d.device
+#TODO: fix this print (its wrong)
             print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
             opt_cond = loss <= 0  # TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision # Use best_needle_loss
 
