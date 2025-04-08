@@ -245,7 +245,8 @@ while True:
       }
       torch.save(checkpoint, filename)
       optimizer.save_history(history_filename)
-      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, dataset index for {current_dataset_filename}: {current_index}")
+      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
+
   
     torch.cuda.empty_cache()
     prompt = "--A Haskell file that opens a file and prints it to stdout:"
