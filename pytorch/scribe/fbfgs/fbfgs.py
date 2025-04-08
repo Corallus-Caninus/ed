@@ -993,6 +993,7 @@ class FBFGS(Optimizer):
           # keep track of nb of iterations
           gc.collect()
           n_iter += 1
+          print("iteration: " + str(n_iter))
           print("[CRAM]")
 
           ############################################################
@@ -1116,9 +1117,9 @@ class FBFGS(Optimizer):
                   old_dirs.append(y.to(self.direction_device)) # Store y as dense Tensor
                   old_stps.append(s.to(self.direction_device)) # Store s as dense Tensor
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+#TODO: break here on n_iters
               if n_iter > max_iter or loss == 0:
                 break
-#TODO: break here on n_iters
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
               y_squared = y_dense.dot(y_dense)
@@ -1145,6 +1146,9 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache()
 
               del H_diag
+#TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
+          if n_iter > max_iter or loss == 0:
+            break
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
 #              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was self.direction_device
