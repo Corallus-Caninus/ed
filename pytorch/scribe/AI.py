@@ -48,6 +48,9 @@ if os.path.exists(filename): # Load model weights and optimizer history
         model.load_state_dict(checkpoint, strict=False) # Load directly if 'model_state_dict' key is missing
     dataset_indices = checkpoint.get('dataset_indices', {}) # Load dataset_indices, default to empty dict
     current_dataset_filename = dataset_filename # Define current dataset filename
+    if dataset_indices:
+        print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
+    print("After loading - dataset_indices:", dataset_indices)
     seen_indices = dataset_indices.get(current_dataset_filename, []) # Load seen_indices, default to empty list
     #current_index = dataset_indices.get(current_dataset_filename, 0) # No longer needed
     print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
