@@ -25,6 +25,7 @@ accelerator = Accelerator()
 filename = "AI_Checkpoint.ai"
 #TODO:  save/load the model and lbfgs history every n number of data iterations.
 #TODO: add LoRa and/or QLoRa so all the kids will try this and not gripe about the scaling
+#TODO: save and load the indices to a seperate file so we can verify.
 #TODO: project Basilisk: parallelize the model layer-wise with the gradients. Also parallelize the flat-grads and gtd etc in L-BFGS-N. Simplest parallelization, assuming we are using commodity last-gen accelerators for edge learning, this will allow the most performant scale-out of models (e.g.: 3 k80's or 3 MI25's)
 
 import time
@@ -33,6 +34,7 @@ model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2
 dataset_filename = "haskell_code_dataset.ds"
 #model_id = "hanzla/Falcon3-Mamba-R1-v0"
 history_filename = "fbfgs_history.pth"
+indices_filename = "dataset_indices.pth"
 #tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
@@ -46,7 +48,10 @@ if os.path.exists(filename): # Load model weights and optimizer history
         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     else:
         model.load_state_dict(checkpoint, strict=False) # Load directly if 'model_state_dict' key is missing
-    dataset_indices = checkpoint.get('dataset_indices', {}) # Load dataset_indices, default to empty dict
+    dataset_indices = {}
+    if os.path.exists(indices_filename):
+        dataset_indices = torch.load(indices_filename) # Load dataset_indices, default to empty dict
+
     current_dataset_filename = dataset_filename # Define current dataset filename
     if dataset_indices:
         print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
@@ -60,7 +65,7 @@ else:
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced')
-    dataset_indices = {} # Initialize dataset_indices for new run
+    dataset_indices = {}
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
@@ -241,11 +246,11 @@ while True:
       dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
       checkpoint = {
           'model_state_dict': unwrapped_model.state_dict(),
-          'dataset_indices': dataset_indices, # Save dataset_indices dictionary
       }
       torch.save(checkpoint, filename)
+      torch.save(dataset_indices, indices_filename)
       optimizer.save_history(history_filename)
-      print(f"Model and FBFGS history saved to {filename} and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
+      print(f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
 
   
     torch.cuda.empty_cache()
