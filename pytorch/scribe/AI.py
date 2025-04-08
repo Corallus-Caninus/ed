@@ -99,12 +99,7 @@ import random
 dataset_size = len(dataset)
 dataset_shuffled_indices = list(range(dataset_size)) # Shuffle indices for each epoch
 #random.shuffle(dataset_shuffled_indices) # Shuffle indices - moved to inside the loop
-input_ids = None
-batch_input_ids_list = []
-attention_mask = None
-batch_attention_mask_list = []
 current_dataset_filename = dataset_filename # Define current dataset filename
-current_index = 0 # Initialize current_index to 0
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
 cache = None # Initialize cache here
@@ -179,6 +174,9 @@ def closure(): # Define closure here, outside the if block
 
 
 while True:
+    dataset_shuffled_indices = list(range(dataset_size)) # Reshuffle indices at the start of each epoch
+    random.shuffle(dataset_shuffled_indices) # Reshuffle
+
     if not dataset_shuffled_indices: # Reshuffle if indices are empty (all seen)
         dataset_shuffled_indices = list(range(dataset_size)) # Recreate full list of indices
         random.shuffle(dataset_shuffled_indices) # Reshuffle
