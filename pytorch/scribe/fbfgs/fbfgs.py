@@ -10,6 +10,7 @@ import torch.distributed as dist
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
+#TODO: extract this to a module and begin FBFGS project structuring
 #TODO: implement sparse operations where we currently perform dense ops
 @torch.jit.script
 class SparseFlatTensor:
@@ -243,7 +244,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, direction_device, x, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100
+    obj_func, direction_device, x, t, d, f, g_best, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100
 ):
 #TODO: this irks the mathematician in me.
     if c2 == 0:
@@ -251,6 +252,7 @@ def _strong_wolfe(
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
 #    g = g.clone(memory_format=torch.contiguous_format)
     # evaluate objective and gradient using initial step
+    g_best = g_best.to(direction_device)
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
@@ -263,8 +265,8 @@ def _strong_wolfe(
     success = False
 
     # bracket an interval containing a point satisfying the Wolfe criteria
-    t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
-    g_prev = g_prev.to(direction_device)
+    t_prev, f_prev, g_prev, gtd_prev = 0, f, g_best, gtd
+#    g_prev = g_prev.to(direction_device)
     done = False
     ls_iter = 0
 
@@ -274,8 +276,8 @@ def _strong_wolfe(
     device = gtd.device
 #TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
     f_best = torch.tensor(f, device=device)
-    g_best = g
-    g = g.to(direction_device)
+#    g_best = g
+#    g = g.to(direction_device)
     gc.collect()
     ls_iter=0
     stall_wolfe=0
@@ -749,6 +751,7 @@ class FBFGS(Optimizer):
         flat_grad = self._gather_flat_grad()
 #        flat_grad = self._gather_flat_grad()
         self._set_param(x)
+        del x
         return loss, flat_grad
 
     def _needle_directional_evaluate(self, closure, x, t, d):
@@ -759,9 +762,7 @@ class FBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
-#TODO: we can still get NaNd. Probably due to ro exploding. Check for what isnt normalized and ensure this isnt the gradient vanishing (which is probably more likely). If its vanishing gradient just batch em if we dont calculate dense gradients should be sufficient
-#TODO: if loss is the same we are going to get NaN. We can reset the Hessian or something if this happens (should probably just ensure this doesnt happen)
-#TODO: Update, this happened on a max_ls Strong wolfe. If we get a strong wolfe given armijo we should not have loss be equivalent. Check relaxed wolfe routines thats probably where the NaNd is.
+#TODO: NOTE after benchmarking, this is compute bound. Its not waiting to read from RAM its stalled in computation on CUDA. Parallelize this from the flat grads to here with a device_map ASAP.
     @torch.jit.script
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
         num_old = len(old_dirs)
@@ -770,7 +771,7 @@ class FBFGS(Optimizer):
 #TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
         if t < 1:
           similarity = similarity/t
-        q = flat_grad.neg().to("cuda")
+        q = flat_grad.to("cuda").neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
@@ -807,7 +808,6 @@ class FBFGS(Optimizer):
 
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
-            dense_old_dir = torch.zeros_like(d) # Initialize dense_old_dir here
             if direction_alignment_mask[i]:
               #be_i.copy_((old_dirs[i].to_dense().to("cuda") * d).to_dense()) # Convert to dense here
 #              dense_old_dir = old_dirs[i].to_dense().to("cuda")
@@ -824,7 +824,7 @@ class FBFGS(Optimizer):
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
         d = d.div_(total_norm)
-#        direction = d
+#TODO: we can clop here if we can get sparse flat tensors supporting all the ops
 #        mask = torch.logical_and(direction > -clop, direction < clop) #TODO: extract to sub_variance hyperparameter
 #        direction[mask] = 0
 #        d = direction.to_sparse()
