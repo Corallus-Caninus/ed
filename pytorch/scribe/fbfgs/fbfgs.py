@@ -640,7 +640,6 @@ class FBFGS(Optimizer):
         views = []
         for p in self._params:
             grad_device = "cuda" #p.device # Get the device of the gradient
-            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
@@ -651,6 +650,9 @@ class FBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view.to(grad_device))
         grad = torch.cat(views, 0)
+        for p in self._params: # Clip after gathering to ensure all grads are included
+            if p.grad is not None: # Check if p.grad is not None
+                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
         return grad
 
     # gather flat grads with L1 Normalization and without clopping
