@@ -145,7 +145,7 @@ def closure(): # Define closure here, outside the if block
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
     chunk_size=100 #1000
-    grad_vector_size = 10 #5
+    grad_vector_size = 50 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
