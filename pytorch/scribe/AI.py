@@ -21,6 +21,7 @@ from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
 #from mamba_ssm import Mamba2
 from peft import LoraConfig, get_peft_model
+from peft import PeftModel
 torch.backends.cudnn.enabled = False
 
 
@@ -43,15 +44,18 @@ indices_filename = "dataset_indices.pth"
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
 if os.path.exists(filename): # Load model weights and optimizer history
-    print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
+    print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
-    checkpoint = torch.load(filename)
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-    else:
-        model.load_state_dict(checkpoint, strict=False) # Load directly if 'model_state_dict' key is missing
+    lora_config =  LoraConfig(
+            r=8,
+            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+            task_type="CAUSAL_LM",
+            bias="none"
+    )
+    model = get_peft_model(model, lora_config)
+    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
     dataset_indices = {}
     if os.path.exists(indices_filename):
         dataset_indices = torch.load(indices_filename) # Load dataset_indices, default to empty dict
@@ -66,15 +70,15 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
 
 else:
-    print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
+    print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16)
     dataset_indices = {}
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
-
-#TODO: ensure we didnt already load the adapter and that we are saving the adapter each time.
+#Initialize and apply LoRa config:
+#TODO: ensure we didnt already load the adapter and that we are initializing the adapter each time.
 lora_config =  LoraConfig(
         r=8,
         target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
@@ -83,7 +87,6 @@ lora_config =  LoraConfig(
 )
 model = get_peft_model(model, lora_config)
 lora_params = (
-    param for name, param in model.named_parameters()
     if "lora_" in name and param.requires_grad
 )
 
@@ -266,11 +269,8 @@ while True:
     if step_count % 3 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
-      dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
-      checkpoint = {
-          'model_state_dict': unwrapped_model.state_dict(),
-      }
-      torch.save(checkpoint, filename) # Save full state_dict
+      dataset_indices[current_dataset_filename] = seen_indices
+      model.save_pretrained(filename) # Only save Peft adapter
       torch.save(dataset_indices, indices_filename)
       optimizer.save_history(history_filename)
       print(f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
@@ -284,5 +284,6 @@ while True:
       generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
       print(f"Model response: {generated_text}")
   
-    unwrapped_model = accelerator.unwrap_model(model)
-    accelerator.save(unwrapped_model.state_dict(), filename) # Save full state_dict
+
+    #unwrapped_model = accelerator.unwrap_model(model) # No longer needed
+    model.save_pretrained(filename) # Only save Peft adapter
