@@ -74,40 +74,14 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 
-#use_lora = True # Flag to enable LoRA
-#lora_rank = 1 # Define LoRA rank
-#
-#if use_lora:
-#    print(f"Applying LoRA with rank {lora_rank}")
-#    for name, module in model.named_modules():
-#        if isinstance(module, torch.nn.Linear):
-#            print(f"Replacing linear layer in module: {name}")
-#            replace_linear_layer = lora.Linear(module.in_features, module.out_features, r=lora_rank, dtype=module.weight.dtype).to(module.weight.device)
-#            # Copy existing weights if possible
-#            replace_linear_layer.weight = module.weight
-#            replace_linear_layer.weight.data = replace_linear_layer.weight.data.to(module.weight.device) # Ensure LoRA layer weights are on the same device
-#            if module.bias is not None:
-#                replace_linear_layer.bias = module.bias
-#                replace_linear_layer.bias.data = replace_linear_layer.bias.data.to(module.bias.device) # Ensure LoRA layer bias are on the same device
-#            # replace the module in the named_modules
-#            parent_name = name.rpartition('.')[0]
-#            if parent_name:
-#                parent_module = model.get_submodule(parent_name)
-#            else:
-#                parent_module = model
-#            setattr(parent_module, name.rpartition('.')[2], replace_linear_layer)
+#TODO: ensure we didnt already load the adapter and that we are saving the adapter each time.
 lora_config =  LoraConfig(
         r=8,
         target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-#        target_modules=[  "in_proj", "out_proj"],
         task_type="CAUSAL_LM",
         bias="none"
 )
 model = get_peft_model(model, lora_config)
-#lora_named_params = [
-#    (name, param) for name, param in model.named_parameters()
-#    if "lora_" in name and param.requires_grad
-#]
 lora_params = (
     param for name, param in model.named_parameters()
     if "lora_" in name and param.requires_grad
