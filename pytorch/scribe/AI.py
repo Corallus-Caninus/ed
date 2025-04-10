@@ -83,8 +83,10 @@ if use_lora:
             replace_linear_layer = lora.Linear(module.in_features, module.out_features, r=lora_rank)
             # Copy existing weights if possible
             replace_linear_layer.weight = module.weight
+            replace_linear_layer.weight.data = replace_linear_layer.weight.data.to(module.weight.device) # Ensure LoRA layer weights are on the same device
             if module.bias is not None:
                 replace_linear_layer.bias = module.bias
+                replace_linear_layer.bias.data = replace_linear_layer.bias.data.to(module.bias.device) # Ensure LoRA layer bias are on the same device
             # replace the module in the named_modules
             parent_name = name.rpartition('.')[0]
             if parent_name:
@@ -159,6 +161,8 @@ def closure(): # Define closure here, outside the if block
     if chunk_size > 0:
       for i in range(0, num_tokens - grad_vector_size, chunk_size):
         end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
+        cur_input_ids = cur_input_ids.to("cuda") # Ensure input_ids are on CUDA
+        cur_attention_mask = cur_attention_mask.to("cuda") # Ensure attention_mask are on CUDA
         cur_input_ids = input_ids[:, i:end_idx]
         cur_attention_mask = attention_mask[:, i:end_idx]
   
