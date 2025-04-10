@@ -87,6 +87,7 @@ lora_config =  LoraConfig(
 )
 model = get_peft_model(model, lora_config)
 lora_params = (
+    param for name, param in model.named_parameters()
     if "lora_" in name and param.requires_grad
 )
 
