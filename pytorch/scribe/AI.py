@@ -80,7 +80,7 @@ if use_lora:
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear):
             print(f"Replacing linear layer in module: {name}")
-            replace_linear_layer = lora.Linear(module.in_features, module.out_features, r=lora_rank).to(module.weight.device)
+            replace_linear_layer = lora.Linear(module.in_features, module.out_features, r=lora_rank, dtype=module.weight.dtype).to(module.weight.device)
             # Copy existing weights if possible
             replace_linear_layer.weight = module.weight
             replace_linear_layer.weight.data = replace_linear_layer.weight.data.to(module.weight.device) # Ensure LoRA layer weights are on the same device
