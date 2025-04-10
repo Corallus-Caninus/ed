@@ -10,6 +10,9 @@ import torch.distributed as dist
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
+#TODO: ensure we are memory efficient. Gather Grads should replace the grads with the view. Im not sure about the implementation but at least we wont allocate a lot of indices for the views? this should not take as much memory as CUDA is saying it does so theres a lot of stuff that can be GC optimized
+#TODO: distribution: need to also distributed the norm. Write our own l1 and turn norm hyperparam into a scalar coefficient to ensure the l1 is stable for networks with high parameter count and low type precision.
+#TODO: implement SparseFlatTensor addition correctly via AI rendering
 #TODO: extract this to a module and begin FBFGS project structuring
 #TODO: implement sparse operations where we currently perform dense ops
 @torch.jit.script
@@ -824,6 +827,7 @@ class FBFGS(Optimizer):
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
         d = d.div_(total_norm)
+
 #TODO: we can clop here if we can get sparse flat tensors supporting all the ops
 #        mask = torch.logical_and(direction > -clop, direction < clop) #TODO: extract to sub_variance hyperparameter
 #        direction[mask] = 0
@@ -1011,7 +1015,7 @@ class FBFGS(Optimizer):
 #TODO: if we do this we should norm inf for Rollover stability
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               d = d/total_norm
-#              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
               H_diag = 1
               t = 1
