@@ -1,6 +1,7 @@
 import os
 import sys
 
+import loralib as lora
 import torch
 
 
@@ -71,6 +72,27 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 
+use_lora = True # Flag to enable LoRA
+lora_rank = 8 # Define LoRA rank
+
+if use_lora:
+    print(f"Applying LoRA with rank {lora_rank}")
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.Linear):
+            print(f"Replacing linear layer in module: {name}")
+            replace_linear_layer = lora.Linear(module.in_features, module.out_features, r=lora_rank)
+            # Copy existing weights if possible
+            replace_linear_layer.weight = module.weight
+            if module.bias is not None:
+                replace_linear_layer.bias = module.bias
+            # replace the module in the named_modules
+            parent_name = name.rpartition('.')[0]
+            if parent_name:
+                parent_module = model.get_submodule(parent_name)
+            else:
+                parent_module = model
+            setattr(parent_module, name.rpartition('.')[2], replace_linear_layer)
+
 batch_size = 1 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
@@ -82,6 +104,9 @@ optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
+
+if use_lora:
+    lora.mark_only_lora_as_trainable(model) # Mark only LoRA params as trainable
 
 datalist = []
 if os.path.exists(dataset_filename):
@@ -247,7 +272,10 @@ while True:
       checkpoint = {
           'model_state_dict': unwrapped_model.state_dict(),
       }
-      torch.save(checkpoint, filename)
+      if use_lora:
+          torch.save(lora.lora_state_dict(unwrapped_model), filename) # Save only LoRA state_dict
+      else:
+          torch.save(checkpoint, filename) # Save full state_dict
       torch.save(dataset_indices, indices_filename)
       optimizer.save_history(history_filename)
       print(f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
@@ -262,4 +290,7 @@ while True:
       print(f"Model response: {generated_text}")
   
     unwrapped_model = accelerator.unwrap_model(model)
-    accelerator.save(unwrapped_model.state_dict(), filename)
+    if use_lora:
+        accelerator.save(lora.lora_state_dict(unwrapped_model), filename) # Save LoRA state_dict
+    else:
+        accelerator.save(unwrapped_model.state_dict(), filename) # Save full state_dict
