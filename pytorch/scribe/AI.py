@@ -138,11 +138,13 @@ def closure(): # Define closure here, outside the if block
         cur_attention_mask = attention_mask[:, i:end_idx]
   
         if cache is not None:
-          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=torch.tensor(i))
+          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=torch.tensor(i))
     #      outputs.loss.backward()
 #          if i == 0:
 #            cache.reset()
-          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=i)
+          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=i)
 #            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
         else:
     #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
