@@ -48,13 +48,13 @@ if os.path.exists(filename): # Load model weights and optimizer history
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
-    lora_config =  LoraConfig(
-            r=8,
-            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-            task_type="CAUSAL_LM",
-            bias="none"
-    )
-    model = get_peft_model(model, lora_config)
+#    lora_config =  LoraConfig(
+#            r=8,
+#            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+#            task_type="CAUSAL_LM",
+#            bias="none"
+#    )
+#    model = get_peft_model(model, lora_config)
     model = PeftModel.from_pretrained(model, filename) # Load Lora weights
     dataset_indices = {}
     if os.path.exists(indices_filename):
@@ -101,7 +101,7 @@ print("num parameters: " + str(pytorch_total_params))
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=0.75, clop=5e-11, c1=3e-4, c2=0.9,direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
 #NOTE: mathematically optimized wolfe condition for exponential decay
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=5e-9, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -254,7 +254,7 @@ while True:
         tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
-        if input_ids.size(1) < 500:
+        if input_ids.size(1) < 1000:
             print("Skipping datapoint with less than 500 tokens.")
             continue # Skip to the next iteration to find a valid datapoint
         batch_input_ids_list.append(input_ids)
@@ -267,7 +267,7 @@ while True:
     torch.cuda.empty_cache()
   
     step_count += 1
-    if step_count % 3 == 0:
+    if step_count % 1 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
       dataset_indices[current_dataset_filename] = seen_indices
@@ -287,4 +287,4 @@ while True:
   
 
     #unwrapped_model = accelerator.unwrap_model(model) # No longer needed
-    model.save_pretrained(filename) # Only save Peft adapter
+#    model.save_pretrained(filename) # Only save Peft adapter
