@@ -20,6 +20,8 @@ from datasets import Dataset
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
 #from mamba_ssm import Mamba2
+from peft import LoraConfig, get_peft_model
+torch.backends.cudnn.enabled = False
 
 
 accelerator = Accelerator()
@@ -72,29 +74,47 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 
-use_lora = True # Flag to enable LoRA
-lora_rank = 8 # Define LoRA rank
+#use_lora = True # Flag to enable LoRA
+#lora_rank = 1 # Define LoRA rank
+#
+#if use_lora:
+#    print(f"Applying LoRA with rank {lora_rank}")
+#    for name, module in model.named_modules():
+#        if isinstance(module, torch.nn.Linear):
+#            print(f"Replacing linear layer in module: {name}")
+#            replace_linear_layer = lora.Linear(module.in_features, module.out_features, r=lora_rank, dtype=module.weight.dtype).to(module.weight.device)
+#            # Copy existing weights if possible
+#            replace_linear_layer.weight = module.weight
+#            replace_linear_layer.weight.data = replace_linear_layer.weight.data.to(module.weight.device) # Ensure LoRA layer weights are on the same device
+#            if module.bias is not None:
+#                replace_linear_layer.bias = module.bias
+#                replace_linear_layer.bias.data = replace_linear_layer.bias.data.to(module.bias.device) # Ensure LoRA layer bias are on the same device
+#            # replace the module in the named_modules
+#            parent_name = name.rpartition('.')[0]
+#            if parent_name:
+#                parent_module = model.get_submodule(parent_name)
+#            else:
+#                parent_module = model
+#            setattr(parent_module, name.rpartition('.')[2], replace_linear_layer)
+lora_config =  LoraConfig(
+        r=8,
+        target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+#        target_modules=[  "in_proj", "out_proj"],
+        task_type="CAUSAL_LM",
+        bias="none"
+)
+model = get_peft_model(model, lora_config)
+#lora_named_params = [
+#    (name, param) for name, param in model.named_parameters()
+#    if "lora_" in name and param.requires_grad
+#]
+lora_params = (
+    param for name, param in model.named_parameters()
+    if "lora_" in name and param.requires_grad
+)
 
-if use_lora:
-    print(f"Applying LoRA with rank {lora_rank}")
-    for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Linear):
-            print(f"Replacing linear layer in module: {name}")
-            replace_linear_layer = lora.Linear(module.in_features, module.out_features, r=lora_rank, dtype=module.weight.dtype).to(module.weight.device)
-            # Copy existing weights if possible
-            replace_linear_layer.weight = module.weight
-            replace_linear_layer.weight.data = replace_linear_layer.weight.data.to(module.weight.device) # Ensure LoRA layer weights are on the same device
-            if module.bias is not None:
-                replace_linear_layer.bias = module.bias
-                replace_linear_layer.bias.data = replace_linear_layer.bias.data.to(module.bias.device) # Ensure LoRA layer bias are on the same device
-            # replace the module in the named_modules
-            parent_name = name.rpartition('.')[0]
-            if parent_name:
-                parent_module = model.get_submodule(parent_name)
-            else:
-                parent_module = model
-            setattr(parent_module, name.rpartition('.')[2], replace_linear_layer)
 
+ 
 batch_size = 1 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
@@ -102,13 +122,12 @@ print("num parameters: " + str(pytorch_total_params))
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=0.75, clop=5e-11, c1=3e-4, c2=0.9,direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
 #NOTE: mathematically optimized wolfe condition for exponential decay
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+#optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
 
-if use_lora:
-    lora.mark_only_lora_as_trainable(model) # Mark only LoRA params as trainable
 
 datalist = []
 if os.path.exists(dataset_filename):
@@ -152,7 +171,7 @@ def closure(): # Define closure here, outside the if block
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
     chunk_size=100 #1000
-    grad_vector_size = 1 #5
+    grad_vector_size = 10 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
@@ -277,10 +296,7 @@ while True:
       checkpoint = {
           'model_state_dict': unwrapped_model.state_dict(),
       }
-      if use_lora:
-          torch.save(lora.lora_state_dict(unwrapped_model), filename) # Save only LoRA state_dict
-      else:
-          torch.save(checkpoint, filename) # Save full state_dict
+      torch.save(checkpoint, filename) # Save full state_dict
       torch.save(dataset_indices, indices_filename)
       optimizer.save_history(history_filename)
       print(f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
@@ -295,7 +311,4 @@ while True:
       print(f"Model response: {generated_text}")
   
     unwrapped_model = accelerator.unwrap_model(model)
-    if use_lora:
-        accelerator.save(lora.lora_state_dict(unwrapped_model), filename) # Save LoRA state_dict
-    else:
-        accelerator.save(unwrapped_model.state_dict(), filename) # Save full state_dict
+    accelerator.save(unwrapped_model.state_dict(), filename) # Save full state_dict
