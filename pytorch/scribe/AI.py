@@ -161,10 +161,11 @@ def closure(): # Define closure here, outside the if block
     if chunk_size > 0:
       for i in range(0, num_tokens - grad_vector_size, chunk_size):
         end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
-        cur_input_ids = cur_input_ids.to("cuda") # Ensure input_ids are on CUDA
-        cur_attention_mask = cur_attention_mask.to("cuda") # Ensure attention_mask are on CUDA
         cur_input_ids = input_ids[:, i:end_idx]
         cur_attention_mask = attention_mask[:, i:end_idx]
+        cur_input_ids = cur_input_ids.to("cuda") # Ensure input_ids are on CUDA
+        cur_attention_mask = cur_attention_mask.to("cuda") # Ensure attention_mask are on CUDA
+
   
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
