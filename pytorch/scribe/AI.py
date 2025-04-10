@@ -139,7 +139,7 @@ def closure(): # Define closure here, outside the if block
   
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=torch.tensor(i))
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=torch.tensor(i), use_cache=True)
 #            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
         else:
     #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
@@ -151,7 +151,7 @@ def closure(): # Define closure here, outside the if block
         current_loss = outputs.loss
         avg_loss += current_loss # Accumulate loss values
   
-      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:])
+      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor(i))
 #      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor(i))
   #    last_chunk_loss = outputs.loss
   #    avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
