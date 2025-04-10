@@ -31,6 +31,7 @@ filename = "AI_Checkpoint.ai"
 import time
 #model_id = "state-spaces/mamba2-130m"
 model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
+model_id = "tiiuae/falcon-mamba-7b"
 dataset_filename = "haskell_code_dataset.ds"
 #model_id = "hanzla/Falcon3-Mamba-R1-v0"
 history_filename = "fbfgs_history.pth"
@@ -42,7 +43,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading model from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced') # Load initial weights using config, ignoring size mismatches
+    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
     checkpoint = torch.load(filename)
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -64,7 +65,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 else:
     print(f"Checkpoint file '{filename}' not found. Loading initial model weights from '{model_id}'...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced')
+    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16)
     dataset_indices = {}
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
@@ -96,7 +97,6 @@ model.train()
 
 batch_train = None
 
-num_iters = 1000
 step_count = 0
 #dataset_size = len(dataset) # Get dataset size outside the loop
 import random
@@ -113,7 +113,8 @@ batch_attention_mask_list = [] # Initialize batch_attention_mask_list as a globa
 def closure(): # Define closure here, outside the if block
   global batch_input_ids_list # Declare batch_input_ids_list as global
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
-  global cache
+#  global cache
+  cache=None
   total_loss= 0
   start_time = time.time()
   loss = 0
@@ -123,8 +124,8 @@ def closure(): # Define closure here, outside the if block
 #TODO iterate the minibatch with a for loop here
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
-    chunk_size=1300 #1000
-    grad_vector_size = 100 #5
+    chunk_size=10 #1000
+    grad_vector_size = 1 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
@@ -137,12 +138,13 @@ def closure(): # Define closure here, outside the if block
         cur_attention_mask = attention_mask[:, i:end_idx]
   
         if cache is not None:
-    #      outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=[i])
+          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,   cache_position=torch.tensor(i))
     #      outputs.loss.backward()
-          if i == 0:
-            cache.reset()
+#          if i == 0:
+#            cache.reset()
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=[i])
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache, use_cache=True,  cache_position=torch.tensor(i))
+#            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
         else:
     #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
@@ -153,7 +155,8 @@ def closure(): # Define closure here, outside the if block
         current_loss = outputs.loss
         avg_loss += current_loss # Accumulate loss values
   
-      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
+      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:])
+#      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor(i))
   #    last_chunk_loss = outputs.loss
   #    avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
       # If num_steps is 0, avg_loss remains 0, or you can handle it differently if needed.
@@ -240,7 +243,7 @@ while True:
     torch.cuda.empty_cache()
   
     step_count += 1
-    if step_count % 1 == 0:
+    if step_count % 3 == 0:
       unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
       dataset_indices[current_dataset_filename] = seen_indices # Update seen_indices list
@@ -254,7 +257,7 @@ while True:
 
   
     torch.cuda.empty_cache()
-    prompt = "--A Haskell file that opens a file and prints it to stdout:"
+    prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
     with torch.no_grad():
       generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
