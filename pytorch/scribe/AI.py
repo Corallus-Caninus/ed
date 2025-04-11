@@ -172,7 +172,8 @@ def closure(): # Define closure here, outside the if block
   
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True, cache_position=torch.tensor([i]))
+            cache_position = torch.full((1, 8192, 1), i, dtype=torch.long, device=input_ids.device)
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True, cache_position=cache_position)
       #            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
         else:
     #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
