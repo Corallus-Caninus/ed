@@ -20,7 +20,7 @@ from datasets import Dataset
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
 #from mamba_ssm import Mamba2
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, BoneConfig
 from peft import PeftModel
 torch.backends.cudnn.enabled = False
 
@@ -48,13 +48,6 @@ if os.path.exists(filename): # Load model weights and optimizer history
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
-#    lora_config =  LoraConfig(
-#            r=8,
-#            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-#            task_type="CAUSAL_LM",
-#            bias="none"
-#    )
-#    model = get_peft_model(model, lora_config)
     model = PeftModel.from_pretrained(model, filename) # Load Lora weights
     dataset_indices = {}
     if os.path.exists(indices_filename):
@@ -78,18 +71,23 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
-#TODO: ensure we didnt already load the adapter and that we are initializing the adapter each time.
-lora_config =  LoraConfig(
-        r=8,
-        target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-        task_type="CAUSAL_LM",
-        bias="none"
-)
-model = get_peft_model(model, lora_config)
-lora_params = (
-    param for name, param in model.named_parameters()
-    if "lora_" in name and param.requires_grad
-)
+    lora_config =  LoraConfig(
+            r=32,
+#            target_modules=["x_proj",  "in_proj", "out_proj"],
+            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+            task_type="CAUSAL_LM",
+#            init_weights = "bat",
+#            torch_dtype=torch.float16 ,
+            bias="lora_only",
+            use_rslora=True,
+    )
+    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
+    model = model.to(dtype=torch.float16)
+    lora_params = (
+#        param for name, param in model.named_parameters()
+        param for name, param in model.named_parameters()
+        if "lora_" in name and param.requires_grad
+    )
 
 
  
@@ -97,8 +95,6 @@ batch_size = 1 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
-#optimizer = FBFGS(model.parameters(), lr=1., history_size=4.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe",gradient_clop=5e-7, direction_clop=1e-5, c1=1e-4, c2=0.9)
-#optimizer = FBFGS(model.parameters(), lr=1., history_size=9.5, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=0.75, clop=5e-11, c1=3e-4, c2=0.9,direction_device="cuda:1", bracket_shift = 1/3, bracket_shove = 1/3)
 #NOTE: mathematically optimized wolfe condition for exponential decay
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=5e-9, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
@@ -148,7 +144,9 @@ def closure(): # Define closure here, outside the if block
 #TODO iterate the minibatch with a for loop here
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
-    chunk_size=100 #1000
+#TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
+    chunk_size=2000 #1000
+#NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
     grad_vector_size = 50 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
@@ -180,15 +178,6 @@ def closure(): # Define closure here, outside the if block
   
       torch.cuda.empty_cache()
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
-#      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor(i))
-  #    last_chunk_loss = outputs.loss
-  #    avg_loss += last_chunk_loss # Accumulate loss from the last chunk as well
-      # If num_steps is 0, avg_loss remains 0, or you can handle it differently if needed.
-      # For now, we assume that if no chunks were processed, the loss is just the last chunk loss (or the full loss if no chunking at all).
-  
-  #  input_ids_grad = input_ids[:, -grad_vector_size:].to("cuda")
-  #  attention_mask_grad = attention_mask[:, -grad_vector_size:].to("cuda")
-  #  outputs = model(input_ids_grad, attention_mask=attention_mask_grad, labels=input_ids_grad, cache_params = cache, cache_position=[i]) # Use cache for grad section
     print(str(outputs.loss.item()))
     print(str(avg_loss))
   #  if num_steps > 0:
