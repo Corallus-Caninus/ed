@@ -172,8 +172,8 @@ def closure(): # Define closure here, outside the if block
   
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-            print("cache_position.shape:", torch.tensor([i]).shape) # Debug print
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True, cache_position=torch.tensor([i]))
+            print("cache_position.shape:", i) # Debug print
 #            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
         else:
     #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
@@ -187,8 +187,8 @@ def closure(): # Define closure here, outside the if block
   
       gc.collect()
       torch.cuda.empty_cache()
-      print("cache_position.shape:", torch.tensor([i]).shape) # Debug print
       outputs = model(input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], attention_mask=attention_mask[:, -grad_vector_size:1+ (-grad_vector_size//2) ],labels = input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], use_cache=True, cache_params=cache, cache_position=torch.tensor([i]))
+      print("cache_position.shape:", i) # Debug print
       loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
       loss.backward()
       cache = outputs.cache_params # redundant assignment
