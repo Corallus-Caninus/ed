@@ -8,7 +8,7 @@ import torch
 print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
 
 import gc
-from transformers import MambaConfig, MambaForCausalLM, AutoTokenizer,  AutoModelForCausalLM, AutoConfig
+from transformers import MambaConfig, Mamba2ForCausalLM, AutoTokenizer,  AutoModelForCausalLM, AutoConfig, Mamba2Config
 
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Dataset, DataLoader
@@ -23,6 +23,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDic
 from peft import LoraConfig, get_peft_model, BoneConfig, BoneModel
 from peft import PeftModel
 torch.backends.cudnn.enabled = False
+from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
 
 
 accelerator = Accelerator()
@@ -34,20 +35,28 @@ filename = "AI_Checkpoint.ai"
 
 import time
 #model_id = "state-spaces/mamba2-130m"
-model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
-model_id = "tiiuae/falcon-mamba-7b"
+model_id = "mistralai/Mamba-Codestral-7B-v0.1"
+#model_id = "tiiuae/falcon-mamba-7b"
 dataset_filename = "haskell_code_dataset.ds"
-#model_id = "hanzla/Falcon3-Mamba-R1-v0"
+model_id = "hanzla/Falcon3-Mamba-R1-v0"
+model_id = "state-spaces/mamba-2.8b"
+model_id = "state-spaces/mamba2-370m"
+model_id = "AntonV/mamba2-1.3b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
+#model_id = "state-spaces/mamba-1.4b-hf"
 history_filename = "fbfgs_history.pth"
 indices_filename = "dataset_indices.pth"
 #tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
-tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+#tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+#tokenizer = AutoTokenizer.from_pretrained(model_id, from_slow=True, legacy=False)
+#tokenizer = AutoTokenizer.from_pretrained(model_id,  legacy=False)
+tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
+#    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
+    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
     model = PeftModel.from_pretrained(model, filename) # Load Lora weights
     dataset_indices = {}
     if os.path.exists(indices_filename):
@@ -64,8 +73,12 @@ if os.path.exists(filename): # Load model weights and optimizer history
 
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
-    config = MambaConfig.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16)
+    config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
+#    config = AutoConfig.from_pretrained(model_id)
+#    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16)
+    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
+#    model = Mamba2ForCausalLM.from_pretrained(config, device_map="auto")
+#    model = MambaLMHeadModel.from_pretrained("state-spaces/mamba-130m")
     dataset_indices = {}
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
@@ -82,7 +95,7 @@ else:
 #            use_rslora=True,
     )
 #    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
-#    model = model.to(dtype=torch.float16)
+    model = model.to(dtype=torch.float16)
 #    lora_params = (
 ##        param for name, param in model.named_parameters()
 #        param for name, param in model.named_parameters()
@@ -93,8 +106,8 @@ else:
     lora_params = (
 #        param for name, param in model.named_parameters()
         param for name, param in model.named_parameters()
-        if  param.requires_grad
-#        if "bone_" in name and param.requires_grad
+#        if  param.requires_grad
+        if "bone_" in name and param.requires_grad
     )
 
  
@@ -152,13 +165,14 @@ def closure(): # Define closure here, outside the if block
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
-    chunk_size=2000 #1000
+    chunk_size=250 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
     grad_vector_size = 100 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
+    cache_position = torch.arange(input_ids.shape[0], dtype=torch.int64)
     if num_tokens == chunk_size+1:
       chunk_size += 1
     if chunk_size > 0:
@@ -168,12 +182,11 @@ def closure(): # Define closure here, outside the if block
         cur_attention_mask = attention_mask[:, i:end_idx]
         cur_input_ids = cur_input_ids.to("cuda") # Ensure input_ids are on CUDA
         cur_attention_mask = cur_attention_mask.to("cuda") # Ensure attention_mask are on CUDA
-
   
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-            cache_position = torch.full((1, 8192, 1), i, dtype=torch.long, device=input_ids.device)
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True, cache_position=cache_position)
+#            cache_position =  torch.tensor(i, dtype=torch.long)
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True,cache_position=cache_position)
       #            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
         else:
     #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
@@ -184,15 +197,16 @@ def closure(): # Define closure here, outside the if block
         num_steps += 1
         current_loss = outputs.loss
         avg_loss += current_loss # Accumulate loss values
+        cache_position = cache_position[-1:] + 1 # add one more position for the next token
   
       gc.collect()
       torch.cuda.empty_cache()
-      outputs = model(input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], attention_mask=attention_mask[:, -grad_vector_size:1+ (-grad_vector_size//2) ],labels = input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], use_cache=True, cache_params=cache, cache_position=torch.tensor([i]))
-      print("cache_position.shape:", torch.tensor([i]).view(1, 1, 1, 1).shape) # Debug print
-      loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
-      loss.backward()
-      cache = outputs.cache_params # redundant assignment
-      outputs = model(input_ids[:, -grad_vector_size//2:], attention_mask=attention_mask[:, -grad_vector_size//2:],labels = input_ids[:, -grad_vector_size//2:], cache_params = cache)
+
+#      outputs = model(input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], attention_mask=attention_mask[:, -grad_vector_size:1+ (-grad_vector_size//2) ],labels = input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], use_cache=True, cache_params=cache, cache_position=cache_position)
+#      loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+#      loss.backward()
+#      cache = outputs.cache_params # redundant assignment
+      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
       loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
       loss.backward()
 
@@ -262,7 +276,7 @@ while True:
         tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
-        if input_ids.size(1) > 2000 or input_ids.size(1) < 1000:
+        if input_ids.size(1) < 1000 :
             print("Skipping datapoint with less than 500 tokens.")
             continue # Skip to the next iteration to find a valid datapoint
         batch_input_ids_list.append(input_ids)
