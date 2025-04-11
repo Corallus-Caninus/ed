@@ -71,22 +71,22 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
-    lora_config =  LoraConfig(
-            r=32,
-#            target_modules=["x_proj",  "in_proj", "out_proj"],
-            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+    lora_config =  BoneConfig(
+            r=16,
+            target_modules=["x_proj",  "in_proj", "out_proj"],
+#            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
 #            init_weights = "bat",
 #            torch_dtype=torch.float16 ,
-            bias="lora_only",
-            use_rslora=True,
+#            bias="none",
+#            use_rslora=True,
     )
     model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
     model = model.to(dtype=torch.float16)
     lora_params = (
 #        param for name, param in model.named_parameters()
         param for name, param in model.named_parameters()
-        if "lora_" in name and param.requires_grad
+        if "bone_" in name and param.requires_grad
     )
 
 
@@ -97,7 +97,7 @@ print("num parameters: " + str(pytorch_total_params))
 
 #NOTE: mathematically optimized wolfe condition for exponential decay
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=5e-9, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-10, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -147,7 +147,7 @@ def closure(): # Define closure here, outside the if block
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
     chunk_size=2000 #1000
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 50 #5
+    grad_vector_size = 100 #5
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
@@ -184,6 +184,7 @@ def closure(): # Define closure here, outside the if block
   #    avg_loss = avg_loss / num_steps 
   #    outputs.loss = avg_loss/(0.1*num_tokens) + outputs.loss
     print(str(outputs.loss))
+    gc.collect()
     torch.cuda.empty_cache()
     loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
     loss.backward()
