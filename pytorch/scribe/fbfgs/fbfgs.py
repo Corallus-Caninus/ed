@@ -1017,7 +1017,7 @@ class FBFGS(Optimizer):
 #TODO: if we do this we should norm inf for Rollover stability
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               d = d/total_norm
-              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+#              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
               H_diag = 1
               t = 1
