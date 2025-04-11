@@ -20,7 +20,7 @@ from datasets import Dataset
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
 #from mamba_ssm import Mamba2
-from peft import LoraConfig, get_peft_model, BoneConfig
+from peft import LoraConfig, get_peft_model, BoneConfig, BoneModel
 from peft import PeftModel
 torch.backends.cudnn.enabled = False
 
@@ -72,7 +72,7 @@ else:
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
     lora_config =  BoneConfig(
-            r=16,
+            r=8,
             target_modules=["x_proj",  "in_proj", "out_proj"],
 #            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
@@ -81,14 +81,21 @@ else:
 #            bias="none",
 #            use_rslora=True,
     )
-    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
-    model = model.to(dtype=torch.float16)
+#    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
+#    model = model.to(dtype=torch.float16)
+#    lora_params = (
+##        param for name, param in model.named_parameters()
+#        param for name, param in model.named_parameters()
+#        if  param.requires_grad
+##        if "bone_" in name and param.requires_grad
+#    )
+    model = BoneModel(model, lora_config, "default")
     lora_params = (
 #        param for name, param in model.named_parameters()
         param for name, param in model.named_parameters()
-        if "bone_" in name and param.requires_grad
+        if  param.requires_grad
+#        if "bone_" in name and param.requires_grad
     )
-
 
  
 batch_size = 1 # Define batch size here
@@ -97,7 +104,8 @@ print("num parameters: " + str(pytorch_total_params))
 
 #NOTE: mathematically optimized wolfe condition for exponential decay
 #optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=3e-8, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-10, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-12, c1=3e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-11, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -134,7 +142,6 @@ def closure(): # Define closure here, outside the if block
   global batch_input_ids_list # Declare batch_input_ids_list as global
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
 #  global cache
-  cache=None
   total_loss= 0
   start_time = time.time()
   loss = 0
@@ -146,6 +153,7 @@ def closure(): # Define closure here, outside the if block
     torch.cuda.empty_cache()
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
     chunk_size=2000 #1000
+    cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
     grad_vector_size = 100 #5
     num_tokens = input_ids.size(1)
@@ -164,7 +172,7 @@ def closure(): # Define closure here, outside the if block
   
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache)
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True, cache_position=torch.tensor([i]))
 #            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
         else:
     #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
@@ -176,18 +184,26 @@ def closure(): # Define closure here, outside the if block
         current_loss = outputs.loss
         avg_loss += current_loss # Accumulate loss values
   
+      gc.collect()
       torch.cuda.empty_cache()
-      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
+      outputs = model(input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], attention_mask=attention_mask[:, -grad_vector_size:1+ (-grad_vector_size//2) ],labels = input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], use_cache=True, cache_params=cache, cache_position=torch.tensor([i]))
+      loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+      loss.backward()
+      cache = outputs.cache_params
+      outputs = model(input_ids[:, -grad_vector_size//2:], attention_mask=attention_mask[:, -grad_vector_size//2:],labels = input_ids[:, -grad_vector_size//2:], cache_params = cache)
+      loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+      loss.backward()
+
     print(str(outputs.loss.item()))
     print(str(avg_loss))
   #  if num_steps > 0:
   #    avg_loss = avg_loss / num_steps 
   #    outputs.loss = avg_loss/(0.1*num_tokens) + outputs.loss
     print(str(outputs.loss))
-    gc.collect()
-    torch.cuda.empty_cache()
-    loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
-    loss.backward()
+#    gc.collect()
+#    torch.cuda.empty_cache()
+#    loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+#    loss.backward()
 
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
@@ -244,7 +260,7 @@ while True:
         tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
-        if input_ids.size(1) < 1000:
+        if input_ids.size(1) > 2000 or input_ids.size(1) < 1000:
             print("Skipping datapoint with less than 500 tokens.")
             continue # Skip to the next iteration to find a valid datapoint
         batch_input_ids_list.append(input_ids)
