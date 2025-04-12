@@ -161,7 +161,6 @@ def closure(): # Define closure here, outside the if block
   i = 0
   torch.cuda.empty_cache()
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
-#TODO iterate the minibatch with a for loop here
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
@@ -169,6 +168,7 @@ def closure(): # Define closure here, outside the if block
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
     grad_vector_size = 150 #5
+    grad_chunk_size = 50
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
@@ -213,6 +213,21 @@ def closure(): # Define closure here, outside the if block
       loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
       total_loss += loss
       loss.backward()
+      cache = outputs.cache_params # redundant assignment
+# Process grad_vector_size in chunks of grad_chunk_size
+#      start_grad_idx = num_tokens - grad_vector_size
+#      for i in range(start_grad_idx, num_tokens, grad_chunk_size):
+#          end_grad_idx = min(i + grad_chunk_size, num_tokens)
+#          cur_input_ids = input_ids[:, i:end_grad_idx]
+#          cur_attention_mask = attention_mask[:, i:end_grad_idx]
+#          cur_input_ids = cur_input_ids.to("cuda")
+#          cur_attention_mask = cur_attention_mask.to("cuda")
+#          outputs = model(input_ids=cur_input_ids, attention_mask=cur_attention_mask, labels=cur_input_ids, cache_params=cache, cache_position=[i])
+#          loss = outputs.loss
+#          total_loss += loss
+#          loss.backward() # Backward pass for each chunk
+#          cache = outputs.cache_params # Update cache
+
 
     print(str(outputs.loss.item()))
     print(str(avg_loss))
