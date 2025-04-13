@@ -247,7 +247,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
 #    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, direction_device, x, t, d, f, g_best, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100
+    obj_func, direction_device, x, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100
 ):
 #TODO: this irks the mathematician in me.
     if c2 == 0:
@@ -255,8 +255,11 @@ def _strong_wolfe(
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
 #    g = g.clone(memory_format=torch.contiguous_format)
     # evaluate objective and gradient using initial step
-    g_best = g_best.to(direction_device)
+#    g_best g.to(direction_device)
     f_new, g_new = obj_func(x, t, d)
+#TODO: better solution for initializing to NaN.
+#    if f_new != f_new:
+#      f_new, g_new = obj_func(x, torch.tensor(1), d)
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
     gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
@@ -264,11 +267,10 @@ def _strong_wolfe(
     del gtd_new_sparse_product
 #    g_new = g_new#
 #    gtd_new = gtd_new#
-    t_orig = t
     success = False
 
     # bracket an interval containing a point satisfying the Wolfe criteria
-    t_prev, f_prev, g_prev, gtd_prev = 0, f, g_best, gtd
+    t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
 #    g_prev = g_prev.to(direction_device)
     done = False
     ls_iter = 0
@@ -279,18 +281,18 @@ def _strong_wolfe(
     device = gtd.device
 #TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
     f_best = torch.tensor(f, device=device)
-#    g_best = g
+    g_best = g
 #    g = g.to(direction_device)
     gc.collect()
     ls_iter=0
     stall_wolfe=0
 
+#TODO something is broken in insta wolfe. Check the initialization. The same step size doesnt throw when not insta-wolfing
     while ls_iter < max_ls:
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-
-        if (f_new > (f + c1 * t * gtd)) :  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+        if (f_new > (f + c1 * t * gtd))   and f_new >= f_prev: #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -299,7 +301,7 @@ def _strong_wolfe(
             break
 
 #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if abs(gtd_new) <= -c2 * gtd: # and f_new <= f_best :
+        if abs(gtd_new) <= -c2 * gtd and f_new < f_best:
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -1025,6 +1027,8 @@ class FBFGS(Optimizer):
 #              print("d elements: " + str((d.values() != 0).sum()) )
           else:
               torch.cuda.empty_cache() # Clear cache before direction calculation
+#              if n_iter == 2:
+              t=1
               if prev_flat_grad is not None:
                   prev_flat_grad = prev_flat_grad # Move prev_flat_grad to direction_device
 #TODO: ensure this is on GPU
