@@ -305,7 +305,7 @@ while True:
       unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
       dataset_indices[current_dataset_filename] = seen_indices
-      model.save_pretrained(filename) # Only save Peft adapter
+      model.save_pretrained(filename, safe_serialization=False) # Only save Peft adapter
       torch.save(dataset_indices, indices_filename)
       optimizer.save_history(history_filename)
       print(f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
