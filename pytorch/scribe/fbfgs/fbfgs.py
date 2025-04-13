@@ -100,7 +100,7 @@ class SparseFlatTensor:
         return self.__mul__(scalar)
 
     @staticmethod
-    def add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor: Tensor) -> Tensor:
+    def add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor) -> Tensor:
         """
         Adds a SparseFlatTensor to a dense tensor, including unit indices.
 
@@ -111,7 +111,28 @@ class SparseFlatTensor:
         Returns:
             Tensor: The dense result of the addition.
         """
-        return sparse_tensor.to_dense() + dense_tensor
+        dense_tensor = dense_tensor_arg # Explicitly use dense_tensor_arg
+        assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
+
+        result_dense_tensor = dense_tensor.clone()
+
+        # Process segments
+        if sparse_tensor.starts.numel() > 0:
+            segment_lengths = sparse_tensor.ends - sparse_tensor.starts
+            segment_indices_offsets = torch.repeat_interleave(sparse_tensor.starts, segment_lengths)
+            indices = torch.arange(segment_lengths.sum(), device=sparse_tensor.starts.device)
+            segment_lengths_cumsum = segment_lengths.cumsum(0)
+            start_indices = torch.cat([torch.tensor([0], device=sparse_tensor.starts.device), segment_lengths_cumsum[:-1]])
+            segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
+            segment_internal_indices = indices - start_indices[segment_ids]
+            segment_indices = segment_indices_offsets + segment_internal_indices
+            result_dense_tensor.view(-1)[segment_indices] += sparse_tensor.values
+
+        # Process unit indices
+        if sparse_tensor.unit_indices.numel() > 0:
+            result_dense_tensor.view(-1)[sparse_tensor.unit_indices] += sparse_tensor.unit_values
+
+        return result_dense_tensor
 
     @staticmethod
     def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
