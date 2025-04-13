@@ -10,6 +10,11 @@ stdenv.mkDerivation {
     pkgs.cudaPackages.cudatoolkit_12
   ]; # Add any build inputs if necessary
 
+  shellHook = ''
+    export CUDA_PATH="${pkgs.cudaPackages.cudatoolkit_12}"
+    export LD_LIBRARY_PATH="$CUDA_PATH/lib64:$LD_LIBRARY_PATH"
+  '';
+
   buildPhase = ''
     export CUDA_PATH="${pkgs.cudaPackages.cudatoolkit_12}"
     export LD_LIBRARY_PATH="$CUDA_PATH/lib64:$LD_LIBRARY_PATH"
