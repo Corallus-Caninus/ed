@@ -38,18 +38,19 @@ import time
 model_id = "mistralai/Mamba-Codestral-7B-v0.1"
 dataset_filename = "haskell_code_dataset.ds"
 model_id = "hanzla/Falcon3-Mamba-R1-v0"
-model_id = "state-spaces/mamba-2.8b"
 model_id = "state-spaces/mamba2-370m"
 model_id = "AntonV/mamba2-1.3b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
+model_id = "AntonV/mamba2-2.7b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
+#model_id = "state-spaces/mamba-2.8b"
 #model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 #model_id = "tiiuae/falcon-mamba-7b"
 #model_id = "state-spaces/mamba-1.4b-hf"
 history_filename = "fbfgs_history.pth"
-indices_filename = "dataset_indices.pth"
-#tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
-#tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+#indices_filename = "dataset_indices.pth"
+tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 #tokenizer = AutoTokenizer.from_pretrained(model_id, from_slow=True, legacy=False)
-tokenizer = AutoTokenizer.from_pretrained(model_id,  legacy=False)
+#tokenizer = AutoTokenizer.from_pretrained(model_id,  legacy=False)
 #tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
 
 if os.path.exists(filename): # Load model weights and optimizer history
@@ -90,12 +91,14 @@ else:
 #            target_modules=[  "in_proj", "out_proj"],
             target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
+            lora_alpha=1,
+            bias="lora_only",
 #            init_weights = "bat",
 #            torch_dtype=torch.float16 ,
 #            bias="none",
 #            use_rslora=True,
     )
-#    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
+    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
     model = model.to(dtype=torch.float16)
 #    lora_params = (
 ##        param for name, param in model.named_parameters()
@@ -103,7 +106,8 @@ else:
 #        if  param.requires_grad
 ##        if "bone_" in name and param.requires_grad
 #    )
-    model = LoraModel(model, lora_config, "default")
+#    model = LoraModel(model, lora_config, "default")
+#Get the params ready for passing as flat_grad to fbfgs
     lora_params = (
 #        param for name, param in model.named_parameters()
         param for name, param in model.named_parameters()
@@ -117,8 +121,8 @@ pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
 #NOTE: mathematically optimized wolfe condition for exponential decay
-#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -135,6 +139,7 @@ else:
     dataset.save_to_disk(dataset_filename)
 
 model.train()
+model.gradient_checkpointing_enable()
 
 batch_train = None
 
@@ -167,7 +172,7 @@ def closure(): # Define closure here, outside the if block
     chunk_size=500 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 150 #5
+    grad_vector_size = 50 #5
     grad_chunk_size = 500
     num_tokens = input_ids.size(1)
     num_steps = 0
@@ -187,7 +192,7 @@ def closure(): # Define closure here, outside the if block
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
 #            cache_position =  torch.tensor(i, dtype=torch.long)
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True,cache_position=[i])
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True,cache_position=torch.tensor([i]))
       #            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
         else:
     #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
@@ -209,7 +214,7 @@ def closure(): # Define closure here, outside the if block
 #      cache = outputs.cache_params # redundant assignment
 #      cache_position=torch.tensor([i])
 #      outputs = model(input_ids[:, -grad_vector_size//2:], attention_mask=attention_mask[:, -grad_vector_size//2:],labels = input_ids[:, -grad_vector_size//2:], cache_params = cache)
-      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=[i])
+      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
       loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
       total_loss += loss
       loss.backward()
@@ -305,7 +310,7 @@ while True:
       unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
       dataset_indices[current_dataset_filename] = seen_indices
-      model.save_pretrained(filename, safe_serialization=False) # Only save Peft adapter
+      model.save_pretrained(filename) # Only save Peft adapter
       torch.save(dataset_indices, indices_filename)
       optimizer.save_history(history_filename)
       print(f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
@@ -315,7 +320,7 @@ while True:
     prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
     with torch.no_grad():
-      generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
+      generated_ids = model.generate(input_ids, max_length=None, num_return_sequences=1)
       generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
       print(f"Model response: {generated_text}")
   
