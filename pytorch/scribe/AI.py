@@ -64,16 +64,13 @@ if os.path.exists(filename): # Load model weights and optimizer history
             bias="lora_only",
     )
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
-#    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
+#    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
+    lora_config = LoraConfig.from_pretrained("AI_Checkpoint.ai")
+#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
-    print("--- Model Named Modules (before PEFT load) ---")
-    for name, module in model.named_modules():
-        print(f"Module Name: {name}, Module Type: {type(module)}")
-    print("--- Model Named Parameters (before PEFT load) ---")
-    for name, param in model.named_parameters(): # Non-recursive for brevity initially
-        print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
-    print("--- End Model Inspection (before PEFT load) ---")
-    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
+#    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
+#    model = LoraModel(model, lora_config, "default") # Load Lora weights
+#    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
     dataset_indices = {}
     if os.path.exists(indices_filename):
         dataset_indices = torch.load(indices_filename) # Load dataset_indices, default to empty dict
