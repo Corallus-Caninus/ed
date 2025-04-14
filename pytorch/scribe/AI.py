@@ -66,6 +66,13 @@ if os.path.exists(filename): # Load model weights and optimizer history
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
 #    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
+    print("--- Model Named Modules (before PEFT load) ---")
+    for name, module in model.named_modules():
+        print(f"Module Name: {name}, Module Type: {type(module)}")
+    print("--- Model Named Parameters (before PEFT load, first level) ---")
+    for name, param in model.named_parameters(recursive=False): # Non-recursive for brevity initially
+        print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
+    print("--- End Model Inspection (before PEFT load) ---")
     model = PeftModel.from_pretrained(model, filename) # Load Lora weights
     dataset_indices = {}
     if os.path.exists(indices_filename):
@@ -85,6 +92,13 @@ else:
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
 #    config = AutoConfig.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16)
+    print("--- Model Named Modules (freshly loaded base model) ---")
+    for name, module in model.named_modules():
+        print(f"Module Name: {name}, Module Type: {type(module)}")
+    print("--- Model Named Parameters (freshly loaded base model, first level) ---")
+    for name, param in model.named_parameters(recursive=False): # Non-recursive for brevity initially
+        print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
+    print("--- End Model Inspection (freshly loaded base model) ---")
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
 #    model = Mamba2ForCausalLM.from_pretrained(config, device_map="auto")
 #    model = MambaLMHeadModel.from_pretrained("state-spaces/mamba-130m")
