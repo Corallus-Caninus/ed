@@ -56,6 +56,13 @@ tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
+    lora_config =  LoraConfig(
+            r=8,
+            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+            task_type="CAUSAL_LM",
+            lora_alpha=8,
+            bias="lora_only",
+    )
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
 #    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16) # Load initial weights using config, ignoring size mismatches
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
