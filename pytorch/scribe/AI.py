@@ -46,7 +46,7 @@ model_id = "AntonV/mamba2-2.7b-hf" # No longer needed, using state-spaces/mamba2
 #model_id = "tiiuae/falcon-mamba-7b"
 #model_id = "state-spaces/mamba-1.4b-hf"
 history_filename = "fbfgs_history.pth"
-#indices_filename = "dataset_indices.pth"
+indices_filename = "dataset_indices.pth"
 tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 #tokenizer = AutoTokenizer.from_pretrained(model_id, from_slow=True, legacy=False)
@@ -86,20 +86,18 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
-    lora_config =  LoraConfig(
-            r=16,
+lora_config =  LoraConfig(
+        r=8,
 #            target_modules=[  "in_proj", "out_proj"],
-            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-            task_type="CAUSAL_LM",
-            lora_alpha=1,
-            bias="lora_only",
+        target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+        task_type="CAUSAL_LM",
+        lora_alpha=8,
+        bias="lora_only",
 #            init_weights = "bat",
 #            torch_dtype=torch.float16 ,
 #            bias="none",
 #            use_rslora=True,
-    )
-    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
-    model = model.to(dtype=torch.float16)
+)
 #    lora_params = (
 ##        param for name, param in model.named_parameters()
 #        param for name, param in model.named_parameters()
@@ -107,13 +105,15 @@ else:
 ##        if "bone_" in name and param.requires_grad
 #    )
 #    model = LoraModel(model, lora_config, "default")
+model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
+model = model.to(dtype=torch.float16)
 #Get the params ready for passing as flat_grad to fbfgs
-    lora_params = (
+lora_params = (
 #        param for name, param in model.named_parameters()
-        param for name, param in model.named_parameters()
-        if  param.requires_grad
+    param for name, param in model.named_parameters()
+    if  param.requires_grad
 #        if "lora_" in name and param.requires_grad
-    )
+)
 
  
 batch_size = 1 # Define batch size here
@@ -320,7 +320,7 @@ while True:
     prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
     with torch.no_grad():
-      generated_ids = model.generate(input_ids, max_length=None, num_return_sequences=1)
+      generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
       generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
       print(f"Model response: {generated_text}")
   
