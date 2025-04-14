@@ -69,8 +69,8 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print("--- Model Named Modules (before PEFT load) ---")
     for name, module in model.named_modules():
         print(f"Module Name: {name}, Module Type: {type(module)}")
-    print("--- Model Named Parameters (before PEFT load, first level) ---")
-    for name, param in model.named_parameters(recursive=False): # Non-recursive for brevity initially
+    print("--- Model Named Parameters (before PEFT load) ---")
+    for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
     print("--- End Model Inspection (before PEFT load) ---")
     model = PeftModel.from_pretrained(model, filename) # Load Lora weights
@@ -95,8 +95,8 @@ else:
     print("--- Model Named Modules (freshly loaded base model) ---")
     for name, module in model.named_modules():
         print(f"Module Name: {name}, Module Type: {type(module)}")
-    print("--- Model Named Parameters (freshly loaded base model, first level) ---")
-    for name, param in model.named_parameters(recursive=False): # Non-recursive for brevity initially
+    print("--- Model Named Parameters (freshly loaded base model) ---")
+    for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
     print("--- End Model Inspection (freshly loaded base model) ---")
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
