@@ -10,18 +10,11 @@ filename = "AI_Checkpoint.ai" # Path to your LoRa adapter checkpoint
 
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
-lora_config =  LoraConfig( # Define LoraConfig explicitly to match training
-        r=8,
-        target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-        task_type="CAUSAL_LM",
-        lora_alpha=8,
-        bias="lora_only",
-)
-
 if os.path.exists(filename): # Load model weights and LoRa adapter
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True, vocab_size=50288) # Load base config, force vocab_size to match checkpoint
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto", trust_remote_code=True)
+    lora_config = LoraConfig.from_pretrained(filename) # Load LoRa config from checkpoint
     model = PeftModel.from_pretrained(model, filename) # Load LoRa weights
     print(f"LoRa adapter loaded successfully from '{filename}'.")
 else:
