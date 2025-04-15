@@ -20,7 +20,7 @@ lora_config =  LoraConfig( # Define LoraConfig explicitly to match training
 
 if os.path.exists(filename): # Load model weights and LoRa adapter
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
-    config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load base config
+    config = MambaConfig.from_pretrained(model_id, trust_remote_code=True, vocab_size=50288) # Load base config, force vocab_size to match checkpoint
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto", trust_remote_code=True)
     model = PeftModel.from_pretrained(model, filename) # Load LoRa weights
     print(f"LoRa adapter loaded successfully from '{filename}'.")
