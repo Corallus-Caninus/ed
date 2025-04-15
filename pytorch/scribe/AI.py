@@ -345,7 +345,7 @@ while True:
     prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
     with torch.no_grad():
-      generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
+      generated_ids = model.generate(input_ids, max_length=20, num_return_sequences=1) # Reduced max_length for debugging
       print(tokenizer.decode(generated_ids[0], skip_special_tokens=False))
     print(f"--- After generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
     print(f"--- After generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
