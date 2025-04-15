@@ -263,6 +263,7 @@ def closure(): # Define closure here, outside the if block
 
 
 while True:
+    cache = None  # Reset cache at the start of each iteration
     dataset_shuffled_indices = list(range(dataset_size)) # Reshuffle indices at the start of each epoch
     random.shuffle(dataset_shuffled_indices) # Reshuffle
 
@@ -339,13 +340,18 @@ while True:
 
 #TODO: something broke this, fix it.
   
+    print(f"--- Before generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    print(f"--- Before generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
     prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
     with torch.no_grad():
       generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
       print(tokenizer.decode(generated_ids[0], skip_special_tokens=False))
+    print(f"--- After generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    print(f"--- After generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
 #      generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 #      print(f"Model response: {generated_text}")
+
   
 
     #unwrapped_model = accelerator.unwrap_model(model) # No longer needed
