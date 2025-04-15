@@ -344,7 +344,7 @@ while True:
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
     with torch.no_grad():
       generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
-      print(tokenizer.decode(output_ids[0], skip_special_tokens=True))
+      print(tokenizer.decode(generated_ids[0], skip_special_tokens=True))
 #      generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 #      print(f"Model response: {generated_text}")
   
