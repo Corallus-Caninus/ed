@@ -190,7 +190,7 @@ def closure(): # Define closure here, outside the if block
     chunk_size=500 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 100 #5
+    grad_vector_size = 150 #5
     grad_chunk_size = 500
     num_tokens = input_ids.size(1)
     num_steps = 0
@@ -339,12 +339,11 @@ while True:
 
 #TODO: something broke this, fix it.
   
-    torch.cuda.empty_cache()
     prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
     with torch.no_grad():
       generated_ids = model.generate(input_ids, max_length=200, num_return_sequences=1)
-      print(tokenizer.decode(generated_ids[0], skip_special_tokens=True))
+      print(tokenizer.decode(generated_ids[0], skip_special_tokens=False))
 #      generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 #      print(f"Model response: {generated_text}")
   
