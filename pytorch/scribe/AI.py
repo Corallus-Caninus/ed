@@ -57,11 +57,11 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     lora_config =  LoraConfig(
-            r=32,
+            r=16,
             target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
 #            lora_alpha=8,
-#            use_dora=True,
+            use_dora=True,
             bias="lora_only",
     )
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
@@ -90,9 +90,6 @@ else:
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
 #    config = AutoConfig.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16)
-    print("--- Model Named Modules (freshly loaded base model) ---")
-    for name, module in model.named_modules():
-        print(f"Module Name: {name}, Module Type: {type(module)}")
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
@@ -106,11 +103,10 @@ else:
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
 lora_config =  LoraConfig(
-        r=32,
-#            target_modules=[  "in_proj", "out_proj"],
+        r=16,
         target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
         task_type="CAUSAL_LM",
-#        use_dora=True,
+        use_dora=True,
 #        lora_alpha=8,
         bias="lora_only",
 #            init_weights = "bat",
@@ -192,7 +188,7 @@ def closure(): # Define closure here, outside the if block
     chunk_size=500 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 150 #5
+    grad_vector_size = 100 #5
     grad_chunk_size = 500
     num_tokens = input_ids.size(1)
     num_steps = 0
@@ -321,6 +317,20 @@ while True:
         batch_attention_mask_list.append(attention_mask)
         batch_count += 1 # Increment batch_count only when a valid datapoint is added
 
+    print(f"--- Before generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    print(f"--- Before generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+    prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
+    out = tokenizer(prompt, return_tensors="pt") .to("cuda")
+    with torch.no_grad():
+      print("generating..")
+      model.eval()
+      generated_ids = model.generate(out.input_ids, max_new_tokens=200, attention_mask=out.attention_mask) # Reduced max_length for debugging
+      model.train()
+      print("generation complete:")
+      print(tokenizer.decode(generated_ids[0], skip_special_tokens=False))
+      generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+      print(f"Model response: {generated_text}")
+
     print("-----------------------step---------------------")
     step_count += 1
     optimizer.step(closure)
@@ -340,6 +350,9 @@ while True:
     optimizer.param_groups[0]['params'] = list(lora_params)
     optimizer._params = optimizer.param_groups[0]['params']
 
+    torch.cuda.empty_cache()
+    gc.collect()
+
     if step_count % 1 == 0:
         #      unwrapped_model = accelerator.unwrap_model(model)
         current_dataset_filename = dataset_filename  # Define current dataset filename
@@ -357,17 +370,6 @@ while True:
 
 #TODO: something broke this, fix it.
   
-    print(f"--- Before generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
-    print(f"--- Before generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
-#    prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
-#    input_ids = tokenizer(prompt, return_tensors="pt").input_ids .to("cuda")
-#    with torch.no_grad():
-#      generated_ids = model.generate(input_ids, max_length=20, num_return_sequences=1) # Reduced max_length for debugging
-#      print(tokenizer.decode(generated_ids[0], skip_special_tokens=False))
-#    print(f"--- After generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
-#    print(f"--- After generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
-#      generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-#      print(f"Model response: {generated_text}")
 
   
 
