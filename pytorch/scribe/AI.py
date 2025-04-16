@@ -60,7 +60,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
             r=8,
             target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
-            lora_alpha=8,
+            lora_alpha=32,
             bias="lora_only",
     )
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
@@ -109,7 +109,7 @@ lora_config =  LoraConfig(
 #            target_modules=[  "in_proj", "out_proj"],
         target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
         task_type="CAUSAL_LM",
-        lora_alpha=8,
+        lora_alpha=32,
         bias="lora_only",
 #            init_weights = "bat",
 #            torch_dtype=torch.float16 ,
@@ -331,16 +331,6 @@ while True:
       dataset_indices[current_dataset_filename] = seen_indices
       if accelerator.is_main_process: # Ensure save only on main process
         model.save_pretrained(filename) # Only save Peft adapter
-        model = model.merge_and_unload()
-        lora_config =  LoraConfig( # Create a *new* LoRa config
-                r=8,
-                target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-                task_type="CAUSAL_LM",
-                lora_alpha=8,
-                bias="lora_only",
-        )
-        model = get_peft_model(model, lora_config, autocast_adapter_dtype=True) # Apply *new* LoRa adapter
-        model = model.to(dtype=torch.float16) # To dtype and device
         print("model saved..")
         torch.save(dataset_indices, indices_filename)
         print("indices saved..")
