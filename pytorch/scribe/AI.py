@@ -332,9 +332,6 @@ while True:
       if accelerator.is_main_process: # Ensure save only on main process
         model.save_pretrained(filename) # Only save Peft adapter
         model = model.merge_and_unload()
-        del model # Remove merged model
-        config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True) # Load base config again
-        model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto", trust_remote_code=True) # Load *base* model again
         lora_config =  LoraConfig( # Create a *new* LoRa config
                 r=8,
                 target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
