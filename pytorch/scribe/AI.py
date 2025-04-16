@@ -325,20 +325,33 @@ while True:
     torch.cuda.empty_cache()
   
     step_count += 1
-    model = model.merge_and_unload() # Merge and unload must be called before re-applying lora
-    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True) # Re-apply lora
+    model = model.merge_and_unload()  # Merge and unload must be called before re-applying lora
+    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)  # Re-apply lora
+
+    # Re-extract lora_params for the *new* LoRa adapter
+    lora_params = (
+        param for name, param in model.named_parameters()
+        if param.requires_grad
+    )
+
+    # Update the optimizer's parameter groups with the new lora_params
+    optimizer.param_groups[0]['params'] = list(lora_params)
+    optimizer._params = optimizer.param_groups[0]['params']
+
     if step_count % 1 == 0:
-#      unwrapped_model = accelerator.unwrap_model(model)
-      current_dataset_filename = dataset_filename # Define current dataset filename
-      dataset_indices[current_dataset_filename] = seen_indices
-      if accelerator.is_main_process: # Ensure save only on main process
-        model.save_pretrained(filename) # Only save Peft adapter
-        print("model saved..")
-        torch.save(dataset_indices, indices_filename)
-        print("indices saved..")
-        optimizer.save_history(history_filename)
-        print("optimizer saved..")
-        print(f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}")
+        #      unwrapped_model = accelerator.unwrap_model(model)
+        current_dataset_filename = dataset_filename  # Define current dataset filename
+        dataset_indices[current_dataset_filename] = seen_indices
+        if accelerator.is_main_process:  # Ensure save only on main process
+            model.save_pretrained(filename)  # Only save Peft adapter
+            print("model saved..")
+            torch.save(dataset_indices, indices_filename)
+            print("indices saved..")
+            optimizer.save_history(history_filename)
+            print("optimizer saved..")
+            print(
+                f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}"
+            )
 
 #TODO: something broke this, fix it.
   
