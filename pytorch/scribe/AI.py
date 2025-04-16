@@ -331,6 +331,8 @@ while True:
       dataset_indices[current_dataset_filename] = seen_indices
       if accelerator.is_main_process: # Ensure save only on main process
         model.save_pretrained(filename) # Only save Peft adapter
+        model = model.merge_and_unload()
+        model.save_pretrained(filename)
         print("model saved..")
         torch.save(dataset_indices, indices_filename)
         print("indices saved..")
