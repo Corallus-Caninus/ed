@@ -57,10 +57,11 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     lora_config =  LoraConfig(
-            r=8,
+            r=32,
             target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
-            lora_alpha=32,
+#            lora_alpha=8,
+#            use_dora=True,
             bias="lora_only",
     )
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
@@ -105,11 +106,12 @@ else:
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
 lora_config =  LoraConfig(
-        r=8,
+        r=32,
 #            target_modules=[  "in_proj", "out_proj"],
         target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
         task_type="CAUSAL_LM",
-        lora_alpha=32,
+#        use_dora=True,
+#        lora_alpha=8,
         bias="lora_only",
 #            init_weights = "bat",
 #            torch_dtype=torch.float16 ,
