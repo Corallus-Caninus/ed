@@ -325,7 +325,8 @@ while True:
     torch.cuda.empty_cache()
   
     step_count += 1
-    model = model.merge_and_unload()
+    model = model.merge_and_unload() # Merge and unload must be called before re-applying lora
+    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True) # Re-apply lora
     if step_count % 1 == 0:
 #      unwrapped_model = accelerator.unwrap_model(model)
       current_dataset_filename = dataset_filename # Define current dataset filename
