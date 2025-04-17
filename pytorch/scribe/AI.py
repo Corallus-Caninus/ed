@@ -25,6 +25,11 @@ from peft import PeftModel
 torch.backends.cudnn.enabled = False
 from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
 
+import os
+num_cores = os.cpu_count()
+torch.set_num_threads(num_cores)
+torch.set_num_interop_threads(num_cores)
+
 
 accelerator = Accelerator()
 filename = "AI_Checkpoint.ai"
@@ -103,7 +108,7 @@ else:
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
 lora_config =  LoraConfig(
-        r=16,
+        r=20,
         target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
         task_type="CAUSAL_LM",
         use_dora=True,
@@ -355,26 +360,27 @@ while True:
             print(
                 f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}"
             )
-            model = model.merge_and_unload()  # Merge and unload must be called before re-applying lora
-            model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)  # Re-apply lora
-            model = model.to(dtype=torch.float16)
-        
-
-            # Re-extract lora_params for the *new* LoRa adapter
-            lora_params = (
-                param for name, param in model.named_parameters()
-                if param.requires_grad
-            )
-
-            # Re-initialize optimizer with new LoRa params
-            optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-            optimizer.load_history(history_filename) # Load history into new optimizer
-
-        
-            # Update the optimizer's parameter groups with the new lora_params
-        #    optimizer.param_groups[0]['params'] = list(lora_params)
-        #    optimizer._params = optimizer.param_groups[0]['params']
-            model.gradient_checkpointing_enable()
+#TODO: fix this. we get NaN (the history doesnt align). could be lora params not aligning in flat grad or something else. We need a merge and reset without unload operation.
+#            model = model.merge_and_unload()  # Merge and unload must be called before re-applying lora
+#            model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)  # Re-apply lora
+#            model = model.to(dtype=torch.float16)
+#        
+#
+#            # Re-extract lora_params for the *new* LoRa adapter
+#            lora_params = (
+#                param for name, param in model.named_parameters()
+#                if param.requires_grad
+#            )
+#
+#            # Re-initialize optimizer with new LoRa params
+#            optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+#            optimizer.load_history(history_filename) # Load history into new optimizer
+#
+#        
+#            # Update the optimizer's parameter groups with the new lora_params
+#        #    optimizer.param_groups[0]['params'] = list(lora_params)
+#        #    optimizer._params = optimizer.param_groups[0]['params']
+#            model.gradient_checkpointing_enable()
 
 #TODO: something broke this, fix it.
   
