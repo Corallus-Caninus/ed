@@ -359,11 +359,17 @@ while True:
             model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)  # Re-apply lora
             model = model.to(dtype=torch.float16)
         
+
             # Re-extract lora_params for the *new* LoRa adapter
             lora_params = (
                 param for name, param in model.named_parameters()
                 if param.requires_grad
             )
+
+            # Re-initialize optimizer with new LoRa params
+            optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+            optimizer.load_history(history_filename) # Load history into new optimizer
+
         
             # Update the optimizer's parameter groups with the new lora_params
         #    optimizer.param_groups[0]['params'] = list(lora_params)
