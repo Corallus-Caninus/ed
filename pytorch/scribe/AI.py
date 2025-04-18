@@ -114,6 +114,7 @@ lora_config =  LoraConfig(
 ##        if "bone_" in name and param.requires_grad
 #    )
 #    model = LoraModel(model, lora_config, "default")
+model = torch.jit.trace(model)
 model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
 model = model.to(dtype=torch.float16)
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
