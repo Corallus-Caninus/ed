@@ -114,7 +114,9 @@ lora_config =  LoraConfig(
 ##        if "bone_" in name and param.requires_grad
 #    )
 #    model = LoraModel(model, lora_config, "default")
-model = torch.jit.trace(model)
+dummy_input_ids = torch.randint(0, 1000, (1, 10)).to(torch.long).to("cuda") # Example input_ids
+dummy_attention_mask = torch.randint(0, 2, (1, 10)).to(torch.int).to("cuda") # Example attention_mask
+model = torch.jit.trace(model, example_kwarg_inputs={"input_ids": dummy_input_ids, "attention_mask": dummy_attention_mask})
 model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
 model = model.to(dtype=torch.float16)
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
