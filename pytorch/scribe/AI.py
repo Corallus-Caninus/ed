@@ -203,9 +203,12 @@ def closure(): # Define closure here, outside the if block
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
 #            cache_position =  torch.tensor(i, dtype=torch.long)
+#          cache_position =  torch.tensor(i, dtype=torch.long)
+            jitted_model = torch.jit.script(model)
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
         else:
           with torch.no_grad():
+            jitted_model = torch.jit.script(model)
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
         num_steps += 1
