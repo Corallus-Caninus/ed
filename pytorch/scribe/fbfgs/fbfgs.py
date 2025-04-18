@@ -854,11 +854,11 @@ class FBFGS(Optimizer):
         d = d.div_(total_norm)
 
 #TODO: we can clop here if we can get sparse flat tensors supporting all the ops
-#        mask = torch.logical_and(direction > -clop, direction < clop) #TODO: extract to sub_variance hyperparameter
-#        direction[mask] = 0
+        mask = torch.logical_and(d > -clop, d < clop) #TODO: extract to sub_variance hyperparameter
+        d[mask] = 0
 #        d = direction.to_sparse()
 #        print("direction elements: " + str((direction != 0).sum()) )
-#        del mask # DEL 9: mask is no longer needed
+        del mask # DEL 9: mask is no longer needed
         return d
 
     @torch.jit.script
@@ -1040,7 +1040,7 @@ class FBFGS(Optimizer):
 #TODO: if we do this we should norm inf for Rollover stability
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               d = d/total_norm
-#              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
               H_diag = 1
               t = 1
@@ -1258,6 +1258,7 @@ class FBFGS(Optimizer):
                       del gtd_needle_sparse_product
                       armijo_condition = current_needle_loss <= best_needle_loss + c1 * needle_t * gtd
                       if current_needle_loss <= best_needle_loss and abs(gtd_needle) > -c2 * gtd and armijo_condition: #and abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
+#TODO: on first iteration we arent getting enough reduction so loss looks equivalent and we never linesearch.
                           best_needle_loss = current_needle_loss
                           best_needle_t = needle_t
                           needle_t = needle_t ** 2  # Increase t for next iteration
