@@ -116,7 +116,7 @@ lora_config =  LoraConfig(
 #    model = LoraModel(model, lora_config, "default")
 model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
 model = model.to(dtype=torch.float16)
-model = torch.jit.script(model)
+#model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
 #Get the params ready for passing as flat_grad to fbfgs
 lora_params = (
 #        param for name, param in model.named_parameters()
