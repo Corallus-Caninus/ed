@@ -52,7 +52,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     lora_config =  LoraConfig(
-            r=8,
+            r=16,
             target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
 #            lora_alpha=8,
@@ -61,7 +61,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
 #    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
     lora_config = LoraConfig.from_pretrained("AI_Checkpoint.ai")
-#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="auto")
+#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced", trust_remote_code=True)
 #    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
 #    model = LoraModel(model, lora_config, "default") # Load Lora weights
@@ -88,8 +88,8 @@ else:
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
     print("--- End Model Inspection (freshly loaded base model) ---")
-#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="auto")
-#    model = Mamba2ForCausalLM.from_pretrained(config, device_map="auto")
+#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
+#    model = Mamba2ForCausalLM.from_pretrained(config, device_map="balanced")
 #    model = MambaLMHeadModel.from_pretrained("state-spaces/mamba-130m")
     dataset_indices = {}
     current_dataset_filename = dataset_filename # Define current dataset filename
@@ -97,7 +97,7 @@ else:
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
 lora_config =  LoraConfig(
-        r=8,
+        r=16,
         target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
         task_type="CAUSAL_LM",
 #        lora_alpha=8,
@@ -166,7 +166,6 @@ dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for no
 cache = None # Initialize cache here
 batch_input_ids_list = [] # Initialize batch_input_ids_list as a global variable
 batch_attention_mask_list = [] # Initialize batch_attention_mask_list as a global variable
-@torch.jit.script
 def closure(): # Define closure here, outside the if block
   global batch_input_ids_list # Declare batch_input_ids_list as global
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
@@ -180,7 +179,7 @@ def closure(): # Define closure here, outside the if block
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
-    chunk_size=600 #1000
+    chunk_size=500 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
     grad_vector_size = 100 #5
@@ -203,12 +202,9 @@ def closure(): # Define closure here, outside the if block
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
 #            cache_position =  torch.tensor(i, dtype=torch.long)
-#          cache_position =  torch.tensor(i, dtype=torch.long)
-            jitted_model = torch.jit.script(model)
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
         else:
           with torch.no_grad():
-            jitted_model = torch.jit.script(model)
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
         num_steps += 1
