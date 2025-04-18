@@ -114,9 +114,6 @@ lora_config =  LoraConfig(
 ##        if "bone_" in name and param.requires_grad
 #    )
 #    model = LoraModel(model, lora_config, "default")
-dummy_input_ids = torch.randint(0, 1000, (1, 10)).to(torch.long).to("cuda") # Example input_ids
-dummy_attention_mask = torch.randint(0, 2, (1, 10)).to(torch.int).to("cuda") # Example attention_mask
-model = torch.jit.trace(model, example_kwarg_inputs={"input_ids": dummy_input_ids, "attention_mask": dummy_attention_mask})
 model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
 model = model.to(dtype=torch.float16)
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
@@ -169,6 +166,7 @@ dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for no
 cache = None # Initialize cache here
 batch_input_ids_list = [] # Initialize batch_input_ids_list as a global variable
 batch_attention_mask_list = [] # Initialize batch_attention_mask_list as a global variable
+@torch.jit.script
 def closure(): # Define closure here, outside the if block
   global batch_input_ids_list # Declare batch_input_ids_list as global
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
