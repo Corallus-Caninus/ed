@@ -202,13 +202,10 @@ def closure(): # Define closure here, outside the if block
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
 #            cache_position =  torch.tensor(i, dtype=torch.long)
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids, cache_params = cache,use_cache = True,cache_position=torch.tensor([i]))
-      #            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
         else:
-    #      with torch.no_grad(): # Keep no_grad context for forward passes in the loop
           with torch.no_grad():
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask  , labels = cur_input_ids,  use_cache=True)
-    #      outputs.loss.backward()
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
         num_steps += 1
         current_loss = outputs.loss
