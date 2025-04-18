@@ -33,47 +33,36 @@ torch.set_num_interop_threads(num_cores)
 
 accelerator = Accelerator()
 filename = "AI_Checkpoint.ai"
-#TODO:  save/load the model and lbfgs history every n number of data iterations.
-#TODO: add LoRa and/or QLoRa so all the kids will try this and not gripe about the scaling
-#TODO: save and load the indices to a seperate file so we can verify.
 #TODO: project Basilisk: parallelize the model layer-wise with the gradients. Also parallelize the flat-grads and gtd etc in L-BFGS-N. Simplest parallelization, assuming we are using commodity last-gen accelerators for edge learning, this will allow the most performant scale-out of models (e.g.: 3 k80's or 3 MI25's)
+#TODO: take another shot at bitsandbytes quantization for nf4 and possibly QLoRa
 
 import time
-#model_id = "state-spaces/mamba2-130m"
 model_id = "mistralai/Mamba-Codestral-7B-v0.1"
 dataset_filename = "haskell_code_dataset.ds"
 model_id = "hanzla/Falcon3-Mamba-R1-v0"
 model_id = "state-spaces/mamba2-370m"
 model_id = "AntonV/mamba2-1.3b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
-model_id = "AntonV/mamba2-2.7b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
-#model_id = "state-spaces/mamba-2.8b"
-#model_id = "AntonV/mamba2-130m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
-#model_id = "tiiuae/falcon-mamba-7b"
-#model_id = "state-spaces/mamba-1.4b-hf"
+#model_id = "AntonV/mamba2-2.7b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 history_filename = "fbfgs_history.pth"
 indices_filename = "dataset_indices.pth"
-tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
+#tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-#tokenizer = AutoTokenizer.from_pretrained(model_id, from_slow=True, legacy=False)
-#tokenizer = AutoTokenizer.from_pretrained(model_id,  legacy=False)
-#tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     lora_config =  LoraConfig(
-            r=16,
+            r=8,
             target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
 #            lora_alpha=8,
-            use_dora=True,
             bias="lora_only",
     )
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
 #    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
     lora_config = LoraConfig.from_pretrained("AI_Checkpoint.ai")
-#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
-    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto", trust_remote_code=True)
+#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="auto")
+    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced", trust_remote_code=True)
 #    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
 #    model = LoraModel(model, lora_config, "default") # Load Lora weights
 #    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
@@ -94,12 +83,12 @@ else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
 #    config = AutoConfig.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float16)
+    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float32)
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
     print("--- End Model Inspection (freshly loaded base model) ---")
-#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, ignore_mismatched_sizes=True, device_map="auto")
+#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="auto")
 #    model = Mamba2ForCausalLM.from_pretrained(config, device_map="auto")
 #    model = MambaLMHeadModel.from_pretrained("state-spaces/mamba-130m")
     dataset_indices = {}
@@ -108,10 +97,9 @@ else:
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
 lora_config =  LoraConfig(
-        r=16,
+        r=8,
         target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
         task_type="CAUSAL_LM",
-        use_dora=True,
 #        lora_alpha=8,
         bias="lora_only",
 #            init_weights = "bat",
@@ -128,6 +116,7 @@ lora_config =  LoraConfig(
 #    model = LoraModel(model, lora_config, "default")
 model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
 model = model.to(dtype=torch.float16)
+model = torch.jit.script(model)
 #Get the params ready for passing as flat_grad to fbfgs
 lora_params = (
 #        param for name, param in model.named_parameters()
@@ -142,7 +131,7 @@ pytorch_total_params = sum(p.numel() for p in model.parameters())
 print("num parameters: " + str(pytorch_total_params))
 
 #NOTE: mathematically optimized wolfe condition for exponential decay
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
@@ -190,11 +179,11 @@ def closure(): # Define closure here, outside the if block
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
-    chunk_size=500 #1000
+    chunk_size=600 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
     grad_vector_size = 100 #5
-    grad_chunk_size = 500
+    grad_chunk_size = 50
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
