@@ -146,15 +146,14 @@ if not lora_params_list:
 else:
     print(f"Number of LoRa parameters found after initial setup: {len(lora_params_list)}")
 lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
-
-    print("--- LoRa Parameters (after initial setup) ---")
-    lora_param_count_initial = 0
-    for name, param in model.named_parameters():
-        if "lora_" in name and param.requires_grad:
-            print(f"  Parameter Name: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-            lora_param_count_initial += 1
-    print(f"Total LoRa parameters found after initial setup: {lora_param_count_initial}")
-    print("--- End LoRa Parameters (after initial setup) ---")
+ print("--- LoRa Parameters (after initial setup) ---")
+ lora_param_count_initial = 0
+ for name, param in model.named_parameters():
+  if "lora_" in name and param.requires_grad:
+   print(f"  Parameter Name: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+  lora_param_count_initial += 1
+ print(f"Total LoRa parameters found after initial setup: {lora_param_count_initial}")
+ print("--- End LoRa Parameters (after initial setup) ---")
 
 
  
