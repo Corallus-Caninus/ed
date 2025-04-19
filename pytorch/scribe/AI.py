@@ -162,14 +162,6 @@ pytorch_total_params = sum(p.numel() for p in model.parameters())
 
 print("num parameters: " + str(pytorch_total_params))
 
-#NOTE: mathematically optimized wolfe condition for exponential decay
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-
-if os.path.exists(filename): # Load optimizer history if checkpoint exists
-    optimizer.load_history(history_filename)
-
-
 datalist = []
 if os.path.exists(dataset_filename):
     if os.path.exists(dataset_filename):
@@ -183,6 +175,15 @@ else:
 model.gradient_checkpointing_enable()
 
 batch_train = None
+
+# Initialize optimizer *after* ensuring lora_params is correctly populated
+# NOTE: mathematically optimized wolfe condition for exponential decay
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+
+if os.path.exists(filename): # Load optimizer history if checkpoint exists
+    optimizer.load_history(history_filename)
+
 
 step_count = 0
 #dataset_size = len(dataset) # Get dataset size outside the loop
