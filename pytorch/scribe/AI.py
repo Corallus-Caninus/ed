@@ -51,13 +51,6 @@ tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
-    lora_config =  LoraConfig(
-            r=16,
-            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-            task_type="CAUSAL_LM",
-#            lora_alpha=8,
-            bias="lora_only",
-    )
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
 #    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
     lora_config = LoraConfig.from_pretrained("AI_Checkpoint.ai")
@@ -96,17 +89,17 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
-lora_config =  LoraConfig(
-        r=16,
-        target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-        task_type="CAUSAL_LM",
-#        lora_alpha=8,
-        bias="lora_only",
+    lora_config =  LoraConfig(
+            r=16,
+            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+            task_type="CAUSAL_LM",
+    #        lora_alpha=8,
+            bias="lora_only",
+    )
 #            init_weights = "bat",
 #            torch_dtype=torch.float16 ,
 #            bias="none",
 #            use_rslora=True,
-)
 #    lora_params = (
 ##        param for name, param in model.named_parameters()
 #        param for name, param in model.named_parameters()
@@ -182,7 +175,7 @@ def closure(): # Define closure here, outside the if block
     chunk_size=500 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 100 #5
+    grad_vector_size = 200 #5
     grad_chunk_size = 50
     num_tokens = input_ids.size(1)
     num_steps = 0
