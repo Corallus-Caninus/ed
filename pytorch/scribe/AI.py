@@ -153,7 +153,7 @@ for name, param in model.named_parameters():
         print(f"  Parameter Name: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
     lora_param_count_initial += 1
 print(f"Total LoRa parameters found after initial setup: {lora_param_count_initial}")
- print("--- End LoRa Parameters (after initial setup) ---")
+print("--- End LoRa Parameters (after initial setup) ---")
 
 
  
