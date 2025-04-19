@@ -73,6 +73,17 @@ if os.path.exists(filename): # Load model weights and optimizer history
     #current_index = dataset_indices.get(current_dataset_filename, 0) # No longer needed
     print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
 
+    lora_params = ( # Re-extract lora_params after loading checkpoint
+        param for name, param in model.named_parameters()
+        if "lora_" in name and param.requires_grad
+    )
+    lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
+    if not lora_params_list:
+        print("Error: lora_params is empty after loading checkpoint. Check LoRa configuration and checkpoint loading.")
+    else:
+        print(f"Number of LoRa parameters found after loading checkpoint: {len(lora_params_list)}")
+    lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
+
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
@@ -119,6 +130,14 @@ lora_params = (
 #    if  param.requires_grad
         if "lora_" in name and param.requires_grad
 )
+
+lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
+if not lora_params_list:
+    print("Error: lora_params is empty after initial LoRa setup. Check LoRa configuration.")
+else:
+    print(f"Number of LoRa parameters found after initial setup: {len(lora_params_list)}")
+lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
+
 
  
 batch_size = 1 # Define batch size here
