@@ -61,6 +61,14 @@ if os.path.exists(filename): # Load model weights and optimizer history
 #    model = LoraModel(model, lora_config, "default") # Load Lora weights
 #    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
     dataset_indices = {}
+
+    # Print requires_grad status *before* dtype conversion
+    print("--- Parameter requires_grad status (after PeftModel.from_pretrained) ---")
+    for name, param in model.named_parameters():
+        if "lora_" in name or param.requires_grad: # Print Lora params or any trainable param
+             print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+    print("--- End Parameter requires_grad status ---")
+
     if os.path.exists(indices_filename):
         dataset_indices = torch.load(indices_filename) # Load dataset_indices, default to empty dict
 
@@ -72,6 +80,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print("After loading - seen_indices:", seen_indices)
     #current_index = dataset_indices.get(current_dataset_filename, 0) # No longer needed
     print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
+    model = model.to(dtype=torch.float16) # Move dtype conversion earlier
 
     lora_params = ( # Re-extract lora_params after loading checkpoint
         # Filter by requires_grad instead of name prefix
@@ -130,7 +139,15 @@ else:
 #    )
 #    model = LoraModel(model, lora_config, "default")
     model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
-model = model.to(dtype=torch.float16)
+
+    # Print requires_grad status *after* get_peft_model
+    print("--- Parameter requires_grad status (after get_peft_model) ---")
+    for name, param in model.named_parameters():
+        if "lora_" in name or param.requires_grad: # Print Lora params or any trainable param
+             print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+    print("--- End Parameter requires_grad status ---")
+
+model = model.to(dtype=torch.float16) # Apply dtype conversion after PEFT
 model.train()
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
 #Get the params ready for passing as flat_grad to fbfgs
