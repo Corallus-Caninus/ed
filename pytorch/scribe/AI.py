@@ -62,6 +62,11 @@ if os.path.exists(filename): # Load model weights and optimizer history
 #    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
     dataset_indices = {}
 
+    # Set requires_grad=True for LoRa parameters after loading
+    for name, param in model.named_parameters():
+        if "lora_" in name:
+            param.requires_grad = True
+
     # Print requires_grad status *before* dtype conversion
     print("--- Parameter requires_grad status (after PeftModel.from_pretrained) ---")
     for name, param in model.named_parameters():
