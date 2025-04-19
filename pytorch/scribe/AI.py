@@ -74,24 +74,25 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
 
     lora_params = ( # Re-extract lora_params after loading checkpoint
-        param for name, param in model.named_parameters()
-        if "lora_" in name and param.requires_grad
+        # Filter by requires_grad instead of name prefix
+        param for param in model.parameters() if param.requires_grad
     )
     lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
     if not lora_params_list:
-        print("Error: lora_params is empty after loading checkpoint. Check LoRa configuration and checkpoint loading.")
+        print("Error: No trainable parameters (param.requires_grad=True) found after loading checkpoint.")
     else:
-        print(f"Number of LoRa parameters found after loading checkpoint: {len(lora_params_list)}")
+        print(f"Number of trainable parameters found after loading checkpoint: {len(lora_params_list)}")
     lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
 
-    print("--- LoRa Parameters (after loading checkpoint) ---")
+    print("--- Trainable Parameters (after loading checkpoint) ---")
     lora_param_count_loaded = 0
-    for name, param in model.named_parameters():
-        if "lora_" in name and param.requires_grad:
-            print(f"  Parameter Name: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-            lora_param_count_loaded += 1
-    print(f"Total LoRa parameters found after loading checkpoint: {lora_param_count_loaded}")
-    print("--- End LoRa Parameters (after loading checkpoint) ---")
+    # Iterate through the collected list to print details
+    for i, param in enumerate(lora_params_list):
+        print(f"  Param {i}: Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+        lora_param_count_loaded += 1
+    # The count is simply the length of the list
+    print(f"Total trainable parameters found after loading checkpoint: {len(lora_params_list)}")
+    print("--- End Trainable Parameters (after loading checkpoint) ---")
 
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
@@ -135,25 +136,25 @@ model.train()
 #Get the params ready for passing as flat_grad to fbfgs
 lora_params = (
 #        param for name, param in model.named_parameters()
-    param for name, param in model.named_parameters()
-#    if  param.requires_grad
-        if "lora_" in name and param.requires_grad
+    # Use the same logic: filter by requires_grad
+    param for param in model.parameters() if param.requires_grad
 )
 
 lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
 if not lora_params_list:
-    print("Error: lora_params is empty after initial LoRa setup. Check LoRa configuration.")
+    print("Error: No trainable parameters (param.requires_grad=True) found after initial setup.")
 else:
-    print(f"Number of LoRa parameters found after initial setup: {len(lora_params_list)}")
+    print(f"Number of trainable parameters found after initial setup: {len(lora_params_list)}")
 lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
-print("--- LoRa Parameters (after initial setup) ---")
+print("--- Trainable Parameters (after initial setup) ---")
 lora_param_count_initial = 0
-for name, param in model.named_parameters():
-    if "lora_" in name and param.requires_grad:
-        print(f"  Parameter Name: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+# Iterate through the collected list to print details
+for i, param in enumerate(lora_params_list):
+    print(f"  Param {i}: Shape: {param.shape}, Requires Grad: {param.requires_grad}")
     lora_param_count_initial += 1
-print(f"Total LoRa parameters found after initial setup: {lora_param_count_initial}")
-print("--- End LoRa Parameters (after initial setup) ---")
+# The count is simply the length of the list
+print(f"Total trainable parameters found after initial setup: {len(lora_params_list)}")
+print("--- End Trainable Parameters (after initial setup) ---")
 
 
  
