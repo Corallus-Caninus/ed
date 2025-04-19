@@ -56,6 +56,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
     lora_config = LoraConfig.from_pretrained("AI_Checkpoint.ai")
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced", trust_remote_code=True)
+    model = PeftModel.from_pretrained(model, filename)
 #    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
 #    model = LoraModel(model, lora_config, "default") # Load Lora weights
 #    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
@@ -107,15 +108,16 @@ else:
 ##        if "bone_" in name and param.requires_grad
 #    )
 #    model = LoraModel(model, lora_config, "default")
-model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
+    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
 model = model.to(dtype=torch.float16)
+model.train()
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
 #Get the params ready for passing as flat_grad to fbfgs
 lora_params = (
 #        param for name, param in model.named_parameters()
     param for name, param in model.named_parameters()
-    if  param.requires_grad
-#        if "lora_" in name and param.requires_grad
+#    if  param.requires_grad
+        if "lora_" in name and param.requires_grad
 )
 
  
@@ -141,7 +143,6 @@ else:
     #dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
     dataset.save_to_disk(dataset_filename)
 
-model.train()
 model.gradient_checkpointing_enable()
 
 batch_train = None
