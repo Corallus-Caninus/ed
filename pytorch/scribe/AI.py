@@ -84,6 +84,15 @@ if os.path.exists(filename): # Load model weights and optimizer history
         print(f"Number of LoRa parameters found after loading checkpoint: {len(lora_params_list)}")
     lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
 
+    print("--- LoRa Parameters (after loading checkpoint) ---")
+    lora_param_count_loaded = 0
+    for name, param in model.named_parameters():
+        if "lora_" in name and param.requires_grad:
+            print(f"  Parameter Name: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+            lora_param_count_loaded += 1
+    print(f"Total LoRa parameters found after loading checkpoint: {lora_param_count_loaded}")
+    print("--- End LoRa Parameters (after loading checkpoint) ---")
+
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
@@ -138,10 +147,20 @@ else:
     print(f"Number of LoRa parameters found after initial setup: {len(lora_params_list)}")
 lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
 
+    print("--- LoRa Parameters (after initial setup) ---")
+    lora_param_count_initial = 0
+    for name, param in model.named_parameters():
+        if "lora_" in name and param.requires_grad:
+            print(f"  Parameter Name: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+            lora_param_count_initial += 1
+    print(f"Total LoRa parameters found after initial setup: {lora_param_count_initial}")
+    print("--- End LoRa Parameters (after initial setup) ---")
+
 
  
 batch_size = 1 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
+
 print("num parameters: " + str(pytorch_total_params))
 
 #NOTE: mathematically optimized wolfe condition for exponential decay
