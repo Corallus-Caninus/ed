@@ -1,4 +1,5 @@
 import os
+import math
 import sys
 
 import loralib as lora
@@ -63,9 +64,6 @@ if os.path.exists(filename): # Load model weights and optimizer history
     dataset_indices = {}
 
     # Set requires_grad=True for LoRa parameters after loading
-    for name, param in model.named_parameters():
-        if "lora_" in name:
-            param.requires_grad = True
 
     # Print requires_grad status *before* dtype conversion
     print("--- Parameter requires_grad status (after PeftModel.from_pretrained) ---")
@@ -152,6 +150,10 @@ else:
              print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
     print("--- End Parameter requires_grad status ---")
 
+for name, param in model.named_parameters():
+    if "lora_" in name:
+        param.requires_grad = True
+
 model = model.to(dtype=torch.float16) # Apply dtype conversion after PEFT
 model.train()
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
@@ -201,7 +203,7 @@ batch_train = None
 
 # Initialize optimizer *after* ensuring lora_params is correctly populated
 # NOTE: mathematically optimized wolfe condition for exponential decay
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm = 1.1, norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
@@ -237,7 +239,7 @@ def closure(): # Define closure here, outside the if block
     chunk_size=500 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 200 #5
+    grad_vector_size = 250 #5
     grad_chunk_size = 50
     num_tokens = input_ids.size(1)
     num_steps = 0
@@ -303,7 +305,8 @@ def closure(): # Define closure here, outside the if block
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
-  return total_loss/batch_size
+#  loss = np.nan_to_num(loss, nan=np.finfo(float).max)
+  return total_loss
 
 
 while True:
