@@ -585,7 +585,8 @@ class FBFGS(Optimizer):
         capture_max_step: float =100,
         clop: float = 5e-7,
         direction_device: str = 'cuda',
-        norm: float = 1.0
+        norm: float = 1.0,
+        y_norm: Optional[float] = None
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -609,7 +610,8 @@ class FBFGS(Optimizer):
             capture_max_step=capture_max_step,
             clop=clop,
             direction_device=direction_device,
-            norm=norm
+            norm=norm,
+            y_norm=y_norm
         )
         super().__init__(params, defaults)
 
@@ -951,6 +953,7 @@ class FBFGS(Optimizer):
       capture_min_step=group["capture_min_step"]
       capture_max_step=group["capture_max_step"]
       norm = group["norm"]
+      y_norm = group["y_norm"]
 
       # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
@@ -1061,7 +1064,8 @@ class FBFGS(Optimizer):
 #Clop
 #TODO: can we scale after norm to prevent the magnitude after clopping from being epsilon? I think this would be mathematically unstable but would help with the direction approximation's curvature
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
-              total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm) # Move total_norm to direction_device
+              norm_y = norm if y_norm is None else y_norm
+              total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
               y_dense = y_dense/total_norm_y
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
 #              total_norm_s = torch.linalg.vector_norm(s_dense, ord=norm) # Move total_norm to direction_device
