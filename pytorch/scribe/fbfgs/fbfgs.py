@@ -676,6 +676,8 @@ class FBFGS(Optimizer):
         for p in self._params: # Clip after gathering to ensure all grads are included
             if p.grad is not None: # Check if p.grad is not None
                 torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+        finfo = torch.finfo(grad.dtype)
+        grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
         return grad
 
     # gather flat grads with L1 Normalization and without clopping
