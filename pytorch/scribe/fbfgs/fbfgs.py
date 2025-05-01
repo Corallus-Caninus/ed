@@ -1239,6 +1239,7 @@ class FBFGS(Optimizer):
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   t = 2. #Reset t to 1 for after needling
+#TODO: fixme
                   best_needle_loss = prev_loss # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
                   Needle = True
@@ -1264,13 +1265,16 @@ class FBFGS(Optimizer):
                       gtd_needle = gtd_needle_sparse_product.sum() # g * d
                       del gtd_needle_sparse_product
                       armijo_condition = current_needle_loss <= best_needle_loss + c1 * needle_t * gtd
-                      if current_needle_loss <= best_needle_loss and abs(gtd_needle) > -c2 * gtd and armijo_condition: #and abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
+#TODO: check these conditions..
+#TODO: dont use convergence metric?
+#                      if current_needle_loss <= best_needle_loss and abs(gtd_needle) < -c2 * gtd and armijo_condition: #and abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
+                      if current_needle_loss <= best_needle_loss :
 #TODO: on first iteration we arent getting enough reduction so loss looks equivalent and we never linesearch.
                           best_needle_loss = current_needle_loss
                           best_needle_t = needle_t
-                          needle_t = needle_t ** 2  # Increase t for next iteration
+                          needle_t = needle_t *2  # Increase t for next iteration
                       else:
-                          best_needle_t = best_needle_t.sqrt() # Stop if loss no longer decreasing
+                          best_needle_t = 0.5*best_needle_t # Stop if loss no longer decreasing
                           break # Stop if loss no longer decreasing
 
 
