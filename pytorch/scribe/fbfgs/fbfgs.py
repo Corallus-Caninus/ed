@@ -1238,7 +1238,7 @@ class FBFGS(Optimizer):
               Needle = False
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
-                  t = 2. #Reset t to 1 for after needling
+                  t = 1e-1 #Reset t to 1 for after needling
 #TODO: fixme
                   best_needle_loss = prev_loss # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
@@ -1246,7 +1246,7 @@ class FBFGS(Optimizer):
                   del flat_grad
                   gc.collect()
                   first_param = next(self.param_groups[0]['params'].__iter__())
-                  needle_t = torch.tensor(2.0, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
+                  needle_t = torch.tensor(1e-1, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
                   best_needle_t = needle_t
 #                  x_init_needle = self._clone_param() # Clone params for needle search
                   x_init_needle = x_init
@@ -1255,7 +1255,10 @@ class FBFGS(Optimizer):
                   flat_grad = self._gather_flat_grad()
                   d_needle = flat_grad.neg()
                   total_norm = torch.linalg.vector_norm(d_needle, ord=1/3)
-                  d_needle = d_needle.div_(total_norm)
+                  d_needle = d_needle.div(total_norm)
+                  mask = torch.logical_and(d_needle > -clop, d_needle < clop) #TODO: extract to sub_variance hyperparameter
+                  print("num needle elements: " + str(mask.sum()))
+                  d_needle[mask] = 0
                   gtd = d_needle * flat_grad
                   gtd = gtd.sum()
                   while True:
