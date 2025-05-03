@@ -124,15 +124,16 @@ else:
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
     lora_config =  LoraConfig(
-            r=32,
+            r=35,
             target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
             task_type="CAUSAL_LM",
-    #        lora_alpha=8,
-#            bias="all",
+            lora_alpha=8,
+            bias="lora_only",
 #            init_weights = "bat",
 #            torch_dtype=torch.float16 ,
 #            bias="none",
-            use_rslora=True,
+#            use_rslora=True,
+#            use_dora=True,
     )
 #    lora_params = (
 ##        param for name, param in model.named_parameters()
@@ -203,7 +204,8 @@ batch_train = None
 
 # Initialize optimizer *after* ensuring lora_params is correctly populated
 # NOTE: mathematically optimized wolfe condition for exponential decay
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-9, c1=1e-9, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.15, norm=1., clop=1e-10, c1=1e-9, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-8, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-9, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
@@ -360,8 +362,9 @@ while True:
         tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
-        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
-            print("Skipping long context data point for warmup")
+#        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
+        if input_ids.size(1) < 1000  :
+            print("Skipping short context data point ")
             seen_indices.remove(dataset_idx) # Mark index as seen
             continue # Skip to the next iteration to find a valid datapoint
         batch_input_ids_list.append(input_ids)
