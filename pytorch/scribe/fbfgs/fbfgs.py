@@ -1238,7 +1238,7 @@ class FBFGS(Optimizer):
               Needle = False
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
-                  t = 1e-1 #Reset t to 1 for after needling
+                  t = 1 #Reset t to 1 for after needling
 #TODO: fixme
                   best_needle_loss = prev_loss # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
@@ -1254,10 +1254,11 @@ class FBFGS(Optimizer):
                   # Iteratively increase t until loss no longer decreases
                   flat_grad = self._gather_flat_grad()
                   d_needle = flat_grad.neg()
-                  total_norm = torch.linalg.vector_norm(d_needle, ord=1/3)
+#TODO: topk may be better here and more reliable since we are expecting a loss of outliers from the gradients at saddle points (relatively flat and low curvature throughout)
+                  total_norm = torch.linalg.vector_norm(d_needle, ord=norm)
                   d_needle = d_needle.div(total_norm)
-                  mask = torch.logical_and(d_needle > -clop, d_needle < clop) #TODO: extract to sub_variance hyperparameter
-                  print("num needle elements: " + str(mask.sum()))
+                  mask = torch.logical_and(d_needle > -self.clop, d_needle < self.clop) #TODO: extract to sub_variance hyperparameter
+                  print("num needle elements: " + str(mask.sum()))#TODO: fixme
                   d_needle[mask] = 0
                   gtd = d_needle * flat_grad
                   gtd = gtd.sum()
@@ -1271,6 +1272,7 @@ class FBFGS(Optimizer):
 #TODO: check these conditions..
 #TODO: dont use convergence metric?
 #                      if current_needle_loss <= best_needle_loss and abs(gtd_needle) < -c2 * gtd and armijo_condition: #and abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
+#TODO: either less than or equal or fix initial loss. Currently this is just a constant learning rate.
                       if current_needle_loss <= best_needle_loss :
 #TODO: on first iteration we arent getting enough reduction so loss looks equivalent and we never linesearch.
                           best_needle_loss = current_needle_loss
