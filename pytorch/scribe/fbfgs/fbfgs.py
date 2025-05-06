@@ -1270,6 +1270,7 @@ class FBFGS(Optimizer):
                       # Zero out elements not in the mask
                       d_needle[~mask] = 0
                   print("num needle elements: " + str((d_needle != 0).sum()))#TODO: fixme
+
                   gtd = d_needle * flat_grad
                   gtd = gtd.sum()
                   while True:
