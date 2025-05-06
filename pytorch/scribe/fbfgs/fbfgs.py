@@ -1256,10 +1256,20 @@ class FBFGS(Optimizer):
                   d_needle = flat_grad.neg()
 #TODO: topk may be better here and more reliable since we are expecting a loss of outliers from the gradients at saddle points (relatively flat and low curvature throughout)
                   total_norm = torch.linalg.vector_norm(d_needle, ord=norm)
-                  d_needle = d_needle.div(total_norm)
-                  mask = torch.logical_and(d_needle > -self.clop, d_needle < self.clop) #TODO: extract to sub_variance hyperparameter
-                  print("num needle elements: " + str(mask.sum()))#TODO: fixme
-                  d_needle[mask] = 0
+                  if total_norm > 0: # Avoid division by zero
+                      d_needle = d_needle.div(total_norm)
+
+                  # Keep only the top 200 elements by absolute value
+                  k = 200 # Number of elements to keep
+                  if d_needle.numel() > k:
+                      abs_d_needle = torch.abs(d_needle)
+                      # Get the k-th largest value
+                      kth_value = torch.kthvalue(abs_d_needle.flatten(), d_needle.numel() - k + 1).values
+                      # Create a mask for elements greater than or equal to the k-th value
+                      mask = abs_d_needle >= kth_value
+                      # Zero out elements not in the mask
+                      d_needle[~mask] = 0
+                  print("num needle elements: " + str((d_needle != 0).sum()))#TODO: fixme
                   gtd = d_needle * flat_grad
                   gtd = gtd.sum()
                   while True:
