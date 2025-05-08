@@ -313,7 +313,7 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-        if (f_new > (f + c1 * t * gtd))   and f_new >= f_prev: #NOTE: Ward condition
+        if (f_new > (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -322,7 +322,7 @@ def _strong_wolfe(
             break
 
 #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if abs(gtd_new) <= -c2 * gtd and f_new < f_best:
+        if abs(gtd_new) <= -c2 * gtd : #and f_new < f_best:
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -371,8 +371,8 @@ def _strong_wolfe(
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
 #TODO: armijo in relaxed wolfe condition
-#        if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
-        if (f_new > (f + c1 * t * gtd))  and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+        if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+#        if (f_new > (f + c1 * t * gtd))  and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
 #NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
           success = True
           stall_wolfe = 0
@@ -479,7 +479,7 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
-            if abs(gtd_new) <= -c2 * gtd and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
+            if abs(gtd_new) <= -c2 * gtd : #and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
                 # Wolfe conditions satisfied
                 print("STRONG WOLFE")
                 success = True
@@ -495,8 +495,8 @@ def _strong_wolfe(
     #        cur_c1 = (f + t*gtd) - f_new
 #            cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
-#            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
-            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+#            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
     #          print("---GOT NEW WOLFE PACK---")
               success = True
               stall_wolfe = 0
@@ -515,7 +515,7 @@ def _strong_wolfe(
         if stall_wolfe >= 5:
           print("STALL WOLFE")
 #TODO: there is still a potential but unlikely bug here where we need to account for if loss isnt reduced. Likely we should consider the Armijo in relaxed wolfe
-        if ls_iter >= max_ls and done != True: # Return Wolfe pack if max ls reached in zoom phase
+        if ls_iter >= max_ls and done != True and success == False: # Return Wolfe pack if max ls reached in zoom phase
           print("WOLFE PACK MAX LS")
           return success, f_best, g_best.to("cuda"), t_best, ls_func_evals
 
@@ -796,9 +796,10 @@ class FBFGS(Optimizer):
 
 #TODO: NOTE after benchmarking, this is compute bound. Its not waiting to read from RAM its stalled in computation on CUDA. Parallelize this from the flat grads to here with a device_map ASAP.
     @torch.jit.script
-    def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
+    def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
+#        similarity = 1e-2
         similarity = 0.
 #TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
         if t < 1:
@@ -1180,7 +1181,7 @@ class FBFGS(Optimizer):
               if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t,  clop=self.clop, norm=norm)
               else:
-                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t,  clop=self.clop, norm=norm)
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t,  clop=self.clop, norm=norm, y_norm = y_norm)
               torch.cuda.empty_cache()
 
               del H_diag
@@ -1256,6 +1257,7 @@ class FBFGS(Optimizer):
                   d_needle = flat_grad.neg()
 #TODO: topk may be better here and more reliable since we are expecting a loss of outliers from the gradients at saddle points (relatively flat and low curvature throughout)
                   total_norm = torch.linalg.vector_norm(d_needle, ord=norm)
+                  d_needle = d_needle.div_(total_norm)
                   # Keep only the top 200 elements by absolute value
                   k = 200 # Number of elements to keep
                   if d_needle.numel() > k:
