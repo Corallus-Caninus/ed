@@ -366,8 +366,9 @@ while True:
 #        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
         if (input_ids.size(1) > 1000 and len(seen_indices)) < 25 : #NOTE:warmup period
 #        if input_ids.size(1) < 1000 :
-            print("Skipping warmup cycle and retaining this index..")
+            print(f"Skipping warmup cycle for index {dataset_idx} (token length {input_ids.size(1)}) and retaining this index..")
             seen_indices.remove(dataset_idx) # Mark index as seen
+            dataset_shuffled_indices.append(dataset_idx) # Put the index back into the shuffled list
             continue # Skip to the next iteration to find a valid datapoint
         batch_input_ids_list.append(input_ids)
         batch_attention_mask_list.append(attention_mask)
