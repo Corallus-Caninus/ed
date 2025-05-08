@@ -205,7 +205,7 @@ batch_train = None
 # Initialize optimizer *after* ensuring lora_params is correctly populated
 # NOTE: mathematically optimized wolfe condition for exponential decay
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.15, norm=1., clop=1e-9, c1=1e-1, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1., norm=1., clop=1e-9, c1=0.5, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1., clop=1e-9, c1=1e-2, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-8, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-9, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
@@ -364,14 +364,12 @@ while True:
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
 #        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
-        if (input_ids.size(1) > 1000 and len(seen_indices) < 25) : #NOTE:warmup period
+        if (input_ids.size(1) > 1000 and len(seen_indices)) < 25 : #NOTE:warmup period
 #        if input_ids.size(1) < 1000 :
-            print(f"Truncating index {dataset_idx} (token length {input_ids.size(1)}) to 1000 tokens during warmup.")
-            # Truncate input_ids and attention_mask
-            max_warmup_length = 1000
-            input_ids = input_ids[:, :max_warmup_length]
-            attention_mask = attention_mask[:, :max_warmup_length]
-            print(f"Truncated token length: {input_ids.size(1)}")
+            print(f"Skipping warmup cycle for index {dataset_idx} (token length {input_ids.size(1)}) and retaining this index..")
+            seen_indices.remove(dataset_idx) # Mark index as seen
+            dataset_shuffled_indices.append(dataset_idx) # Put the index back into the shuffled list
+            continue # Skip to the next iteration to find a valid datapoint
         batch_input_ids_list.append(input_ids)
         batch_attention_mask_list.append(attention_mask)
         batch_count += 1 # Increment batch_count only when a valid datapoint is added
