@@ -364,13 +364,14 @@ while True:
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
 #        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
-        if (input_ids.size(1) > 1000 and len(seen_indices)) < 25 : #NOTE:warmup period
+        if (input_ids.size(1) > 1000 and len(seen_indices) < 25) : #NOTE:warmup period
 #        if input_ids.size(1) < 1000 :
-            print(f"Skipping warmup cycle for index {dataset_idx} (token length {input_ids.size(1)}) and putting it back in the list..")
-            seen_indices.remove(dataset_idx) # Mark index as seen
-            # Put the index back into the shuffled list at the beginning to avoid immediate re-selection
-            dataset_shuffled_indices.insert(0, dataset_idx)
-            continue # Skip to the next iteration to find a valid datapoint
+            print(f"Truncating index {dataset_idx} (token length {input_ids.size(1)}) to 1000 tokens during warmup.")
+            # Truncate input_ids and attention_mask
+            max_warmup_length = 1000
+            input_ids = input_ids[:, :max_warmup_length]
+            attention_mask = attention_mask[:, :max_warmup_length]
+            print(f"Truncated token length: {input_ids.size(1)}")
         batch_input_ids_list.append(input_ids)
         batch_attention_mask_list.append(attention_mask)
         batch_count += 1 # Increment batch_count only when a valid datapoint is added
