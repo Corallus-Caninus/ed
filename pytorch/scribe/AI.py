@@ -364,6 +364,8 @@ while True:
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
 #        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
+#TODO: warmup linearly, increasing allowed context length over time. Also, does the seen indices work if we reshuffle the dataset?
+#TODO: skip any data points with less than a certain minimum tokens.
         if (input_ids.size(1) > 1000 and len(seen_indices) < 25) : #NOTE:warmup period
 #        if input_ids.size(1) < 1000 :
             print(f"Truncating index {dataset_idx} (token length {input_ids.size(1)}) to 1000 tokens during warmup.")
