@@ -365,15 +365,21 @@ while True:
         print("got num_tokens: " + str(input_ids.size(1)))
 #        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
 #TODO: warmup linearly, increasing allowed context length over time. Also, does the seen indices work if we reshuffle the dataset?
-#TODO: skip any data points with less than a certain minimum tokens.
         if (input_ids.size(1) > 1000 and len(seen_indices) < 25) : #NOTE:warmup period
-#        if input_ids.size(1) < 1000 :
             print(f"Truncating index {dataset_idx} (token length {input_ids.size(1)}) to 1000 tokens during warmup.")
             # Truncate input_ids and attention_mask
             max_warmup_length = 1000
             input_ids = input_ids[:, :max_warmup_length]
             attention_mask = attention_mask[:, :max_warmup_length]
             print(f"Truncated token length: {input_ids.size(1)}")
+
+        # Skip if token length is less than 1000 after potential truncation
+        if input_ids.size(1) < 1000:
+            print(
+                f"Skipping index {dataset_idx} due to token length ({input_ids.size(1)}) being less than 1000."
+            )
+            continue  # Skip to the next iteration of the inner while loop
+
         batch_input_ids_list.append(input_ids)
         batch_attention_mask_list.append(attention_mask)
         batch_count += 1 # Increment batch_count only when a valid datapoint is added
