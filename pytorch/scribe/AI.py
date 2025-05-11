@@ -372,6 +372,14 @@ while True:
             input_ids = input_ids[:, :max_warmup_length]
             attention_mask = attention_mask[:, :max_warmup_length]
             print(f"Truncated token length: {input_ids.size(1)}")
+#TODO: fix this in the optimizer instead of here
+#        if input_ids.size(1) > 5000 :
+#            print(f"Truncating index {dataset_idx} (token length {input_ids.size(1)}) to 5000 tokens.")
+#            # Truncate input_ids and attention_mask
+#            max_warmup_length = 5000
+#            input_ids = input_ids[:, :max_warmup_length]
+#            attention_mask = attention_mask[:, :max_warmup_length]
+#            print(f"Truncated token length: {input_ids.size(1)}")
 
         # Skip if token length is less than 1000 after potential truncation
         if input_ids.size(1) < 1000:

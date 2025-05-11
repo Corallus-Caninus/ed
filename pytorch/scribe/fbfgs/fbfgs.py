@@ -372,7 +372,7 @@ def _strong_wolfe(
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
 #TODO: armijo in relaxed wolfe condition
-        if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+        if f_new < f_best and done != True and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
 #        if (f_new > (f + c1 * t * gtd))  and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
 #NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
           success = True
@@ -496,7 +496,8 @@ def _strong_wolfe(
     #        cur_c1 = (f + t*gtd) - f_new
 #            cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
-            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+#            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
+            if f_new < f_best and done != True and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
 #            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
     #          print("---GOT NEW WOLFE PACK---")
               success = True
@@ -574,8 +575,8 @@ class FBFGS(Optimizer):
         lr: Union[float, Tensor] = 1,
         max_iter: int = 20,
         max_eval: Optional[int] = None,
-        tolerance_grad: float = 1e-16,
-        tolerance_change: float = 1e-16,
+        tolerance_grad: float = 1e-8,
+        tolerance_change: float = 1e-8,
         history_size: int = 2,
         c1: float = 1e-3,
         c2: float = 0.25,
@@ -796,17 +797,21 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
 #TODO: NOTE after benchmarking, this is compute bound. Its not waiting to read from RAM its stalled in computation on CUDA. Parallelize this from the flat grads to here with a device_map ASAP.
+#TODO: ys min should probably just scale with history size for stability with very long histories.
+#TODO: we are getting NaNs here. seemingly its caused by the last update (could need weight decay?) but likely its two very small numbers being multiplied (low rho scaling). Fix with ys?
     @torch.jit.script
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
-#        similarity = 1e-2
+#        similarity = 1e-4
         similarity = 0.
 #TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
         if t < 1:
           similarity = similarity/t
         q = flat_grad.to("cuda").neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
+#TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
+        total_norm = max(1e-3, total_norm)
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
@@ -857,6 +862,7 @@ class FBFGS(Optimizer):
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
+        total_norm = max(1e-3, total_norm)
         d = d.div_(total_norm)
 
 #TODO: we can clop here if we can get sparse flat tensors supporting all the ops
@@ -1044,13 +1050,18 @@ class FBFGS(Optimizer):
               print("RESET")
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
+#we wont be able to get an anchor on this data point so skip it. TODO: we also need a convergence and vanishing gradient check throughout direction but need to clean up the code
+              if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
+                return orig_loss
 #TODO: IMPLEMENT THE DIRECTION HERE AI_COMMAND
 #TODO: if we do this we should norm inf for Rollover stability
-#              total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
-#              d = d/total_norm
-#              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+              total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
+              total_norm = max(1e-3, total_norm)
+              d = d/total_norm
+              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
               H_diag = 1
+              H_diag = torch.tensor(H_diag)
               t = 1
               gc.collect()
 #              print("d elements: " + str((d.values() != 0).sum()) )
@@ -1069,6 +1080,7 @@ class FBFGS(Optimizer):
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
+              total_norm_y = max(1e-3, total_norm_y)
               y_dense = y_dense/total_norm_y
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
 #              total_norm_s = torch.linalg.vector_norm(s_dense, ord=norm) # Move total_norm to direction_device
@@ -1105,7 +1117,10 @@ class FBFGS(Optimizer):
 #TODO: ys is extremely important. This determines how quickly we can discover otherwise zero partials and therefore move the direction via history. It may be worth using double precision throughout this optimizer to account for the otherwise instability | ys -> epsilon
 #TODO: if the case where ys <= -N is correct, can we find contradictions in the direction wrt curvature s.t. we can remove 2 indices in the approximation if they are sufficiently aligned and opposing? this may prevent us from popping valuable directions while maintaining directions that have been disproved
 #TODO: we can keep the gradient in whatever precision the closure gives us then upscale to the direction in 64 etc. (configurable hyperparam?). This should scale s.t. the precision greatly accounts for sparsity (more memory efficient to use higher precision?)
-              if  ys >= 1e-8  or ys <= -1e-8:
+#TODO: probably cant do the negative since this can cause the direction to vanish in the approximation.
+#              if  ys >= 1e-4  or ys <= -1e-4:
+#              if  ys >= 1e-8  or ys <= -1e-8:
+              if  ys >= 1e-8 :
                 # updating memory
 #                if len(old_dirs) <= history_size:
 #TODO: fix this so any cuda device gets this
