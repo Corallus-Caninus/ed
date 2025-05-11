@@ -263,6 +263,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
         return torch.tensor((xmin_bound + xmax_bound) / 2.0)
 
 
+#TODO: on relaxed wolfe, if loss is reduced from the previous iteration of this data point, accept it (the first iteration is the relaxed wolfe).
 #TODO: cleanup all the AI device mess
 #TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down
 def _strong_wolfe(
@@ -1043,10 +1044,11 @@ class FBFGS(Optimizer):
               print("RESET")
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
+#TODO: IMPLEMENT THE DIRECTION HERE AI_COMMAND
 #TODO: if we do this we should norm inf for Rollover stability
-              total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
-              d = d/total_norm
-              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+#              total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
+#              d = d/total_norm
+#              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
               H_diag = 1
               t = 1
