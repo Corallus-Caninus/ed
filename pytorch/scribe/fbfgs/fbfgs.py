@@ -314,7 +314,7 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-        if (f_new > (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
+        if (f_new > (f + c1 * t * gtd))  or f_new != f_new: #  or f_new >= f_prev: #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -372,7 +372,7 @@ def _strong_wolfe(
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
 #TODO: armijo in relaxed wolfe condition
-        if f_new < f_best and done != True and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
+        if f_new < f_best and done != True : #and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
 #        if (f_new > (f + c1 * t * gtd))  and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
 #NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
           success = True
@@ -472,7 +472,7 @@ def _strong_wolfe(
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
-        if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos] : #or f_new > f_best: #NOTE: Ward condition
+        if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
@@ -497,7 +497,7 @@ def _strong_wolfe(
 #            cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
 #            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
-            if f_new < f_best and done != True and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
+            if f_new < f_best :#and done != True and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
 #            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
     #          print("---GOT NEW WOLFE PACK---")
               success = True
@@ -806,8 +806,8 @@ class FBFGS(Optimizer):
 #        similarity = 1e-4
         similarity = 0.
 #TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
-        if t < 1:
-          similarity = similarity/t
+#        if t < 1:
+#          similarity = similarity/t
         q = flat_grad.to("cuda").neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
 #TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
@@ -1120,7 +1120,7 @@ class FBFGS(Optimizer):
 #TODO: probably cant do the negative since this can cause the direction to vanish in the approximation.
 #              if  ys >= 1e-4  or ys <= -1e-4:
 #              if  ys >= 1e-8  or ys <= -1e-8:
-              if  ys >= 1e-8 :
+              if  ys >= 1e-8  :
                 # updating memory
 #                if len(old_dirs) <= history_size:
 #TODO: fix this so any cuda device gets this
