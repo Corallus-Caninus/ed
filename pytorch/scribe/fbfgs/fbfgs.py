@@ -683,6 +683,10 @@ class FBFGS(Optimizer):
                 torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
         finfo = torch.finfo(grad.dtype)
         grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
+        total_norm = torch.linalg.vector_norm(grad, ord=2.).to("cuda") # Move total_norm to direction_device
+#TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
+        total_norm = max(1e-3, total_norm)
+        grad = grad.div_(total_norm)
         return grad
 
     # gather flat grads with L1 Normalization and without clopping
@@ -806,14 +810,14 @@ class FBFGS(Optimizer):
         hit_miss = str("")
 #        similarity = 1e-4
         similarity = 0.
-#TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
-#        if t < 1:
-#          similarity = similarity/t
+##TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
+##        if t < 1:
+##          similarity = similarity/t
         q = flat_grad.to("cuda").neg()
-        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
-#TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
-        total_norm = max(1e-3, total_norm)
-        q = q.div_(total_norm)
+#        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
+##TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
+#        total_norm = max(1e-3, total_norm)
+#        q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
@@ -1052,6 +1056,7 @@ class FBFGS(Optimizer):
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
 #we wont be able to get an anchor on this data point so skip it. TODO: we also need a convergence and vanishing gradient check throughout direction but need to clean up the code
+#TODO: can we try to needle the norm after to boost the gradient?
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
                 return orig_loss
 #TODO: IMPLEMENT THE DIRECTION HERE AI_COMMAND
@@ -1121,7 +1126,7 @@ class FBFGS(Optimizer):
 #TODO: probably cant do the negative since this can cause the direction to vanish in the approximation.
 #              if  ys >= 1e-4  or ys <= -1e-4:
 #              if  ys >= 1e-8  or ys <= -1e-8:
-              if  ys >= 1e-8  :
+              if  ys >= 1e-4  :
                 # updating memory
 #                if len(old_dirs) <= history_size:
 #TODO: fix this so any cuda device gets this
