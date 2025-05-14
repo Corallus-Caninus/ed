@@ -372,7 +372,7 @@ def _strong_wolfe(
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
 #TODO: armijo in relaxed wolfe condition
-        if f_new < f_best and done != True : #and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
+        if f_new < f_best and done != True and f_new == f_new: #and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
 #        if (f_new > (f + c1 * t * gtd))  and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
 #NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
           success = True
@@ -408,7 +408,7 @@ def _strong_wolfe(
     # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
 
     #NOTE: we wait for bracket to collapse, we dont use max linesearch here, if it takes too long turn the bracket hyperparameters up.
-    while not done  and ls_iter < max_ls:
+    while not done  and ls_iter < max_ls and f_new == f_new:
 #        if len(bracket) < 2: # Check if bracket has at least 2 elements
 #            print("WOLFE PACK")
 #            return success, f_best, g_best, t_best, ls_func_evals
@@ -497,7 +497,8 @@ def _strong_wolfe(
 #            cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
 #            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity.
-            if f_new < f_best :#and done != True and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
+#TODO redundant NaN check
+            if f_new < f_best and f_new == f_new:#and done != True and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
 #            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
     #          print("---GOT NEW WOLFE PACK---")
               success = True
@@ -1257,7 +1258,8 @@ class FBFGS(Optimizer):
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
                   t = 1 #Reset t to 1 for after needling
-#TODO: fixme
+#TODO: instead of topk, iteratively reduce the norm order and check if loss is reducing or equivalent then increase step size until loss doesnt reduce and repeat
+#TODO: if we cant decrease at all, we skip the data point, currently loss can increase here.
                   best_needle_loss = prev_loss # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
                   Needle = True
