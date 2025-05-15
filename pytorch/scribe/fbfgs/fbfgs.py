@@ -1182,6 +1182,8 @@ class FBFGS(Optimizer):
 #TODO: break here on n_iters
               if n_iter > max_iter or loss == 0:
                 break
+              if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
+                return orig_loss
               # update scale of initial Hessian approximation
 #TODO: was this also shifted? check the original implementation
               y_squared = y_dense.dot(y_dense)
@@ -1209,6 +1211,7 @@ class FBFGS(Optimizer):
 
               del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
+#TODO: this or the above should be redundant trace and remove redundancy
           if n_iter > max_iter or loss == 0:
             break
 
