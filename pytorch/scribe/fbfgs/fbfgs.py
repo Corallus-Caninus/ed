@@ -323,7 +323,7 @@ def _strong_wolfe(
             break
 
 #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if abs(gtd_new) <= -c2 * gtd : #and f_new < f_best:
+        if abs(gtd_new) <= -c2 * gtd and f_new < f_best:
             bracket = [t]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -480,7 +480,7 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
-            if abs(gtd_new) <= -c2 * gtd : #and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
+            if abs(gtd_new) <= -c2 * gtd and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
                 # Wolfe conditions satisfied
                 print("STRONG WOLFE")
                 success = True
