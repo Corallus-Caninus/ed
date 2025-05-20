@@ -417,7 +417,7 @@ def _strong_wolfe(
     # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
 
     #NOTE: we wait for bracket to collapse, we dont use max linesearch here, if it takes too long turn the bracket hyperparameters up.
-    while not done  and ls_iter < max_ls and f_new == f_new:
+    while not done  and ls_iter < max_ls and not is_nan:
 #        if len(bracket) < 2: # Check if bracket has at least 2 elements
 #            print("WOLFE PACK")
 #            return success, f_best, g_best, t_best, ls_func_evals
