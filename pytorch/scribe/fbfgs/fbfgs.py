@@ -441,6 +441,10 @@ def _strong_wolfe(
             bracket_gtd[1], # type: ignore[possibly-undefined]
         )
         t = torch.tensor(t)
+        # insta-NaN handler
+        if f_new != f_new:
+          t = torch.tensor(1.)
+          is_nan = True
 #        bracket_gtd[1]#,
 #        bracket_gtd[0]#,  # type: ignore[possibly-undefined]
 
