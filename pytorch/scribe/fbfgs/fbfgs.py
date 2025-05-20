@@ -290,6 +290,7 @@ def _strong_wolfe(
 #    g_new = g_new#
 #    gtd_new = gtd_new#
     success = False
+    is_nan = False
 
     # bracket an interval containing a point satisfying the Wolfe criteria
     t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
@@ -314,7 +315,7 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
         # check conditions
-        if (f_new > (f + c1 * t * gtd))  or f_new != f_new: #  or f_new >= f_prev: #NOTE: Ward condition
+        if (f_new > (f + c1 * t * gtd))  or (f_new != f_new and is_nan == True): #  or f_new >= f_prev: #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -354,6 +355,14 @@ def _strong_wolfe(
         t = _cubic_interpolate(
             t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
         )
+#TODO: insta-NaN handler
+        if f_new != f_new:
+          t = torch.tensor(1.)
+          min_step = torch.tensor(0.)
+          t = _cubic_interpolate(
+              t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
+          )
+          is_nan = True
         t = torch.tensor(t) #.item() # get scalar value from tensor
 
         # next step
@@ -685,7 +694,8 @@ class FBFGS(Optimizer):
         grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
         total_norm = torch.linalg.vector_norm(grad, ord=2.).to("cuda") # Move total_norm to direction_device
 #TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
-        total_norm = max(1e-3, total_norm)
+        total_norm = max(1e-9, total_norm)
+#        total_norm = total_norm + 1e-8
         grad = grad.div_(total_norm)
         return grad
 
@@ -816,7 +826,7 @@ class FBFGS(Optimizer):
         q = flat_grad.to("cuda").neg()
 #        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
 ##TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
-#        total_norm = max(1e-3, total_norm)
+#        total_norm = max(1e-9, total_norm)
 #        q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
@@ -867,7 +877,8 @@ class FBFGS(Optimizer):
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
-        total_norm = max(1e-3, total_norm)
+        total_norm = max(1e-9, total_norm)
+#        total_norm = total_norm + 1e-8
         d = d.div_(total_norm)
 
 #TODO: we can clop here if we can get sparse flat tensors supporting all the ops
@@ -1059,10 +1070,10 @@ class FBFGS(Optimizer):
 #TODO: can we try to needle the norm after to boost the gradient?
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
                 return orig_loss
-#TODO: IMPLEMENT THE DIRECTION HERE AI_COMMAND
+#TODO: we shouldnt double norm here. l1 the raw grad. (Why does this still work correctly?)
 #TODO: if we do this we should norm inf for Rollover stability
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
-              total_norm = max(1e-3, total_norm)
+              total_norm = max(1e-9, total_norm)
               d = d/total_norm
               d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
@@ -1086,7 +1097,7 @@ class FBFGS(Optimizer):
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
-              total_norm_y = max(1e-3, total_norm_y)
+#              total_norm_y = max(1e-3, total_norm_y)
               y_dense = y_dense/total_norm_y
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
 #              total_norm_s = torch.linalg.vector_norm(s_dense, ord=norm) # Move total_norm to direction_device
@@ -1158,20 +1169,6 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-#                if self.clop > 0:
-#                  y_sparse = y.to_sparse()
-#                if self.clop > 0:
-#                  y_sparse = y.to(self.direction_device) # Store y_sparse on direction_device
-#                  old_dirs.append(y_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
-#                else:
-#                  y_sparse = y.to(self.direction_device) # Store y_sparse on direction_device
-#                  old_dirs.append(y_sparse.to(self.direction_device)) # NOTE: was cpu
-#                if self.clop > 0:
-#                  s_sparse = s.to_sparse().to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
-#                  old_stps.append(s_sparse.coalesce().to(self.direction_device)) # NOTE: was cpu
-#                else:
-#                  s_sparse = s.to(self.direction_device).to(self.direction_device) # Store s_sparse on direction_device
-#                  old_stps.append(s_sparse.to(self.direction_device)) # NOTE: was cpu
                 if self.clop != 0:
                   old_dirs.append(y.to(self.direction_device)) # Store y as SparseFlatTensor
                   old_stps.append(s.to(self.direction_device)) # Store s as SparseFlatTensor
