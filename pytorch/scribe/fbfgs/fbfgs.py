@@ -696,11 +696,11 @@ class FBFGS(Optimizer):
                 torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
         finfo = torch.finfo(grad.dtype)
         grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
-        total_norm = torch.linalg.vector_norm(grad, ord=2.).to("cuda") # Move total_norm to direction_device
-#TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
-        total_norm = max(1e-9, total_norm)
-#        total_norm = total_norm + 1e-8
-        grad = grad.div_(total_norm)
+#        total_norm = torch.linalg.vector_norm(grad, ord=2.).to("cuda") # Move total_norm to direction_device
+##TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
+#        total_norm = max(1e-9, total_norm)
+##        total_norm = total_norm + 1e-8
+#        grad = grad.div_(total_norm)
         return grad
 
     # gather flat grads with L1 Normalization and without clopping
@@ -828,8 +828,7 @@ class FBFGS(Optimizer):
 ##        if t < 1:
 ##          similarity = similarity/t
         q = flat_grad.to("cuda").neg()
-#        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
-##TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
+#        total_norm = torch.linalg.vector_norm(q, ord=norm).to("cuda") # Move total_norm to direction_device
 #        total_norm = max(1e-9, total_norm)
 #        q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
@@ -1064,7 +1063,7 @@ class FBFGS(Optimizer):
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
 #TODO: or if history is empty. Better if we do this by history in case we reset the approximation.
 #          if prev_flat_grad is None :
-          if n_iter == 1 or prev_flat_grad is None:
+          if n_iter == 1 or prev_flat_grad is None :
               restart = False
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET")
@@ -1089,23 +1088,24 @@ class FBFGS(Optimizer):
           else:
               torch.cuda.empty_cache() # Clear cache before direction calculation
 #              if n_iter == 2:
-              t=1
+#              t=1
               if prev_flat_grad is not None:
                   prev_flat_grad = prev_flat_grad # Move prev_flat_grad to direction_device
 #TODO: ensure this is on GPU
               y_dense = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
               s_dense = (d.mul(t)) # Define s_dense here
-              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
+#              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 #Clop
 #TODO: can we scale after norm to prevent the magnitude after clopping from being epsilon? I think this would be mathematically unstable but would help with the direction approximation's curvature
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
-#              total_norm_y = max(1e-3, total_norm_y)
+              total_norm_y = max(1e-9, total_norm_y)
               y_dense = y_dense/total_norm_y
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
 #              total_norm_s = torch.linalg.vector_norm(s_dense, ord=norm) # Move total_norm to direction_device
-              s_dense = d
+#              s_dense = d
+              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 #              s_dense = s_dense/total_norm_s
 #              s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
               if self.clop != 0:
@@ -1141,7 +1141,7 @@ class FBFGS(Optimizer):
 #TODO: probably cant do the negative since this can cause the direction to vanish in the approximation.
 #              if  ys >= 1e-4  or ys <= -1e-4:
 #              if  ys >= 1e-8  or ys <= -1e-8:
-              if  ys >= 1e-4  :
+              if  ys >= 1e-8  :
                 # updating memory
 #                if len(old_dirs) <= history_size:
 #TODO: fix this so any cuda device gets this
