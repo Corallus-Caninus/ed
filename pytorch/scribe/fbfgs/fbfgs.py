@@ -828,9 +828,9 @@ class FBFGS(Optimizer):
 ##        if t < 1:
 ##          similarity = similarity/t
         q = flat_grad.to("cuda").neg()
-#        total_norm = torch.linalg.vector_norm(q, ord=norm).to("cuda") # Move total_norm to direction_device
-#        total_norm = max(1e-9, total_norm)
-#        q = q.div_(total_norm)
+        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
+        total_norm = max(1e-9, total_norm)
+        q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
@@ -1091,8 +1091,16 @@ class FBFGS(Optimizer):
 #              t=1
               if prev_flat_grad is not None:
                   prev_flat_grad = prev_flat_grad # Move prev_flat_grad to direction_device
-#TODO: ensure this is on GPU
-              y_dense = flat_grad.to("cuda").sub(prev_flat_grad.to("cuda"))
+#TODO: l2 here possibly before sum and feature extraction
+              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
+              total_norm_grad = max(1e-9, total_norm_grad)
+              norm_flat_grad = flat_grad/total_norm_grad
+
+              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
+              total_norm_prev_grad = max(1e-9, total_norm_prev_grad)
+              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad
+
+              y_dense = norm_flat_grad.to("cuda").sub(prev_norm_flat_grad.to("cuda"))
               s_dense = (d.mul(t)) # Define s_dense here
 #              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 #Clop
@@ -1141,7 +1149,7 @@ class FBFGS(Optimizer):
 #TODO: probably cant do the negative since this can cause the direction to vanish in the approximation.
 #              if  ys >= 1e-4  or ys <= -1e-4:
 #              if  ys >= 1e-8  or ys <= -1e-8:
-              if  ys >= 1e-8  :
+              if  ys >= 1e-4  :
                 # updating memory
 #                if len(old_dirs) <= history_size:
 #TODO: fix this so any cuda device gets this
