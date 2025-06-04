@@ -442,9 +442,12 @@ def _strong_wolfe(
         )
         t = torch.tensor(t)
         # insta-NaN handler
+#TODO: bracket collapses when we get NaN. Ensure we reset step size accordingly.
+#TODO: were jumping the border here
         if f_new != f_new:
           t = torch.tensor(1.)
           is_nan = True
+#TODO: need to revaluate here.
 #        bracket_gtd[1]#,
 #        bracket_gtd[0]#,  # type: ignore[possibly-undefined]
 
@@ -880,15 +883,19 @@ class FBFGS(Optimizer):
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
-        total_norm = max(1e-9, total_norm)
+        total_norm = max(1e-5, total_norm)
+        total_norm = min(1e5, total_norm)
 #        total_norm = total_norm + 1e-8
+        print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
 
 #TODO: we can clop here if we can get sparse flat tensors supporting all the ops
         mask = torch.logical_and(d > -clop, d < clop) #TODO: extract to sub_variance hyperparameter
         d[mask] = 0
+#TODO: need to debug if this is causing vanishing. Can iteratively increase the norm until max is above tolerance_change min.
 #        d = direction.to_sparse()
-#        print("direction elements: " + str((direction != 0).sum()) )
+        print("direction elements: " + str((d != 0).sum()) )
+        print("total_norm: " + str(total_norm))
         del mask # DEL 9: mask is no longer needed
         return d
 
