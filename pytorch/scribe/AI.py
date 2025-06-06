@@ -285,7 +285,8 @@ def closure(): # Define closure here, outside the if block
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
       loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
       total_loss += loss
-      loss.backward()
+      total_loss += avg_loss
+      total_loss.backward()
       cache = outputs.cache_params # redundant assignment
 # Process grad_vector_size in chunks of grad_chunk_size
 #      start_grad_idx = num_tokens - grad_vector_size
@@ -302,7 +303,6 @@ def closure(): # Define closure here, outside the if block
 #          cache = outputs.cache_params # Update cache
 
 
-    print(str(outputs.loss.item()))
     print(str(avg_loss))
     print(str(outputs.loss))
 
