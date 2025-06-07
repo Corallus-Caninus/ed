@@ -1059,7 +1059,6 @@ class FBFGS(Optimizer):
       while True:
           torch.cuda.empty_cache() # Clear cache before direction calculation
           # keep track of nb of iterations
-          gc.collect()
           n_iter += 1
           print("iteration: " + str(n_iter))
           print("[CRAM]")
@@ -1073,7 +1072,7 @@ class FBFGS(Optimizer):
           if n_iter == 1 or prev_flat_grad is None :
               restart = False
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
-              print("RESET")
+              print("RESET (n_iter=1 or prev_flat_grad is None)")
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
 #we wont be able to get an anchor on this data point so skip it. TODO: we also need a convergence and vanishing gradient check throughout direction but need to clean up the code
@@ -1093,21 +1092,21 @@ class FBFGS(Optimizer):
               gc.collect()
 #              print("d elements: " + str((d.values() != 0).sum()) )
           else:
-              torch.cuda.empty_cache() # Clear cache before direction calculation
-#              if n_iter == 2:
-#              t=1
-              if prev_flat_grad is not None:
-                  prev_flat_grad = prev_flat_grad # Move prev_flat_grad to direction_device
-#TODO: l2 here possibly before sum and feature extraction
+              # Calculate normalized gradients
               total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
               total_norm_grad = max(1e-9, total_norm_grad)
               norm_flat_grad = flat_grad/total_norm_grad
 
               total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
               total_norm_prev_grad = max(1e-9, total_norm_prev_grad)
-              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad
+              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
 
-              y_dense = norm_flat_grad.to("cuda").sub(prev_norm_flat_grad.to("cuda"))
+              # Calculate y_dense using clone and in-place operations to reduce allocations
+              y_dense = norm_flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
+              y_dense.sub_(prev_norm_flat_grad) # Perform subtraction in-place (avoids new tensor for subtraction result)
+              del norm_flat_grad # Free memory for temporary normalized grad
+              del prev_norm_flat_grad # Free memory for temporary normalized prev_grad
+
               s_dense = (d.mul(t)) # Define s_dense here
 #              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 #Clop
@@ -1115,10 +1114,12 @@ class FBFGS(Optimizer):
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
-              total_norm_y = max(1e-9, total_norm_y)
-              y_dense = y_dense/total_norm_y
+              # Handle potential division by zero or very small norm
+              if total_norm_y > 1e-9:
+                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
+              else:
+                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
-#              total_norm_s = torch.linalg.vector_norm(s_dense, ord=norm) # Move total_norm to direction_device
 #              s_dense = d
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 #              s_dense = s_dense/total_norm_s
@@ -1154,7 +1155,7 @@ class FBFGS(Optimizer):
 #TODO: if the case where ys <= -N is correct, can we find contradictions in the direction wrt curvature s.t. we can remove 2 indices in the approximation if they are sufficiently aligned and opposing? this may prevent us from popping valuable directions while maintaining directions that have been disproved
 #TODO: we can keep the gradient in whatever precision the closure gives us then upscale to the direction in 64 etc. (configurable hyperparam?). This should scale s.t. the precision greatly accounts for sparsity (more memory efficient to use higher precision?)
 #TODO: probably cant do the negative since this can cause the direction to vanish in the approximation.
-#              if  ys >= 1e-4  or ys <= -1e-4:
+#              if  ys >= 1e-4  or ys <= -1e-4: # Original condition
 #              if  ys >= 1e-8  or ys <= -1e-8:
               if  ys >= 1e-4  :
                 # updating memory
@@ -1200,10 +1201,10 @@ class FBFGS(Optimizer):
                 break
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
                 return orig_loss
-              # update scale of initial Hessian approximation
-#TODO: was this also shifted? check the original implementation
+              # Update scale of initial Hessian approximation
+# TODO: was this also shifted? check the original implementation
               y_squared = y_dense.dot(y_dense)
-              H_diag = ys / y_squared  # (y*y)
+              H_diag = ys / y_squared # (y*y)
               del y_squared
 
 
@@ -1220,7 +1221,7 @@ class FBFGS(Optimizer):
 
               gc.collect()
               if self.clop == 0:
-                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t,  clop=self.clop, norm=norm)
+                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
               else:
                 d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t,  clop=self.clop, norm=norm, y_norm = y_norm)
               torch.cuda.empty_cache()
@@ -1232,10 +1233,8 @@ class FBFGS(Optimizer):
             break
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
-#              prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)#NOTE: was self.direction_device
               prev_flat_grad = flat_grad#NOTE: was self.direction_device
           else:
-#              prev_flat_grad.copy_(flat_grad)#NOTE: was self.direction_device
               prev_flat_grad = flat_grad#NOTE: was self.direction_device
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
@@ -1254,7 +1253,7 @@ class FBFGS(Optimizer):
           gtd_sparse_product = flat_grad.to("cuda") * d.to("cuda")
           gtd = gtd_sparse_product.sum() # g * d
           del gtd_sparse_product
-          prev_flat_grad = prev_flat_grad.to(self.direction_device)
+#          prev_flat_grad = prev_flat_grad.to(self.direction_device) # This move is handled before y calculation
           t = self.t 
           # directional derivative is below tolerance
 #          if gtd > -tolerance_change:
