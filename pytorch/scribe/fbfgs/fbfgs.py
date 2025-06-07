@@ -1286,68 +1286,61 @@ class FBFGS(Optimizer):
                   best_needle_loss = prev_loss # Initialize best_needle_loss here to ensure it's always defined
                   print("saddle-search subroutine..")
                   Needle = True
-                  del flat_grad
                   gc.collect()
                   first_param = next(self.param_groups[0]['params'].__iter__())
-                  needle_t = torch.tensor(1e-1, dtype=first_param.dtype, device=first_param.device) #Unit vector until we restore curvature
-                  best_needle_t = needle_t
-#                  x_init_needle = self._clone_param() # Clone params for needle search
+                  needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Fixed step size
                   x_init_needle = x_init
 
                   # Iteratively increase t until loss no longer decreases
                   flat_grad = self._gather_flat_grad()
                   d_needle = flat_grad.neg()
-#TODO: topk may be better here and more reliable since we are expecting a loss of outliers from the gradients at saddle points (relatively flat and low curvature throughout)
-                  total_norm = torch.linalg.vector_norm(d_needle, ord=norm)
-                  d_needle = d_needle.div_(total_norm)
-                  # Keep only the top 200 elements by absolute value
-                  k = 200 # Number of elements to keep
-                  if d_needle.numel() > k:
-                      # Get the indices of the top k absolute values
-                      _, topk_indices = torch.topk(torch.abs(d_needle), k)
-                      # Create a mask for elements to zero out, initially True
-                      zero_mask = torch.ones_like(d_needle, dtype=torch.bool)
-                      # Set the mask to False for the top k indices (don't zero out these)
-                      zero_mask[topk_indices] = False
-                      # Zero out elements not in the mask
-                      d_needle[zero_mask] = 0
-                  print("num needle elements: " + str((d_needle != 0).sum()))#TODO: fixme
+                  best_d_needle = d_needle.clone() # Store the best direction found
 
-                  gtd = d_needle * flat_grad
-                  gtd = gtd.sum()
                   while True:
                       gc.collect()
-                      current_needle_loss, flat_grad= self._needle_directional_evaluate(closure, x_init_needle, needle_t, d_needle) # Use directional_evaluate
-                      gtd_needle_sparse_product = flat_grad * d_needle #TODO: use raw gradients so we dont double norm here
-                      gtd_needle = gtd_needle_sparse_product.sum() # g * d
-                      del gtd_needle_sparse_product
-                      armijo_condition = current_needle_loss <= best_needle_loss + c1 * needle_t * gtd
-#TODO: check these conditions..
-#TODO: dont use convergence metric?
-#                      if current_needle_loss <= best_needle_loss and abs(gtd_needle) < -c2 * gtd and armijo_condition: #and abs(gtd_needle) <= -c2 * gtd: #abs(gtd_new) <= -c2 * gtd:
-#TODO: either less than or equal or fix initial loss. Currently this is just a constant learning rate.
-                      if current_needle_loss <= best_needle_loss :
-#TODO: on first iteration we arent getting enough reduction so loss looks equivalent and we never linesearch.
+                      # Calculate L1 norm and normalize
+                      current_norm = torch.linalg.vector_norm(d_needle, ord=1.0)
+                      if current_norm < 1e-9: # Break if norm is too small
+                          print("Needle norm too small, breaking.")
+                          break
+                      d_needle.div_(current_norm)
+
+                      # Apply step relative to x_init_needle
+                      self._add_grad(needle_t, d_needle)
+                      # Evaluate loss at the new point
+                      current_needle_loss = float(closure())
+                      # Undo the step to return to x_init_needle
+                      self._add_grad(-needle_t, d_needle)
+
+                      print(f"  Needle step loss: {current_needle_loss}, Best loss: {best_needle_loss}")
+
+                      if current_needle_loss < best_needle_loss:
+                          # Loss reduced, update best loss and direction
                           best_needle_loss = current_needle_loss
-                          best_needle_t = needle_t
-                          needle_t = needle_t *2  # Increase t for next iteration
+                          best_d_needle = d_needle.clone()
+                          # Scale direction for the next iteration
+                          d_needle.mul_(0.3)
                       else:
-                          best_needle_t = 0.5*best_needle_t # Stop if loss no longer decreasing
-                          break # Stop if loss no longer decreasing
+                          # Loss did not reduce, break the loop
+                          print("Needle step did not reduce loss, breaking.")
+                          break
 
+                  # Apply the best step found
+                  self._add_grad(needle_t, best_d_needle)
+                  loss = best_needle_loss # Update the main loss
 
-                  self._add_grad(best_needle_t, d_needle) # Use best t for add_grad
+                  print(f" \n -----------Applied needle step with size: {needle_t} and final loss: \033[92m{loss}\033[0m-----------")
 
-                  loss_device = d.device
-                  print(f" \n -----------got needle stepsize: {needle_t} and loss: \033[92m{current_needle_loss}\033[0m on device: {loss_device}-----------") # Use best_needle_loss
                   del prev_flat_grad
                   del d_needle
+                  del best_d_needle
                   del x_init_needle
                   prev_flat_grad = None
                   torch.cuda.empty_cache()
                   gc.collect()
 
                 print("\033[91mLinesearch failure, resetting..\033[0m")
+                # If needle search also failed to reduce loss, reset history
                 ls_failed = True
               else:
                 ls_failed = False
