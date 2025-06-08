@@ -1307,8 +1307,10 @@ class FBFGS(Optimizer):
                   while not needle_loss_reduced and needle_norm_order >= 0: # Continue until overall reduction or norm order invalid
                       gc.collect()
                       # Start with the initial negative gradient and normalize it
+                      d_needle = initial_neg_grad.clone()
                       print(f"  Needle norm order: {needle_norm_order:.2f}")
                       current_norm = torch.linalg.vector_norm(d_needle, ord=needle_norm_order)
+
 
                       if current_norm < 1e-9 or needle_norm_order < 0: # Break outer loop if norm too small or order negative
                           print("Needle norm too small or order negative, breaking outer loop.")
