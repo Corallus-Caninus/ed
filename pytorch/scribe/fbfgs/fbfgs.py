@@ -1293,9 +1293,9 @@ class FBFGS(Optimizer):
                   initial_needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Starting step size for inner loop
 
                   # Capture the negative gradient once before the outer loop
-                  flat_grad = self._gather_flat_grad()
-                  d_needle = flat_grad.neg()
-                  initial_neg_grad = d_needle.clone() # Use the flat_grad from before line search
+                  # Use the flat_grad from before line search (captured before the main line search attempt)
+                  # flat_grad = self._gather_flat_grad() # No need to regather here
+                  initial_neg_grad = flat_grad.neg().clone()
 
                   best_overall_d_needle = None # Store the direction that achieved the best overall loss
                   best_overall_t = None # Store the step size that achieved the best overall loss
@@ -1303,10 +1303,10 @@ class FBFGS(Optimizer):
                   needle_norm_order = 1.0 # Start with L1 norm
 
                   needle_loss_reduced = False # Flag to track if needle reduced loss
-                  while True:
+                  # Outer loop: Decrease norm order until overall loss is reduced or underflow
+                  while not needle_loss_reduced and needle_norm_order >= 0: # Continue until overall reduction or norm order invalid
                       gc.collect()
                       # Start with the initial negative gradient and normalize it
-                      d_needle = initial_neg_grad.clone()
                       print(f"  Needle norm order: {needle_norm_order:.2f}")
                       current_norm = torch.linalg.vector_norm(d_needle, ord=needle_norm_order)
 
@@ -1315,64 +1315,62 @@ class FBFGS(Optimizer):
                           break
                       d_needle.div_(current_norm)
 
-                      # --- Inner Loop Starts Here ---
-                      # Iteratively increase step size (t) for the *current* normalized d_needle
+                      # --- Evaluate at initial step size (1.0) for this norm order ---
                       current_step_t = initial_needle_t.clone() # Start step size for this norm order iteration
-                      # The baseline loss for the step increase phase is the best loss found *before* this phase started.
-                      # This is the best_overall_needle_loss from the previous outer iteration (or prev_loss initially).
-                      loss_baseline_for_step_increase = best_overall_needle_loss
+                      self._add_grad(current_step_t, d_needle)
+                      loss_at_step_1 = float(closure())
+                      self._add_grad(-current_step_t, d_needle)
+                      print(f"  Step size 1.0 with norm order {needle_norm_order:.2f}, Loss: {loss_at_step_1}")
 
-                      best_t_for_this_norm_order = torch.tensor(0.0, dtype=first_param.dtype, device=first_param.device) # Initialize best t for this norm order
-                      best_loss_for_this_norm_order = float('inf') # Initialize best loss for this norm order
+                      # Check if step 1.0 reduced loss compared to the best overall loss found so far
+                      if loss_at_step_1 < best_overall_needle_loss:
+                          print(f"  Loss reduced at step 1.0 for norm order {needle_norm_order:.2f}. Exploring larger steps.")
+                          # Update overall best with step 1.0 result
+                          best_overall_needle_loss = loss_at_step_1
+                          best_overall_d_needle = d_needle.clone() # Store the normalized direction
+                          best_overall_t = current_step_t.clone() # Store the step size (1.0)
+                          needle_loss_reduced = True # Mark that we've found at least one reduction
 
-                      # Evaluate at t=0 to set the initial best loss for this norm order iteration
-                      best_loss_for_this_norm_order = loss_baseline_for_step_increase
-                      best_t_for_this_norm_order = torch.tensor(0.0, dtype=first_param.dtype, device=first_param.device) # t=0 gives the baseline loss
+                          # --- Inner Loop Starts Here ---
+                          # Iteratively increase step size (t) starting from 2.0
+                          current_step_t = torch.tensor(2.0, dtype=first_param.dtype, device=first_param.device)
+                          # The baseline loss for the step increase phase is the loss achieved at step 1.0
+                          loss_baseline_for_step_increase = loss_at_step_1
 
-                      while True: # Inner loop: Iteratively increase step size
+                          while True: # Inner loop: Iteratively increase step size
+                              # Add a safeguard against unbounded step size before applying
+                              if current_step_t > 1e10: # Arbitrary large number, could be a hyperparameter
+                                  print(f"    Step size {current_step_t:.4f} exceeded max limit, stopping step increase.")
+                                  break # Break inner loop
+
                           # Apply step
                           self._add_grad(current_step_t, d_needle)
                           # Evaluate loss at the new point
+                          # Evaluate loss
                           current_loss_at_step = float(closure())
                           # Undo step
                           self._add_grad(-current_step_t, d_needle)
-
                           print(f"    Trying step size {current_step_t:.4f} with norm order {needle_norm_order:.2f}, Loss: {current_loss_at_step}")
 
-                          # Check if this step improved the best loss *for this norm order iteration*
-                          if current_loss_at_step < best_loss_for_this_norm_order:
-                              best_loss_for_this_norm_order = current_loss_at_step
-                              best_t_for_this_norm_order = current_step_t.clone()
+                          # Check if this step improved the overall best loss
+                          if current_loss_at_step < best_overall_needle_loss:
+                              best_overall_needle_loss = current_loss_at_step
+                              best_overall_d_needle = d_needle.clone() # Store the normalized direction
+                              best_overall_t = current_step_t.clone() # Store the step size
 
-                          # Check the user's condition: increase step size while loss >= loss_baseline_for_step_increase
-                          if current_loss_at_step >= loss_baseline_for_step_increase:
-                               # Loss is still >= the baseline, try larger step
+                          # Check the user's condition: increase step size while loss <= loss_baseline_for_step_increase
+                          # The baseline is the loss at step 1.0 for this norm order.
+                          if current_loss_at_step <= loss_baseline_for_step_increase:
+                               # Loss is still <= the baseline (loss at step 1.0), try larger step
                                current_step_t *= 2 # Increase step size (e.g., double)
-                               # Add a safeguard against unbounded step size
-                               if current_step_t > 1e10: # Arbitrary large number, could be a hyperparameter
-                                   print(f"    Step size {current_step_t:.4f} exceeded max limit, stopping step increase.")
-                                   break # Break inner loop
                           else:
-                               # Loss is now < the baseline, stop increasing step size for this norm order
-                               print(f"    Step size {current_step_t:.4f} decreased loss below baseline {loss_baseline_for_step_increase:.4f} for norm order {needle_norm_order:.2f}, stopping step increase.")
+                               # Loss is now > the baseline (loss at step 1.0), stop increasing step size for this norm order
+                               print(f"    Loss increased above baseline {loss_baseline_for_step_increase:.4f} for norm order {needle_norm_order:.2f}, stopping step increase.")
                                break # Break inner loop
 
                       # --- Inner Loop Ends Here ---
-
-                      # After finding the best step size (best_t_for_this_norm_order) and its loss (best_loss_for_this_norm_order)
-                      # for the current norm order, check if this improved the overall best loss.
-                      if best_loss_for_this_norm_order < best_overall_needle_loss:
-                          # Overall loss reduced by this norm order and its best step size
-                          best_overall_needle_loss = best_loss_for_this_norm_order # Update overall best loss
-                          best_overall_d_needle = d_needle.clone() # Store the normalized direction that achieved this
-                          best_overall_t = best_t_for_this_norm_order.clone() # Store the step size that achieved this
-                          needle_loss_reduced = True # Set overall success flag
-                          # Reduce norm order for the next iteration of the outer loop
-                          needle_norm_order = needle_norm_order - 0.3
-                      else:
-                          # Loss did not reduce, break the loop
-                          print("Needle step did not reduce loss, breaking.")
-                          break
+                      # After inner loop, reduce norm order for the next outer iteration
+                      needle_norm_order -= 0.3
 
                   if needle_loss_reduced:
                       # Apply the best step found only if loss was reduced
@@ -1384,8 +1382,8 @@ class FBFGS(Optimizer):
                       # Needle failed to reduce loss, skip the step
                       print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
                       # Parameters remain at x_init_needle (which is the state before needle)
-                      ls_failed = True # Indicate that no successful step was found
-                      # Return the original loss, effectively skipping this data point
+                      ls_failed = True # Indicate that no successful step was found # This line is redundant as we return
+                      # Return the original loss, effectively skipping this data point # This is already handled below
                       return orig_loss
 
                   del prev_flat_grad
