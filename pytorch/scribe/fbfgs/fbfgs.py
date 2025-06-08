@@ -1295,11 +1295,13 @@ class FBFGS(Optimizer):
                   flat_grad = self._gather_flat_grad()
                   d_needle = flat_grad.neg()
                   best_d_needle = d_needle.clone() # Store the best direction found
+                  needle_norm_order = 1.0 # Start with L1 norm
 
                   while True:
                       gc.collect()
                       # Calculate L1 norm and normalize
-                      current_norm = torch.linalg.vector_norm(d_needle, ord=1.0)
+                      print(f"  Needle norm order: {needle_norm_order:.2f}")
+                      current_norm = torch.linalg.vector_norm(d_needle, ord=needle_norm_order)
                       if current_norm < 1e-9: # Break if norm is too small
                           print("Needle norm too small, breaking.")
                           break
@@ -1317,9 +1319,9 @@ class FBFGS(Optimizer):
                       if current_needle_loss < best_needle_loss:
                           # Loss reduced, update best loss and direction
                           best_needle_loss = current_needle_loss
-                          best_d_needle = d_needle.clone()
-                          # Scale direction for the next iteration
-                          d_needle.mul_(0.3)
+                          best_d_needle = d_needle.clone() # Store the direction *before* normalization for the final step
+                          # Reduce norm order for the next iteration
+                          needle_norm_order = max(0.1, needle_norm_order - 0.3) # Reduce by 0.3, clamp at 0.1
                       else:
                           # Loss did not reduce, break the loop
                           print("Needle step did not reduce loss, breaking.")
