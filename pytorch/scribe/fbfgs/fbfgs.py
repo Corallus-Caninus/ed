@@ -1339,8 +1339,9 @@ class FBFGS(Optimizer):
                       # Needle failed to reduce loss, skip the step
                       print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
                       # Parameters remain at x_init_needle (which is the state before needle)
-                      loss = prev_loss # Loss remains the same as before needle
                       ls_failed = True # Indicate that no successful step was found
+                      # Return the original loss, effectively skipping this data point
+                      return orig_loss
 
                   del prev_flat_grad
                   del d_needle
