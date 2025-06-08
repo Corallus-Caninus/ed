@@ -1277,6 +1277,7 @@ class FBFGS(Optimizer):
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
                       obj_func, self.direction_device, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
+#TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
               Needle = False
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
