@@ -1332,7 +1332,7 @@ class FBFGS(Optimizer):
                       while True: # Inner loop: Iteratively increase step size
                           # Apply step
                           self._add_grad(current_step_t, d_needle)
-                          # Evaluate loss
+                          # Evaluate loss at the new point
                           current_loss_at_step = float(closure())
                           # Undo step
                           self._add_grad(-current_step_t, d_needle)
@@ -1344,15 +1344,17 @@ class FBFGS(Optimizer):
                               best_loss_for_this_norm_order = current_loss_at_step
                               best_t_for_this_norm_order = current_step_t.clone()
 
-                          # Check the user's condition: increase step size while loss <= loss_baseline_for_step_increase
-                          if current_loss_at_step <= loss_baseline_for_step_increase:
-                               # Loss is still <= the baseline, try larger step
-                               # The baseline does NOT update here according to the user's request "until loss is not less than or equal"
-                               # The baseline is fixed at the loss *before* starting the step increase for this norm order.
+                          # Check the user's condition: increase step size while loss >= loss_baseline_for_step_increase
+                          if current_loss_at_step >= loss_baseline_for_step_increase:
+                               # Loss is still >= the baseline, try larger step
                                current_step_t *= 2 # Increase step size (e.g., double)
+                               # Add a safeguard against unbounded step size
+                               if current_step_t > 1e10: # Arbitrary large number, could be a hyperparameter
+                                   print(f"    Step size {current_step_t:.4f} exceeded max limit, stopping step increase.")
+                                   break # Break inner loop
                           else:
-                               # Loss is now > the baseline, stop increasing step size for this norm order
-                               print(f"    Step size {current_step_t:.4f} increased loss above baseline {loss_baseline_for_step_increase:.4f} for norm order {needle_norm_order:.2f}, stopping step increase.")
+                               # Loss is now < the baseline, stop increasing step size for this norm order
+                               print(f"    Step size {current_step_t:.4f} decreased loss below baseline {loss_baseline_for_step_increase:.4f} for norm order {needle_norm_order:.2f}, stopping step increase.")
                                break # Break inner loop
 
                       # --- Inner Loop Ends Here ---
