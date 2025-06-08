@@ -1297,6 +1297,7 @@ class FBFGS(Optimizer):
                   best_d_needle = d_needle.clone() # Store the best direction found
                   needle_norm_order = 1.0 # Start with L1 norm
 
+                  needle_loss_reduced = False # Flag to track if needle reduced loss
                   while True:
                       gc.collect()
                       # Calculate L1 norm and normalize
@@ -1319,6 +1320,7 @@ class FBFGS(Optimizer):
                       if current_needle_loss < best_needle_loss:
                           # Loss reduced, update best loss and direction
                           best_needle_loss = current_needle_loss
+                          needle_loss_reduced = True # Set flag
                           best_d_needle = d_needle.clone() # Store the best normalized direction
                           # Reduce norm order for the next iteration
                           needle_norm_order = needle_norm_order - 0.3 # Reduce by 0.3, no clamping
@@ -1327,11 +1329,18 @@ class FBFGS(Optimizer):
                           print("Needle step did not reduce loss, breaking.")
                           break
 
-                  # Apply the best step found
-                  self._add_grad(needle_t, best_d_needle)
-                  loss = best_needle_loss # Update the main loss
-
-                  print(f" \n -----------Applied needle step with size: {needle_t} and final loss: \033[92m{loss}\033[0m-----------")
+                  if needle_loss_reduced:
+                      # Apply the best step found only if loss was reduced
+                      self._add_grad(needle_t, best_d_needle)
+                      loss = best_needle_loss # Update the main loss
+                      print(f" \n -----------Applied needle step with size: {needle_t} and final loss: \033[92m{loss}\033[0m-----------")
+                      ls_failed = False # Needle succeeded in reducing loss
+                  else:
+                      # Needle failed to reduce loss, skip the step
+                      print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
+                      # Parameters remain at x_init_needle (which is the state before needle)
+                      loss = prev_loss # Loss remains the same as before needle
+                      ls_failed = True # Indicate that no successful step was found
 
                   del prev_flat_grad
                   del d_needle
