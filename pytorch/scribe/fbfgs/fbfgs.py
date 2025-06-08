@@ -1319,9 +1319,9 @@ class FBFGS(Optimizer):
                       if current_needle_loss < best_needle_loss:
                           # Loss reduced, update best loss and direction
                           best_needle_loss = current_needle_loss
-                          best_d_needle = d_needle.clone() # Store the direction *before* normalization for the final step
+                          best_d_needle = d_needle.clone() # Store the best normalized direction
                           # Reduce norm order for the next iteration
-                          needle_norm_order = max(0.1, needle_norm_order - 0.3) # Reduce by 0.3, clamp at 0.1
+                          needle_norm_order = needle_norm_order - 0.3 # Reduce by 0.3, no clamping
                       else:
                           # Loss did not reduce, break the loop
                           print("Needle step did not reduce loss, breaking.")
