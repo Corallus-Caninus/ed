@@ -1301,7 +1301,7 @@ class FBFGS(Optimizer):
                   best_overall_d_needle = None # Store the direction that achieved the best overall loss
                   best_overall_t = torch.tensor(0.0, dtype=first_param.dtype, device=first_param.device) # Store the step size that achieved the best overall loss
 
-                  needle_norm_order = 1.0 # Start with L1 norm
+                  needle_norm_order = 0.7 # Start with L1 norm - 0.3
 
                   needle_loss_reduced = False # Flag to track if needle reduced loss
                   # Outer loop: Decrease norm order until overall loss is reduced or underflow
