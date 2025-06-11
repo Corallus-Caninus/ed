@@ -1068,8 +1068,8 @@ class FBFGS(Optimizer):
           ############################################################
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
 #TODO: or if history is empty. Better if we do this by history in case we reset the approximation.
-#          if prev_flat_grad is None :
-          if n_iter == 1 or prev_flat_grad is None :
+          if prev_flat_grad is None :
+#          if n_iter == 1 or prev_flat_grad is None :
               restart = False
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
@@ -1328,7 +1328,7 @@ class FBFGS(Optimizer):
                       print(f"  Step size 1.0 with norm order {needle_norm_order:.2f}, Loss: {loss_at_step_1}, GTD: {gtd_at_step_1}")
 
                       # Check if step 1.0 is a descent direction and improved the overall best loss found so far
-                      if gtd_at_step_1 < 0 and loss_at_step_1 < best_overall_needle_loss:
+                      if gtd_at_step_1 <= 0 and loss_at_step_1 <= best_overall_needle_loss:
                           print(f"  Loss reduced at step 1.0 for norm order {needle_norm_order:.2f}. Exploring larger steps.")
                           # Update overall best with step 1.0 result
                           best_overall_needle_loss = loss_at_step_1
@@ -1374,13 +1374,13 @@ class FBFGS(Optimizer):
                                    print(f"    Armijo failed for norm order {needle_norm_order:.2f}, stopping step increase.")
                                    break # Break inner loop
                               # --- Inner Loop Ends Here ---
-                      elif gtd_at_step_1 >= 0:
+                      elif gtd_at_step_1 > 0:
                           # Step 1.0 is not a descent direction for this norm order.
                           print(f"  Step size 1.0 is not a descent direction (GTD >= 0) for norm order {needle_norm_order:.2f}. Skipping step increase.")
                           # No inner loop for step increase if not a descent direction.
                       else:
                           # Step 1.0 is a descent direction (GTD < 0) but did not reduce overall loss.
-                          print(f"  Step size 1.0 is a descent direction (GTD < 0) but did not reduce overall loss for norm order {needle_norm_order:.2f}. Skipping step increase.")
+                          print(f"  Step size 1.0 is a descent direction (GTD < 0) but increased overall loss for norm order {needle_norm_order:.2f}. Skipping step increase.")
                           # No inner loop for step increase if step 1.0 didn't reduce overall loss.
 
                       # After inner loop (or if skipped), reduce norm order for the next outer iteration
