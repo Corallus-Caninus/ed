@@ -992,9 +992,7 @@ class FBFGS(Optimizer):
       # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
       state = self.state[self._params[0]]
-#      state.setdefault("func_evals", 0)
-#      state.setdefault("n_iter", 0)
-#
+
       # evaluate initial f(x) and df/dx
       orig_loss = closure()
       loss = float(orig_loss)
@@ -1036,6 +1034,7 @@ class FBFGS(Optimizer):
       if "old_dirs" in state:
         old_dirs = state.get("old_dirs")
         old_stps = state.get("old_stps")
+        d = state.get("d")
         ro = state.get("ro")
 #TODO: TEST
 #      H_diag = state.get("H_diag")
@@ -1046,6 +1045,7 @@ class FBFGS(Optimizer):
         old_dirs= []
         old_stps= []
         ro= []
+        d = None
         prev_flat_grad = None
 
       n_iter = 0
@@ -1067,9 +1067,7 @@ class FBFGS(Optimizer):
           # compute gradient descent direction
           ############################################################
           #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
-#TODO: or if history is empty. Better if we do this by history in case we reset the approximation.
-          if prev_flat_grad is None :
-#          if n_iter == 1 or prev_flat_grad is None :
+          if d is None or prev_flat_grad is None :
               restart = False
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
@@ -1092,6 +1090,7 @@ class FBFGS(Optimizer):
               gc.collect()
 #              print("d elements: " + str((d.values() != 0).sum()) )
           else:
+              # d is already loaded from state
               flat_grad = self._gather_flat_grad()
               # Calculate normalized gradients
               total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
@@ -1493,6 +1492,7 @@ class FBFGS(Optimizer):
 #      state["d"] = d
 #      state["t"] = t
       state["old_dirs"] = old_dirs
+      state["d"] = d
       state["old_stps"] = old_stps
       state["ro"] = ro
 #      state["H_diag"] = H_diag
@@ -1510,6 +1510,7 @@ class FBFGS(Optimizer):
             "old_dirs": state_dict.get("old_dirs", []),
             "old_stps": state_dict.get("old_stps", []),
             "ro":  state_dict.get("ro", []),
+            "d": state_dict.get("d", None), # Save direction d
             "prev_flat_grad": state_dict.get("prev_flat_grad", None),
             "t": self.t, # Save step size t
             "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
@@ -1525,6 +1526,7 @@ class FBFGS(Optimizer):
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
             state["old_dirs"] = [tensor.to(device) for tensor in history.get("old_dirs", [])] # Load history and move to direction_device
+            state["d"] = history.get("d", None) # Load direction d
             state["old_stps"] = [tensor.to(device) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
             state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Load history and move to direction_device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
@@ -1537,6 +1539,8 @@ class FBFGS(Optimizer):
 
             if state["prev_flat_grad"] is not None:
                 state["prev_flat_grad"] = state["prev_flat_grad"].to(device) # Move prev_flat_grad to direction_device if it exists
+            if state["d"] is not None:
+                state["d"] = state["d"].to(device) # Move d to direction_device if it exists
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
