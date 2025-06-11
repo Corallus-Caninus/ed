@@ -1092,6 +1092,7 @@ class FBFGS(Optimizer):
               gc.collect()
 #              print("d elements: " + str((d.values() != 0).sum()) )
           else:
+              flat_grad = self._gather_flat_grad()
               # Calculate normalized gradients
               total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
               total_norm_grad = max(1e-9, total_norm_grad)
@@ -1103,7 +1104,7 @@ class FBFGS(Optimizer):
 
               # Calculate y_dense using clone and in-place operations to reduce allocations
               y_dense = norm_flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
-              y_dense.sub_(prev_norm_flat_grad) # Perform subtraction in-place (avoids new tensor for subtraction result)
+              y_dense.sub_(prev_norm_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
               del norm_flat_grad # Free memory for temporary normalized grad
               del prev_norm_flat_grad # Free memory for temporary normalized prev_grad
 
