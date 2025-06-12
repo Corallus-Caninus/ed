@@ -994,7 +994,7 @@ class FBFGS(Optimizer):
       state = self.state[self._params[0]]
 
       # evaluate initial f(x) and df/dx
-      orig_loss = closure()
+      orig_loss = closure() #TODO: should we be calling closure just for this?
       loss = float(orig_loss)
       current_evals = 1
 #      state["func_evals"] += 1
