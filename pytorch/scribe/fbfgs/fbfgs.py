@@ -1509,9 +1509,10 @@ class FBFGS(Optimizer):
         history = {
             "old_dirs": state_dict.get("old_dirs", []),
             "old_stps": state_dict.get("old_stps", []),
-            "ro":  state_dict.get("ro", []),
+            "ro": state_dict.get("ro", []),
             "d": state_dict.get("d", None), # Save direction d
             "prev_flat_grad": state_dict.get("prev_flat_grad", None),
+            "flat_grad": state_dict.get("flat_grad", None), # Save flat_grad
             "t": self.t, # Save step size t
             "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
         }
@@ -1526,10 +1527,11 @@ class FBFGS(Optimizer):
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
             state["old_dirs"] = [tensor.to(device) for tensor in history.get("old_dirs", [])] # Load history and move to direction_device
-            state["d"] = history.get("d", None) # Load direction d
             state["old_stps"] = [tensor.to(device) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
             state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Load history and move to direction_device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
+            state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
+            state["d"] = history.get("d", None) # Load direction d
             t_val = history.get("t", 1) # Load step size t, default to 1 if not found
             if isinstance(t_val, torch.Tensor):
                 self.t = t_val.item()
@@ -1540,7 +1542,9 @@ class FBFGS(Optimizer):
             if state["prev_flat_grad"] is not None:
                 state["prev_flat_grad"] = state["prev_flat_grad"].to(device) # Move prev_flat_grad to direction_device if it exists
             if state["d"] is not None:
-                state["d"] = state["d"].to(device) # Move d to direction_device if it exists
+                state["d"] = state["d"].to(device) # Move d to direction_device if it exists #TODO: this should be direction_device
+            if state["flat_grad"] is not None:
+                state["flat_grad"] = state["flat_grad"].to(device) # Move flat_grad to direction_device if it exists #TODO: this should be direction_device
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
