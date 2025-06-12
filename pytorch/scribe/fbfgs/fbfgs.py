@@ -994,7 +994,7 @@ class FBFGS(Optimizer):
       state = self.state[self._params[0]]
 
       # evaluate initial f(x) and df/dx
-      orig_loss = closure() #TODO: should we be calling closure just for this?
+      orig_loss = closure()
       loss = float(orig_loss)
       current_evals = 1
 #      state["func_evals"] += 1
@@ -1025,28 +1025,20 @@ class FBFGS(Optimizer):
       # tensors cached in state (for tracing)
 #      d = state.get("d")
 #      t = state.get("t")
-#      old_dirs= []
-#      old_stps= []
-#      ro= []
-#TODO: initialize al here not itl
-#TODO: configure: keep_hessian, grad_norm, fragment_sub_variance, direction_norm -- hyperparameters for L-BFGS-NS (reset hessian per datapoint/linesearch failure, sub_variance for fragmentation dropout, grad/direction (L1/L2)
-#TODO: also expose C1 and C2, we would expose max_linesearch but instead expose stall_wolfe since its a more informed and as reliable heuristic metric
       if "old_dirs" in state:
         old_dirs = state.get("old_dirs")
         old_stps = state.get("old_stps")
         d = state.get("d")
         ro = state.get("ro")
-#TODO: TEST
-#      H_diag = state.get("H_diag")
-#      prev_loss = state.get("prev_loss")
-#TODO: this may leak when we reset and assign prev_flat_grad to None
         prev_flat_grad = state.get("prev_flat_grad")
+        flat_grad = state.get("flat_grad")
       else:
         old_dirs= []
         old_stps= []
         ro= []
         d = None
         prev_flat_grad = None
+        flat_grad = None
 
       n_iter = 0
 #      d = flat_grad.neg() # Initialize d on direction_device
@@ -1066,15 +1058,17 @@ class FBFGS(Optimizer):
           ############################################################
           # compute gradient descent direction
           ############################################################
-          #TODO: DEPRECATED, the reset logic should be extracted, this should just be initializing d as grad etc.
-          if d is None or prev_flat_grad is None :
+          # If this is the first iteration or history was reset
+          if d is None or prev_flat_grad is None or flat_grad is None:
               restart = False
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
               d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
-#we wont be able to get an anchor on this data point so skip it. TODO: we also need a convergence and vanishing gradient check throughout direction but need to clean up the code
-#TODO: can we try to needle the norm after to boost the gradient?
+              # We won't be able to get an anchor on this data point so skip it.
+              # TODO: we also need a convergence and vanishing gradient check throughout direction but need to clean up the code
+              # TODO: can we try to needle the norm after to boost the gradient?
+              if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
                 return orig_loss
 #TODO: we shouldnt double norm here. l1 the raw grad. (Why does this still work correctly?)
@@ -1091,8 +1085,9 @@ class FBFGS(Optimizer):
 #              print("d elements: " + str((d.values() != 0).sum()) )
           else:
               # d is already loaded from state
-              flat_grad = self._gather_flat_grad()
+              # flat_grad is already loaded from state or computed in the previous iteration
               # Calculate normalized gradients
+              flat_grad = self._gather_flat_grad()
               total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
               total_norm_grad = max(1e-9, total_norm_grad)
               norm_flat_grad = flat_grad/total_norm_grad
