@@ -213,8 +213,6 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
 
         # Identify unit-length segments
         is_unit_segment = (segment_lengths == 1)
-        unit_segment_start_indices_mask = segment_starts_indices[is_unit_segment]
-        unit_segment_end_indices_mask = segment_ends_indices[is_unit_segment]
 
         # Identify unit-length segments
         is_unit_segment = (segment_lengths == 1)
