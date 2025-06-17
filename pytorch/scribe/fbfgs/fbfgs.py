@@ -1000,27 +1000,6 @@ class FBFGS(Optimizer):
 #      state["func_evals"] += 1
       al = []
 
-#      flat_grad = self._gather_flat_grad()
-#      flat_grad = self._gather_norm_flat_grad(2, False)
-#      flat_grad = self._gather_flat_grad()
-#TODO: remove this if we remove gradient normalization.
-#      opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
-#      opt_cond = flat_grad.abs().max() <= 0 #TODO: see TODO below. Can this ever happen with normalization? shouldn't.
-
-#TODO: HARDCORE.
-      # optimal condition
-#      if opt_cond :#or loss.isnan:# NOTE: this is a NaN check via equivalence
-#          print("GRAD CONVERGED") #TODO: if we throw out the hessian, will the gradient norm be able to fix this? No, the normalization scalar coeficient is clamped @ 1 so we only scale the norm down.
-						#TODO: can we flip the c2 condition to force curvature to escape like momentum?or like a cosine schedule of learning rate based on sub-optimal convergence? ideally we just set c2 correctly but this would be much more robust and easier to tune.
-#TODO: instead of resetting, or alongside resetting, flip the linesearch to search for > C2 condition as a momentum factor.
-#          print("RESET")
-#          d = flat_grad.neg()
-#          old_dirs = []
-#          old_stps = []
-#          ro = []
-#          H_diag = 1
-#          return orig_loss
-
 #TODO: put old_dirs, steps and ro on self.direction_device. Perform the direction calculation as efficiently as possible with this constraint so we can use main memory for history size
       # tensors cached in state (for tracing)
 #      d = state.get("d")
@@ -1030,16 +1009,23 @@ class FBFGS(Optimizer):
         old_stps = state.get("old_stps")
         d = state.get("d")
         ro = state.get("ro")
-        prev_flat_grad = state.get("prev_flat_grad")
-        flat_grad = state.get("flat_grad")
       else:
         old_dirs= []
         old_stps= []
         ro= []
         d = None
+#TODO: the else conditions should already be covered by the load and save state methods.
+      if "prev_flat_grad" in state:
+        prev_flat_grad = state.get("prev_flat_grad")
+      else:
         prev_flat_grad = None
+      if "flat_grad" in state:
+        flat_grad = state.get("flat_grad")
+      else:
         flat_grad = None
-
+#      flat_grad = None
+#      prev_flat_grad = None
+#
       n_iter = 0
 #      d = flat_grad.neg() # Initialize d on direction_device
       first_param = next(self.param_groups[0]['params'].__iter__())
@@ -1059,35 +1045,33 @@ class FBFGS(Optimizer):
           # compute gradient descent direction
           ############################################################
           # If this is the first iteration or history was reset
-          if d is None or prev_flat_grad is None or flat_grad is None:
+          if  n_iter == 1 or prev_flat_grad is None:
+#          if prev_flat_grad is None:
               restart = False
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
-              d = self._gather_flat_grad().neg()
               flat_grad = self._gather_flat_grad()
-              # We won't be able to get an anchor on this data point so skip it.
-              # TODO: we also need a convergence and vanishing gradient check throughout direction but need to clean up the code
-              # TODO: can we try to needle the norm after to boost the gradient?
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
-              if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
                 return orig_loss
-#TODO: we shouldnt double norm here. l1 the raw grad. (Why does this still work correctly?)
-#TODO: if we do this we should norm inf for Rollover stability
-              total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
-              total_norm = max(1e-9, total_norm)
-              d = d/total_norm
-              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
-#              d = d.to_sparse()
               H_diag = 1
               H_diag = torch.tensor(H_diag)
+#TODO: t shouldnt be 1 here for insta-wolfes
               t = 1
+              if len(old_dirs) > 0 and prev_flat_grad is not None:
+                if self.clop == 0:
+                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
+                else:
+                  d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t,  clop=self.clop, norm=norm, y_norm = y_norm)
+              else:
+                d = self._gather_flat_grad().neg()
+                total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
+                total_norm = max(1e-9, total_norm)
+                d = d/total_norm
+                d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+#              d = d.to_sparse()
               gc.collect()
 #              print("d elements: " + str((d.values() != 0).sum()) )
           else:
-              # d is already loaded from state
-              # flat_grad is already loaded from state or computed in the previous iteration
-              # Calculate normalized gradients
-              flat_grad = self._gather_flat_grad()
               total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
               total_norm_grad = max(1e-9, total_norm_grad)
               norm_flat_grad = flat_grad/total_norm_grad
@@ -1125,37 +1109,10 @@ class FBFGS(Optimizer):
               else:
                 y = y_dense
                 s = s_dense
-
-#              y = y*total_norm
-#
-#              total_norm = torch.linalg.vector_norm(y, ord=float("inf")) # Move total_norm to direction_device
-#              y = y/total_norm
-#              if self.clop != 0:
-#                y = y.to_sparse()
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ') # s_dense is still dense here
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-#TODO: may need to calculate ys before
-#              ys_sparse_product = y * s
-#              ys = ys_sparse_product.sum()#y*s
-#              del ys_sparse_product
-#TODO: SCALE HESSIAN^-1 COMPONENTS BY ERROR TO REFINE APPROXIMATION MORE EFFICIENTLY
-#TODO: with normalization, armijo should be able to solve s.t. c1 <= 1 since loss reduction is 1:1 if the direction approx is 100% accurate since direction is normalized. We also can expect flat_grad.dot(d) to be 0 if approx is 100% accurate since we set number of iterations based on c2 condition convergence minima. e.g.: c2 = 0.9 we do 10 iterations for 100% reduction.
-		#TODO: ys = flat_grad.dot(d)  * ys ? #TODO: (abs(gtd_prev) - -gtd ) * ys TODO: which  of these is better? they both make sense to me right now
-#              if ys > set this to 1e-10: #TODO:  this may not work with normalized unit vector failsafe. 1e-16 or precision of assigned dtype or better yet ys > 0
-#              if ys > 1e-16:
-#TODO: double check the math to ensure this will account for opposing direction-curvature
-#              if  ys >= 1e-8 or ys <= -1e-8:
-#TODO: ys is extremely important. This determines how quickly we can discover otherwise zero partials and therefore move the direction via history. It may be worth using double precision throughout this optimizer to account for the otherwise instability | ys -> epsilon
-#TODO: if the case where ys <= -N is correct, can we find contradictions in the direction wrt curvature s.t. we can remove 2 indices in the approximation if they are sufficiently aligned and opposing? this may prevent us from popping valuable directions while maintaining directions that have been disproved
-#TODO: we can keep the gradient in whatever precision the closure gives us then upscale to the direction in 64 etc. (configurable hyperparam?). This should scale s.t. the precision greatly accounts for sparsity (more memory efficient to use higher precision?)
-#TODO: probably cant do the negative since this can cause the direction to vanish in the approximation.
-#              if  ys >= 1e-4  or ys <= -1e-4: # Original condition
-#              if  ys >= 1e-8  or ys <= -1e-8:
               if  ys >= 1e-4  :
-                # updating memory
-#                if len(old_dirs) <= history_size:
-#TODO: fix this so any cuda device gets this
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1192,7 +1149,7 @@ class FBFGS(Optimizer):
                   old_stps.append(s.to(self.direction_device)) # Store s as dense Tensor
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
 #TODO: break here on n_iters
-              if n_iter > max_iter or loss == 0:
+              if n_iter >= max_iter or loss == 0:
                 break
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
                 return orig_loss
@@ -1215,6 +1172,7 @@ class FBFGS(Optimizer):
               num_old = len(old_dirs)
 
               gc.collect()
+              flat_grad = self._gather_flat_grad()
               if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
               else:
@@ -1224,8 +1182,8 @@ class FBFGS(Optimizer):
               del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
 #TODO: this or the above should be redundant trace and remove redundancy
-          if n_iter > max_iter or loss == 0:
-            break
+#          if n_iter >= max_iter or loss == 0:
+#            break
 
           if prev_flat_grad is None : #or state["n_iter"] == 1:
               prev_flat_grad = flat_grad#NOTE: was self.direction_device
@@ -1273,6 +1231,7 @@ class FBFGS(Optimizer):
                       obj_func, self.direction_device, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
 #TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
+#TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
               Needle = False
               if not success: #TODO: we chase misprinted lines
                 if  ls_failed: #TODO: we chase misprinted lines
@@ -1296,7 +1255,7 @@ class FBFGS(Optimizer):
                   best_overall_d_needle = None # Store the direction that achieved the best overall loss
                   best_overall_t = torch.tensor(0.0, dtype=first_param.dtype, device=first_param.device) # Store the step size that achieved the best overall loss
 
-                  needle_norm_order = 0.7 # Start with L1 norm - 0.3
+                  needle_norm_order = 1. # Start with L1 norm - 0.3
 
                   needle_loss_reduced = False # Flag to track if needle reduced loss
                   # Outer loop: Decrease norm order until overall loss is reduced or underflow
@@ -1323,7 +1282,7 @@ class FBFGS(Optimizer):
                       print(f"  Step size 1.0 with norm order {needle_norm_order:.2f}, Loss: {loss_at_step_1}, GTD: {gtd_at_step_1}")
 
                       # Check if step 1.0 is a descent direction and improved the overall best loss found so far
-                      if gtd_at_step_1 <= 0 and loss_at_step_1 <= best_overall_needle_loss:
+                      if gtd_at_step_1 < 0 and loss_at_step_1 <= best_overall_needle_loss:
                           print(f"  Loss reduced at step 1.0 for norm order {needle_norm_order:.2f}. Exploring larger steps.")
                           # Update overall best with step 1.0 result
                           best_overall_needle_loss = loss_at_step_1
