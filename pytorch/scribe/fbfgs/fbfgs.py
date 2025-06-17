@@ -209,9 +209,6 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
         starts_local_segments = non_zero_indices[start_indices_in_non_zero]
         # The end index should be the index *after* the last element of the segment.
         ends_local_segments = non_zero_indices[end_indices_in_non_zero] + 1
-
-        starts_local_segments = non_zero_indices[segment_starts_indices]
-        ends_local_segments = non_zero_indices[segment_ends_indices - 1] + 1
         segment_lengths = ends_local_segments - starts_local_segments
 
         # Identify unit-length segments
