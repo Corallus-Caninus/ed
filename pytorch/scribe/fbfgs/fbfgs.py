@@ -185,7 +185,7 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
     if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
         starts_local = torch.empty(0, dtype=torch.int64, device=device)
         ends_local = torch.empty(0, dtype=torch.int64, device=device)
-        values_local = torch.empty(0, dtype=dtype, device=device)
+        values_local = torch.empty(0, dtype=dtype, device=device) # Ensure dtype matches dense_tensor
         unit_indices_local = torch.empty(0, dtype=torch.long, device=device)
         unit_values_local = torch.empty(0, dtype=dtype, device=device)
         total_size_local = torch.tensor(total_size)
@@ -193,8 +193,22 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
         # Find start and end indices of contiguous segments
         diff = non_zero_indices[1:] - non_zero_indices[:-1]
         segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
-        segment_starts_indices = torch.cat([torch.tensor([0], device=device), segment_ends_indices])
-        segment_ends_indices = torch.cat([segment_ends_indices, torch.tensor([len(non_zero_indices)], device=device)])
+        # Ensure segment_ends_indices is 1D for concatenation
+        if segment_ends_indices.ndim == 0 and segment_ends_indices.numel() > 0:
+            segment_ends_indices = segment_ends_indices.unsqueeze(0)
+        elif segment_ends_indices.numel() == 0:
+            segment_ends_indices = torch.empty(0, dtype=torch.long, device=device)
+
+        # Correctly identify start and end indices in the non_zero_indices tensor
+        # Indices in non_zero_indices for the start of each segment
+        start_indices_in_non_zero = torch.cat([torch.tensor([0], dtype=torch.long, device=device), segment_ends_indices])
+        # Indices in non_zero_indices for the end of each segment
+        end_indices_in_non_zero = torch.cat([segment_ends_indices - 1, torch.tensor([len(non_zero_indices) - 1], dtype=torch.long, device=device)])
+
+        # Actual start and end indices in the original flattened tensor
+        starts_local_segments = non_zero_indices[start_indices_in_non_zero]
+        # The end index should be the index *after* the last element of the segment.
+        ends_local_segments = non_zero_indices[end_indices_in_non_zero] + 1
 
         starts_local_segments = non_zero_indices[segment_starts_indices]
         ends_local_segments = non_zero_indices[segment_ends_indices - 1] + 1
@@ -205,15 +219,21 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
         unit_segment_start_indices_mask = segment_starts_indices[is_unit_segment]
         unit_segment_end_indices_mask = segment_ends_indices[is_unit_segment]
 
+        # Identify unit-length segments
+        is_unit_segment = (segment_lengths == 1)
+        # Indices in starts_local_segments/ends_local_segments that correspond to unit segments
+        unit_segment_mask = is_unit_segment
+
         # Extract unit indices and values
-        unit_indices_local = non_zero_indices[unit_segment_start_indices_mask]
+        # The index of a unit segment is simply its start index
+        unit_indices_local = starts_local_segments[unit_segment_mask]
         unit_values_local = dense_tensor.view(-1)[unit_indices_local]
 
         # Filter out unit segments to get actual segments
         segment_mask = ~is_unit_segment
         starts_local = starts_local_segments[segment_mask]
         ends_local = ends_local_segments[segment_mask]
-        segment_lengths = segment_lengths[segment_mask]
+        segment_lengths = segment_lengths[segment_mask] # Update segment_lengths for non-unit segments
 
 
         avg_segment_length = segment_lengths.float().mean() if segment_lengths.numel() > 0 else torch.tensor(0.0)
