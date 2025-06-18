@@ -1116,6 +1116,7 @@ class FBFGS(Optimizer):
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
 #              s_dense = d
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
+              print(f"ys: {ys.item()}")
 #              s_dense = s_dense/total_norm_s
 #              s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
               if self.clop != 0:
