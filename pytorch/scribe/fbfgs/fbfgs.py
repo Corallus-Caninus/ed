@@ -881,6 +881,7 @@ class FBFGS(Optimizer):
         be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
         del q
 
+#TODO: if direction goes to NaN, drop the largest rho entry out iteratively?
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
             if direction_alignment_mask[i]:
@@ -1108,11 +1109,13 @@ class FBFGS(Optimizer):
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
+              total_norm_y = max(1e-9, norm_y)
               # Handle potential division by zero or very small norm
-              if total_norm_y > 1e-9:
-                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
-              else:
-                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
+#              if total_norm_y > 1e-9:
+#                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
+#              else:
+#                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
+              y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
 #              s_dense = d
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
