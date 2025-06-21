@@ -877,7 +877,8 @@ class FBFGS(Optimizer):
             else:
               hit_miss = hit_miss + str("_ ")
 
-        d = q.mul(H_diag)
+        d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
+        d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
         be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
         del q
 
@@ -950,7 +951,8 @@ class FBFGS(Optimizer):
             else:
               hit_miss = hit_miss + str("_ ")
 
-        d = q.mul(H_diag)
+        d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
+        d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
         be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
         del q
 
@@ -1076,8 +1078,8 @@ class FBFGS(Optimizer):
               if len(old_dirs) > 0 and prev_flat_grad is not None:
                 if self.clop == 0:
                   d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
-                else:
-                  d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t,  clop=self.clop, norm=norm, y_norm = y_norm)
+ else:
+ d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
               else:
                 d = self._gather_flat_grad().neg()
                 total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
@@ -1085,6 +1087,7 @@ class FBFGS(Optimizer):
                 d = d/total_norm
                 d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 #              d = d.to_sparse()
+              d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               gc.collect()
 #              print("d elements: " + str((d.values() != 0).sum()) )
           else:
@@ -1195,7 +1198,8 @@ class FBFGS(Optimizer):
               if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
               else:
-                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t,  clop=self.clop, norm=norm, y_norm = y_norm)
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
+              d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               torch.cuda.empty_cache()
 
               del H_diag
