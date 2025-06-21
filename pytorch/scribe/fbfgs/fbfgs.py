@@ -1078,8 +1078,8 @@ class FBFGS(Optimizer):
               if len(old_dirs) > 0 and prev_flat_grad is not None:
                 if self.clop == 0:
                   d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
- else:
- d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
+                else:
+                  d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
               else:
                 d = self._gather_flat_grad().neg()
                 total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
