@@ -1119,6 +1119,8 @@ class FBFGS(Optimizer):
               print(f"ys: {ys.item()}")
 #              s_dense = s_dense/total_norm_s
 #              s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
+              gc.collect()
+              torch.cuda.empty_cache()
               if self.clop != 0:
                 y = dense_to_sparse_flat_tensor(y_dense)
                 s = dense_to_sparse_flat_tensor(s_dense)
