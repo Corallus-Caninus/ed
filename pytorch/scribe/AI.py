@@ -187,7 +187,7 @@ def closure(): # Define closure here, outside the if block
     chunk_size=500 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 500 #5
+    grad_vector_size = 200 #5
     grad_chunk_size = 50
     num_tokens = input_ids.size(1)
     num_steps = 0
