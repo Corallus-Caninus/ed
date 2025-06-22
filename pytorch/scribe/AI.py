@@ -47,8 +47,8 @@ model_id = "AntonV/mamba2-370m-hf" # No longer needed, using state-spaces/mamba2
 #model_id = "AntonV/mamba2-2.7b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 history_filename = "fbfgs_history.pth"
 indices_filename = "dataset_indices.pth"
-tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
-#tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+#tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
@@ -90,11 +90,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
-    # Explicitly set dt_rank to match the 370M model's expected size
-    config.dt_rank = 32
-    # Explicitly set hidden_size to match the 370M model's expected size
-    config.hidden_size = 1024
-    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True)
+    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map=balanced)
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
