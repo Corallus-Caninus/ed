@@ -56,6 +56,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 #    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
     lora_config = LoraConfig.from_pretrained("AI_Checkpoint.ai")
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
+    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, device_map="balanced", trust_remote_code=True)
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced", trust_remote_code=True)
     model = PeftModel.from_pretrained(model, filename)
 #    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
@@ -72,7 +73,6 @@ if os.path.exists(filename): # Load model weights and optimizer history
              print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
     print("--- End Parameter requires_grad status ---")
 
-    if os.path.exists(indices_filename):
         dataset_indices = torch.load(indices_filename) # Load dataset_indices, default to empty dict
 
     current_dataset_filename = dataset_filename # Define current dataset filename
@@ -81,10 +81,9 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print("After loading - dataset_indices:", dataset_indices)
     seen_indices = dataset_indices.get(current_dataset_filename, []) # Load seen_indices, default to empty list
     print("After loading - seen_indices:", seen_indices)
+    print("After loading - seen_indices:", seen_indices)
     #current_index = dataset_indices.get(current_dataset_filename, 0) # No longer needed
     print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
-    model = model.to(dtype=torch.float16) # Move dtype conversion earlier
-
 #    lora_params = ( # Re-extract lora_params after loading checkpoint
 #        # Filter by requires_grad instead of name prefix
 #        param for param in model.parameters() if param.requires_grad
@@ -109,6 +108,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
+    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, device_map='balanced', torch_dtype=torch.float16, trust_remote_code=True)
 #    config = AutoConfig.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float32)
     print("--- Model Named Parameters (freshly loaded base model) ---")
