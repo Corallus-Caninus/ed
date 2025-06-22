@@ -819,16 +819,13 @@ class FBFGS(Optimizer):
         self._add_grad(t, d)
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
-#        flat_grad = self._gather_flat_grad()
-        self._set_param(x)
-        del x
-        return loss, flat_grad
         self._add_grad(-t, d) # Revert parameters
         return loss, flat_grad
 
     def _needle_directional_evaluate(self, closure, t, d):
         self._add_grad(t, d)
         loss = float(closure())
+        self._add_grad(-t, d) # Revert parameters
         return loss, flat_grad
 
 #TODO: NOTE after benchmarking, this is compute bound. Its not waiting to read from RAM its stalled in computation on CUDA. Parallelize this from the flat grads to here with a device_map ASAP.
@@ -1265,13 +1262,7 @@ class FBFGS(Optimizer):
                   best_overall_needle_loss = prev_loss # Initialize best_overall_needle_loss (loss before needle)
                   print("saddle-search subroutine..")
                   Needle = True
-                  first_param = next(self.param_groups[0]['params'].__iter__())
-                  needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Fixed step size
-                  initial_needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Starting step size for inner loop
-
-                  # Capture the negative gradient once before the outer loop
-                  # Use the flat_grad from before line search (captured before the main line search attempt)
-                  # flat_grad = self._gather_flat_grad() # No need to regather here
+                  # Capture the negative gradient once before the outer loop # Use the flat_grad from before line search (captured before the main line search attempt)
                   initial_neg_grad = flat_grad.neg().clone()
 
                   best_overall_d_needle = None # Store the direction that achieved the best overall loss
@@ -1326,7 +1317,7 @@ class FBFGS(Optimizer):
                               # _directional_evaluate handles adding/removing the step and evaluating closure
                               # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature. #TODO: fix this comment
                               current_loss_at_step, _ = self._directional_evaluate(closure, x_init_needle, current_step_t, d_needle)
-                              # Evaluate loss at the new point # Evaluate loss # Evaluate loss # Evaluate loss
+                              # Evaluate loss at the new point # Evaluate loss # Evaluate loss # Evaluate loss # Evaluate loss
                               # Evaluate loss
                               # Undo step
                               print(f"    Trying step size {current_step_t:.4f} with norm order {needle_norm_order:.2f}, Loss: {current_loss_at_step}")
@@ -1382,6 +1373,7 @@ class FBFGS(Optimizer):
                   del x_init_needle
                   torch.cuda.empty_cache()
                   gc.collect()
+
 
                 print("\033[91mLinesearch failure, resetting..\033[0m")
                 # If needle search also failed to reduce loss, reset history
