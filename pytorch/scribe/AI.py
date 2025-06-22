@@ -51,7 +51,7 @@ tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remot
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
-    config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
+    config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
 #    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
