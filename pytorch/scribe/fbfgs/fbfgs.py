@@ -296,7 +296,6 @@ def _strong_wolfe(
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
     gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
-    gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value # Get scalar value
     gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
     del gtd_new_sparse_product
 #    g_new = g_new#
@@ -364,7 +363,7 @@ def _strong_wolfe(
         # interpolate
         tmp = t
         t = _cubic_interpolate(
-            t_prev, f_prev, gtd_prev.to("cuda"), t, f_new, gtd_new.to("cuda"), bounds=(min_step, max_step)
+            t_prev, f_prev, gtd_prev, t, f_new, gtd_new, bounds=(min_step, max_step)
         )
 #TODO: insta-NaN handler
         if f_new != f_new:
@@ -445,11 +444,11 @@ def _strong_wolfe(
         # compute new trial value
         t = _cubic_interpolate(
             bracket[0],
-            bracket_f[0],
-            bracket_gtd[0], # type: ignore[possibly-undefined]
+            bracket_f[0], # type: ignore[possibly-undefined]
+            bracket_gtd[0],
             bracket[1],
-            bracket_f[1],
-            bracket_gtd[1], # type: ignore[possibly-undefined]
+            bracket_f[1], # type: ignore[possibly-undefined]
+            bracket_gtd[1],
         )
         t = torch.tensor(t)
         # insta-NaN handler
