@@ -54,12 +54,11 @@ if os.path.exists(filename): # Load model weights and optimizer history
     config = MambaConfig.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
 #    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
-    lora_config = LoraConfig.from_pretrained("AI_Checkpoint.ai")
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, device_map="balanced", trust_remote_code=True)
-    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced", trust_remote_code=True)
     model = PeftModel.from_pretrained(model, filename)
 #    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
+#    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
 #    model = LoraModel(model, lora_config, "default") # Load Lora weights
 #    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
     dataset_indices = {}
@@ -73,89 +72,32 @@ if os.path.exists(filename): # Load model weights and optimizer history
              print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
     print("--- End Parameter requires_grad status ---")
 
-        dataset_indices = torch.load(indices_filename) # Load dataset_indices, default to empty dict
-
     current_dataset_filename = dataset_filename # Define current dataset filename
-    if dataset_indices:
-        print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
-    print("After loading - dataset_indices:", dataset_indices)
-    seen_indices = dataset_indices.get(current_dataset_filename, []) # Load seen_indices, default to empty list
-    print("After loading - seen_indices:", seen_indices)
-    print("After loading - seen_indices:", seen_indices)
+    if os.path.exists(indices_filename):
+        dataset_indices = torch.load(indices_filename)
+        print("After loading - dataset_indices:", dataset_indices)
+        seen_indices = dataset_indices.get(current_dataset_filename, [])
+        print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
+        if dataset_indices:
+            print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
+    else:
+        dataset_indices = {}
+        seen_indices = []
+        print(f"Model checkpoint loaded successfully from '{filename}'. Starting new run for {current_dataset_filename}.")
     #current_index = dataset_indices.get(current_dataset_filename, 0) # No longer needed
-    print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
-#    lora_params = ( # Re-extract lora_params after loading checkpoint
-#        # Filter by requires_grad instead of name prefix
-#        param for param in model.parameters() if param.requires_grad
-#    )
-#    lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
-#    if not lora_params_list:
-#        print("Error: No trainable parameters (param.requires_grad=True) found after loading checkpoint.")
-#    else:
-#        print(f"Number of trainable parameters found after loading checkpoint: {len(lora_params_list)}")
-#    lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
-
-#    print("--- Trainable Parameters (after loading checkpoint) ---")
-#    lora_param_count_loaded = 0
-#    # Iterate through the collected list to print details
-#    for i, param in enumerate(lora_params_list):
-#        print(f"  Param {i}: Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-#        lora_param_count_loaded += 1
-#    # The count is simply the length of the list
-#    print(f"Total trainable parameters found after loading checkpoint: {len(lora_params_list)}")
-#    print("--- End Trainable Parameters (after loading checkpoint) ---")
 
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, device_map='balanced', torch_dtype=torch.float16, trust_remote_code=True)
-#    config = AutoConfig.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id, ignore_mismatched_sizes=True, device_map='balanced', torch_dtype=torch.float32)
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
     print("--- End Model Inspection (freshly loaded base model) ---")
-#    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
-#    model = Mamba2ForCausalLM.from_pretrained(config, device_map="balanced")
-#    model = MambaLMHeadModel.from_pretrained("state-spaces/mamba-130m")
     dataset_indices = {}
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
-#Initialize and apply LoRa config:
-#    lora_config =  LoraConfig(
-#            r=24,
-#            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-#            task_type="CAUSAL_LM",
-#            lora_alpha=11,
-#            bias="lora_only",
-##            init_weights = "bat",
-##            torch_dtype=torch.float16 ,
-##            bias="none",
-##            use_rslora=True,
-##            use_dora=True,
-#    )
-##    lora_params = (
-###        param for name, param in model.named_parameters()
-##        param for name, param in model.named_parameters()
-##        if  param.requires_grad
-###        if "bone_" in name and param.requires_grad
-##    )
-##    model = LoraModel(model, lora_config, "default")
-#    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
-#
-#    # Print requires_grad status *after* get_peft_model
-#    print("--- Parameter requires_grad status (after get_peft_model) ---")
-#    for name, param in model.named_parameters():
-#        if "lora_" in name or param.requires_grad: # Print Lora params or any trainable param
-#             print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-#    print("--- End Parameter requires_grad status ---")
-#
-#for name, param in model.named_parameters():
-#    if "lora_" in name:
-#        param.requires_grad = True
-
-#model = model.to(dtype=torch.float16) # Apply dtype conversion after PEFT
 model.train()
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
 #Get the params ready for passing as flat_grad to fbfgs
