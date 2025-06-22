@@ -325,7 +325,7 @@ def _strong_wolfe(
 #TODO something is broken in insta wolfe. Check the initialization. The same step size doesnt throw when not insta-wolfing
     while ls_iter < max_ls:
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
-#TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
+#TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a linear equation or a ratio
         # check conditions #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition #TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
         if (f_new > (f + c1 * t * gtd)) or (f_new != f_new and is_nan == True): # or f_new >= f_prev: #NOTE: Ward condition
             bracket = [t_prev, t]
@@ -384,7 +384,7 @@ def _strong_wolfe(
         g_prev = g_new.to(direction_device)
         gtd_prev = gtd_new # type: ignore[assignment] # type: ignore[assignment]
         f_new, g_new = obj_func(t, d)
-        ls_func_evals += 1
+        ls_func_evals += 1 # Increment func evals after new evaluation
         gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
         gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
         del gtd_new_sparse_product
@@ -491,7 +491,7 @@ def _strong_wolfe(
             insuf_progress = False
 
         # Evaluate new point
-        f_new, g_new = obj_func(x, t, d)
+        f_new, g_new = obj_func(t, d)
         ls_func_evals += 1
         gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
         gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
@@ -1235,11 +1235,11 @@ class FBFGS(Optimizer):
           if line_search_fn is not None:
               # perform line search, using user function
               if line_search_fn != "strong_wolfe":
-                  raise RuntimeError("only 'strong_wolfe' is supported")
+                  raise RuntimeError("Only 'strong_wolfe' is supported for line search.")
               else:
                   # No need to clone parameters, _directional_evaluate will handle adding/subtracting
-                  def obj_func(x_dummy, t_step, d_direction):  # x_dummy is ignored
-                      return self._directional_evaluate(closure, x_dummy, t_step, d_direction)
+                  def obj_func(t_step, d_direction):
+                      return self._directional_evaluate(closure, t_step, d_direction)
 
                   gc.collect()
                   prev_loss = loss
@@ -1282,7 +1282,7 @@ class FBFGS(Optimizer):
                           # --- Inner Loop Starts Here ---
                           # Evaluate loss and gradient at step 1.0 for this norm order
                           current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for this norm order iteration
-                          current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop # Start step size for inner loop
+                          current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop
                           loss_at_step_1, grad_at_step_1 = self._directional_evaluate(closure, None, current_step_t, d_needle) # Pass None for x_dummy
                           gtd_at_step_1 = (grad_at_step_1.to("cuda") * d_needle.to("cuda")).sum()
                           loss_baseline_for_step_increase = loss_at_step_1  # Baseline for Armijo and loss reduction check
