@@ -92,7 +92,6 @@ else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map="balanced")
-    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map="balanced")
     model.gradient_checkpointing_enable()
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
@@ -187,7 +186,7 @@ def closure(): # Define closure here, outside the if block
     chunk_size=500 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 200 #5
+    grad_vector_size = 20 #5
     grad_chunk_size = 50
     num_tokens = input_ids.size(1)
     num_steps = 0
