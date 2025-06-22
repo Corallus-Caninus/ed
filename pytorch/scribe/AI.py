@@ -42,12 +42,12 @@ model_id = "mistralai/Mamba-Codestral-7B-v0.1"
 dataset_filename = "haskell_code_dataset.ds"
 model_id = "hanzla/Falcon3-Mamba-R1-v0"
 model_id = "state-spaces/mamba2-370m"
-model_id = "AntonV/mamba2-1.3b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
+#model_id = "AntonV/mamba2-1.3b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 #model_id = "AntonV/mamba2-2.7b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 history_filename = "fbfgs_history.pth"
 indices_filename = "dataset_indices.pth"
-#tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
-tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
+#tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
@@ -85,26 +85,26 @@ if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
     model = model.to(dtype=torch.float16) # Move dtype conversion earlier
 
-    lora_params = ( # Re-extract lora_params after loading checkpoint
-        # Filter by requires_grad instead of name prefix
-        param for param in model.parameters() if param.requires_grad
-    )
-    lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
-    if not lora_params_list:
-        print("Error: No trainable parameters (param.requires_grad=True) found after loading checkpoint.")
-    else:
-        print(f"Number of trainable parameters found after loading checkpoint: {len(lora_params_list)}")
-    lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
+#    lora_params = ( # Re-extract lora_params after loading checkpoint
+#        # Filter by requires_grad instead of name prefix
+#        param for param in model.parameters() if param.requires_grad
+#    )
+#    lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
+#    if not lora_params_list:
+#        print("Error: No trainable parameters (param.requires_grad=True) found after loading checkpoint.")
+#    else:
+#        print(f"Number of trainable parameters found after loading checkpoint: {len(lora_params_list)}")
+#    lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
 
-    print("--- Trainable Parameters (after loading checkpoint) ---")
-    lora_param_count_loaded = 0
-    # Iterate through the collected list to print details
-    for i, param in enumerate(lora_params_list):
-        print(f"  Param {i}: Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-        lora_param_count_loaded += 1
-    # The count is simply the length of the list
-    print(f"Total trainable parameters found after loading checkpoint: {len(lora_params_list)}")
-    print("--- End Trainable Parameters (after loading checkpoint) ---")
+#    print("--- Trainable Parameters (after loading checkpoint) ---")
+#    lora_param_count_loaded = 0
+#    # Iterate through the collected list to print details
+#    for i, param in enumerate(lora_params_list):
+#        print(f"  Param {i}: Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+#        lora_param_count_loaded += 1
+#    # The count is simply the length of the list
+#    print(f"Total trainable parameters found after loading checkpoint: {len(lora_params_list)}")
+#    print("--- End Trainable Parameters (after loading checkpoint) ---")
 
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
@@ -123,63 +123,63 @@ else:
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #Initialize and apply LoRa config:
-    lora_config =  LoraConfig(
-            r=24,
-            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
-            task_type="CAUSAL_LM",
-            lora_alpha=11,
-            bias="lora_only",
-#            init_weights = "bat",
-#            torch_dtype=torch.float16 ,
-#            bias="none",
-#            use_rslora=True,
-#            use_dora=True,
-    )
-#    lora_params = (
-##        param for name, param in model.named_parameters()
-#        param for name, param in model.named_parameters()
-#        if  param.requires_grad
-##        if "bone_" in name and param.requires_grad
+#    lora_config =  LoraConfig(
+#            r=24,
+#            target_modules=["x_proj", "embeddings", "in_proj", "out_proj"],
+#            task_type="CAUSAL_LM",
+#            lora_alpha=11,
+#            bias="lora_only",
+##            init_weights = "bat",
+##            torch_dtype=torch.float16 ,
+##            bias="none",
+##            use_rslora=True,
+##            use_dora=True,
 #    )
-#    model = LoraModel(model, lora_config, "default")
-    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
+##    lora_params = (
+###        param for name, param in model.named_parameters()
+##        param for name, param in model.named_parameters()
+##        if  param.requires_grad
+###        if "bone_" in name and param.requires_grad
+##    )
+##    model = LoraModel(model, lora_config, "default")
+#    model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
+#
+#    # Print requires_grad status *after* get_peft_model
+#    print("--- Parameter requires_grad status (after get_peft_model) ---")
+#    for name, param in model.named_parameters():
+#        if "lora_" in name or param.requires_grad: # Print Lora params or any trainable param
+#             print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+#    print("--- End Parameter requires_grad status ---")
+#
+#for name, param in model.named_parameters():
+#    if "lora_" in name:
+#        param.requires_grad = True
 
-    # Print requires_grad status *after* get_peft_model
-    print("--- Parameter requires_grad status (after get_peft_model) ---")
-    for name, param in model.named_parameters():
-        if "lora_" in name or param.requires_grad: # Print Lora params or any trainable param
-             print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-    print("--- End Parameter requires_grad status ---")
-
-for name, param in model.named_parameters():
-    if "lora_" in name:
-        param.requires_grad = True
-
-model = model.to(dtype=torch.float16) # Apply dtype conversion after PEFT
+#model = model.to(dtype=torch.float16) # Apply dtype conversion after PEFT
 model.train()
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
 #Get the params ready for passing as flat_grad to fbfgs
-lora_params = (
-#        param for name, param in model.named_parameters()
-    # Use the same logic: filter by requires_grad
-    param for param in model.parameters() if param.requires_grad
-)
+#lora_params = (
+##        param for name, param in model.named_parameters()
+#    # Use the same logic: filter by requires_grad
+#    param for param in model.parameters() if param.requires_grad
+#)
 
-lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
-if not lora_params_list:
-    print("Error: No trainable parameters (param.requires_grad=True) found after initial setup.")
-else:
-    print(f"Number of trainable parameters found after initial setup: {len(lora_params_list)}")
-lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
-print("--- Trainable Parameters (after initial setup) ---")
-lora_param_count_initial = 0
-# Iterate through the collected list to print details
-for i, param in enumerate(lora_params_list):
-    print(f"  Param {i}: Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-    lora_param_count_initial += 1
-# The count is simply the length of the list
-print(f"Total trainable parameters found after initial setup: {len(lora_params_list)}")
-print("--- End Trainable Parameters (after initial setup) ---")
+#lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
+#if not lora_params_list:
+#    print("Error: No trainable parameters (param.requires_grad=True) found after initial setup.")
+#else:
+#    print(f"Number of trainable parameters found after initial setup: {len(lora_params_list)}")
+#lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
+#print("--- Trainable Parameters (after initial setup) ---")
+#lora_param_count_initial = 0
+## Iterate through the collected list to print details
+#for i, param in enumerate(lora_params_list):
+#    print(f"  Param {i}: Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+#    lora_param_count_initial += 1
+## The count is simply the length of the list
+#print(f"Total trainable parameters found after initial setup: {len(lora_params_list)}")
+#print("--- End Trainable Parameters (after initial setup) ---")
 
 
  
@@ -205,7 +205,7 @@ batch_train = None
 # Initialize optimizer *after* ensuring lora_params is correctly populated
 # NOTE: mathematically optimized wolfe condition for exponential decay
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.15, norm=1., clop=1e-9, c1=1e-1, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1., clop=1e-9, c1=1e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=1, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1., clop=1e-9, c1=1e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-8, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-9, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
@@ -305,6 +305,7 @@ def closure(): # Define closure here, outside the if block
 
     print(str(avg_loss))
     print(str(outputs.loss))
+    print(str(total_loss))
 
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
