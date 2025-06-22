@@ -81,11 +81,11 @@ if os.path.exists(filename): # Load model weights and optimizer history
         print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
         if dataset_indices:
             print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
-    model.gradient_checkpointing_enable()
-    else:
-        dataset_indices = {}
-        seen_indices = []
-        print(f"Model checkpoint loaded successfully from '{filename}'. Starting new run for {current_dataset_filename}.")
+        model.gradient_checkpointing_enable()
+    else: # This else belongs to the inner if
+        dataset_indices = {} # Initialize dataset_indices for new run
+        seen_indices = [] # Initialize seen_indices for new run
+        print(f"Model checkpoint loaded successfully from '{filename}'. Starting new run for {current_dataset_filename}.") # Print message for new run
     #current_index = dataset_indices.get(current_dataset_filename, 0) # No longer needed
 
 else:
