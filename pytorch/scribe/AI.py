@@ -90,7 +90,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
-    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map=balanced)
+    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True)
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
