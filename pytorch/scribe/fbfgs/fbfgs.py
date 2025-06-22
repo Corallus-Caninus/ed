@@ -279,12 +279,10 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 
 
 #TODO: on relaxed wolfe, if loss is reduced from the previous iteration of this data point, accept it (the first iteration is the relaxed wolfe).
-#TODO: cleanup all the AI device mess
 #TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
-#    obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
-    obj_func, direction_device, x, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100
+    obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100
 ):
 #TODO: this irks the mathematician in me.
     if c2 == 0:
@@ -300,7 +298,7 @@ def _strong_wolfe(
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
     gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
-    gtd_new = gtd_new_sparse_product.sum()
+    gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
     del gtd_new_sparse_product
 #    g_new = g_new#
 #    gtd_new = gtd_new#
@@ -317,7 +315,6 @@ def _strong_wolfe(
     t_best = t
     t = torch.tensor(t) # Ensure t is a tensor before the loop
     device = gtd.device
-#TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
     f_best = torch.tensor(f, device=device)
     g_best = g
 #    g = g.to(direction_device)
@@ -364,7 +361,7 @@ def _strong_wolfe(
         upper_bracket = max(t_prev, t)
         max_step = upper_bracket * capture_max_step
 #TODO: insufficient progress for bracket maybe? set min_step = t and if t doesnt change then break or nudge here, we miss the point on bracketing too
-  
+
         # interpolate
         tmp = t
         t = _cubic_interpolate(
@@ -389,7 +386,7 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
-        gtd_new = gtd_new_sparse_product.sum()
+        gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
         del gtd_new_sparse_product
 #        g_new = g_new#
         ls_iter += 1
@@ -443,7 +440,7 @@ def _strong_wolfe(
         if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 5:   # type: ignore[possibly-undefined]
            print("WOLFE PACK")
            return success, f_best, g_best.to("cuda"), t_best, ls_func_evals
-       		#TODO: return the wolfe pack here
+         #TODO: return the wolfe pack here
        #            break
 
         # compute new trial value
@@ -497,7 +494,7 @@ def _strong_wolfe(
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
-        gtd_new = gtd_new_sparse_product.sum()
+        gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
         del gtd_new_sparse_product
 #        g_new = g_new#
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
@@ -807,16 +804,16 @@ class FBFGS(Optimizer):
         assert offset == self._numel()
 
 #TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
-    def _clone_param(self):
-#        return [p.clone(memory_format=torch.contiguous_format).to(self.direction_device) for p in self._params]
-        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
-#        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+    # def _clone_param(self):
+    # #        return [p.clone(memory_format=torch.contiguous_format).to(self.direction_device) for p in self._params]
+    #     return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+    # #        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
-    def _set_param(self, params_data):
-        for p, pdata in zip(self._params, params_data):
-            p.copy_(pdata)
+    # def _set_param(self, params_data):
+    #     for p, pdata in zip(self._params, params_data):
+    #         p.copy_(pdata)
 
-    def _directional_evaluate(self, closure, x, t, d):
+    def _directional_evaluate(self, closure, t, d):
         self._add_grad(t, d)
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
@@ -824,13 +821,12 @@ class FBFGS(Optimizer):
         self._set_param(x)
         del x
         return loss, flat_grad
+        self._add_grad(-t, d) # Revert parameters
+        return loss, flat_grad
 
-    def _needle_directional_evaluate(self, closure, x, t, d):
+    def _needle_directional_evaluate(self, closure, t, d):
         self._add_grad(t, d)
         loss = float(closure())
-        flat_grad = self._gather_flat_grad()
-#        flat_grad = self._gather_flat_grad()
-        self._set_param(x)
         return loss, flat_grad
 
 #TODO: NOTE after benchmarking, this is compute bound. Its not waiting to read from RAM its stalled in computation on CUDA. Parallelize this from the flat grads to here with a device_map ASAP.
@@ -1227,7 +1223,7 @@ class FBFGS(Optimizer):
           ############################################################
           # reset initial guess for step size
           # directional derivative
-  	#TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
+   #TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
 #          flat_grad = self._gather_norm_flat_grad(1, True) TODO: is this right?
           gtd_sparse_product = flat_grad.to("cuda") * d.to("cuda")
           gtd = gtd_sparse_product.sum() # g * d
@@ -1254,7 +1250,7 @@ class FBFGS(Optimizer):
                   prev_loss = loss
 
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                      obj_func, self.direction_device, x_init, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
+                      obj_func, self.direction_device, t, d, loss, flat_grad, gtd, c2=c2,c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step
                   )
 #TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
 #TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
@@ -1267,7 +1263,6 @@ class FBFGS(Optimizer):
                   best_overall_needle_loss = prev_loss # Initialize best_overall_needle_loss (loss before needle)
                   print("saddle-search subroutine..")
                   Needle = True
-                  gc.collect()
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Fixed step size
                   x_init_needle = x_init
@@ -1285,7 +1280,6 @@ class FBFGS(Optimizer):
 
                   needle_loss_reduced = False # Flag to track if needle reduced loss
                   # Outer loop: Decrease norm order until overall loss is reduced or underflow
-                  while not needle_loss_reduced and needle_norm_order >= 0: # Continue until overall reduction or norm order invalid
                       gc.collect()
                       # Start with the initial negative gradient and normalize it
                       d_needle = initial_neg_grad.clone()
@@ -1300,7 +1294,7 @@ class FBFGS(Optimizer):
 
                       # --- Inner Loop Starts Here ---
                       # Evaluate loss and gradient at step 1.0 for this norm order
-                      current_step_t = initial_needle_t.clone() # Start step size for this norm order iteration
+                      current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Start step size for this norm order iteration
                       loss_at_step_1, grad_at_step_1 = self._directional_evaluate(closure, x_init_needle, current_step_t, d_needle)
                       gtd_at_step_1 = (grad_at_step_1.to("cuda") * d_needle.to("cuda")).sum()
                       loss_baseline_for_step_increase = loss_at_step_1 # Baseline for Armijo and loss reduction check
@@ -1328,7 +1322,7 @@ class FBFGS(Optimizer):
                               # Apply step
                               # We need to evaluate at x_init_needle + current_step_t * d_needle
                               # _directional_evaluate handles adding/removing the step and evaluating closure
-                              # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature.
+                              # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature. #TODO: fix this comment
                               current_loss_at_step, _ = self._directional_evaluate(closure, x_init_needle, current_step_t, d_needle)
                               # Evaluate loss at the new point
                               # Evaluate loss
@@ -1365,7 +1359,7 @@ class FBFGS(Optimizer):
 
                       # After inner loop (or if skipped), reduce norm order for the next outer iteration
                       needle_norm_order -= 0.3
-
+                  while not needle_loss_reduced and needle_norm_order >= 0: # Continue until overall reduction or norm order invalid
                   if needle_loss_reduced:
                       # Apply the best step found only if loss was reduced
                       self._add_grad(best_overall_t, best_overall_d_needle) # Use the best step size and best direction
@@ -1377,7 +1371,6 @@ class FBFGS(Optimizer):
                       print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
                       # Parameters remain at x_init_needle (which is the state before needle)
                       ls_failed = True # Indicate that no successful step was found # This line is redundant as we return
-                      # Return the original loss, effectively skipping this data point # This is already handled below
                       return orig_loss
 
                   del prev_flat_grad
