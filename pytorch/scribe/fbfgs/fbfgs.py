@@ -877,7 +877,7 @@ class FBFGS(Optimizer):
             else:
               hit_miss = hit_miss + str("_ ")
 
-        d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
+#TODO: nan_to_num can lead to everything going to NaN and is not a fix for ys. It does help with edge cases though.
         d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
         be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
         del q
@@ -896,12 +896,15 @@ class FBFGS(Optimizer):
               d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled.to("cuda"), d) # Sparse addition
               #del dense_old_stp
 
+        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
         total_norm = max(1e-5, total_norm)
         total_norm = min(1e5, total_norm)
+        if total_norm != total_norm:
+          total_norm = 1e-5
 #        total_norm = total_norm + 1e-8
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
@@ -952,7 +955,6 @@ class FBFGS(Optimizer):
               hit_miss = hit_miss + str("_ ")
 
         d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
-        d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
         be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
         del q
 
@@ -963,6 +965,7 @@ class FBFGS(Optimizer):
               alpha_val = al[i] - be_i.sum() * ro[i].item()
               d = d + (old_stps[i].to("cuda") * (alpha_val))
 
+        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
