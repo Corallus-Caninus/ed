@@ -42,6 +42,7 @@ model_id = "mistralai/Mamba-Codestral-7B-v0.1"
 dataset_filename = "haskell_code_dataset.ds"
 model_id = "hanzla/Falcon3-Mamba-R1-v0"
 model_id = "state-spaces/mamba2-370m"
+model_id = "AntonV/mamba2-370m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 #model_id = "AntonV/mamba2-1.3b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 #model_id = "AntonV/mamba2-2.7b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
 history_filename = "fbfgs_history.pth"
@@ -56,7 +57,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 #    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, device_map="balanced", trust_remote_code=True)
-    model = PeftModel.from_pretrained(model, filename)
+#    model = PeftModel.from_pretrained(model, filename)
 #    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
 #    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
 #    model = LoraModel(model, lora_config, "default") # Load Lora weights
@@ -89,7 +90,11 @@ if os.path.exists(filename): # Load model weights and optimizer history
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
-    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, device_map='balanced', torch_dtype=torch.float16, trust_remote_code=True)
+    # Explicitly set dt_rank to match the 370M model's expected size
+    config.dt_rank = 32
+    # Explicitly set hidden_size to match the 370M model's expected size
+    config.hidden_size = 1024
+    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True)
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
