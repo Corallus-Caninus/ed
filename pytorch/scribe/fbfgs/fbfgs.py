@@ -279,7 +279,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 
 
 #TODO: on relaxed wolfe, if loss is reduced from the previous iteration of this data point, accept it (the first iteration is the relaxed wolfe).
-#TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down
+#TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down #TODO: cleanup all the AI device mess
 def _strong_wolfe(
 #TODO: c2 = 1 - 1/num_iterations #we always solve given c2 reduction each data point the exact number required
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100
@@ -299,7 +299,7 @@ def _strong_wolfe(
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
     gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
-    gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
+    gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value # Get scalar value
     gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
     del gtd_new_sparse_product
 #    g_new = g_new#
@@ -328,7 +328,7 @@ def _strong_wolfe(
     while ls_iter < max_ls:
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a liner equation or a ratio
-        # check conditions #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
+        # check conditions #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition #TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
         if (f_new > (f + c1 * t * gtd)) or (f_new != f_new and is_nan == True): # or f_new >= f_prev: #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
@@ -384,8 +384,8 @@ def _strong_wolfe(
         f_prev = f_new
 #        g_prev = g_new.clone(memory_format=torch.contiguous_format)
         g_prev = g_new.to(direction_device)
-        gtd_prev = gtd_new # type: ignore[assignment]
-        f_new, g_new = obj_func(x, t, d)
+        gtd_prev = gtd_new # type: ignore[assignment] # type: ignore[assignment]
+        f_new, g_new = obj_func(t, d)
         ls_func_evals += 1
         gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
         gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
@@ -1297,7 +1297,7 @@ class FBFGS(Optimizer):
                       # --- Inner Loop Starts Here ---
                       # Evaluate loss and gradient at step 1.0 for this norm order
                       current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Start step size for this norm order iteration
-                      current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Start step size for inner loop
+                      current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Start step size for inner loop # Start step size for inner loop
                       loss_at_step_1, grad_at_step_1 = self._directional_evaluate(closure, current_step_t, d_needle)
                       gtd_at_step_1 = (grad_at_step_1.to("cuda") * d_needle.to("cuda")).sum()
                       loss_baseline_for_step_increase = loss_at_step_1 # Baseline for Armijo and loss reduction check
@@ -1327,7 +1327,7 @@ class FBFGS(Optimizer):
                               # _directional_evaluate handles adding/removing the step and evaluating closure
                               # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature. #TODO: fix this comment
                               current_loss_at_step, _ = self._directional_evaluate(closure, x_init_needle, current_step_t, d_needle)
-                              # Evaluate loss at the new point # Evaluate loss
+                              # Evaluate loss at the new point # Evaluate loss # Evaluate loss
                               # Evaluate loss
                               # Undo step
                               print(f"    Trying step size {current_step_t:.4f} with norm order {needle_norm_order:.2f}, Loss: {current_loss_at_step}")
