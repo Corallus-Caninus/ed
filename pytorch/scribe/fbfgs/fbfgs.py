@@ -1267,7 +1267,6 @@ class FBFGS(Optimizer):
                   Needle = True
                   first_param = next(self.param_groups[0]['params'].__iter__())
                   needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Fixed step size
-                  x_init_needle = x_init
                   initial_needle_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device) # Starting step size for inner loop
 
                   # Capture the negative gradient once before the outer loop
@@ -1327,7 +1326,7 @@ class FBFGS(Optimizer):
                               # _directional_evaluate handles adding/removing the step and evaluating closure
                               # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature. #TODO: fix this comment
                               current_loss_at_step, _ = self._directional_evaluate(closure, x_init_needle, current_step_t, d_needle)
-                              # Evaluate loss at the new point # Evaluate loss # Evaluate loss
+                              # Evaluate loss at the new point # Evaluate loss # Evaluate loss # Evaluate loss
                               # Evaluate loss
                               # Undo step
                               print(f"    Trying step size {current_step_t:.4f} with norm order {needle_norm_order:.2f}, Loss: {current_loss_at_step}")
@@ -1381,7 +1380,6 @@ class FBFGS(Optimizer):
                   if best_overall_t is not None: del best_overall_t
                   del d_needle # d_needle is cloned inside the loop, but the last one might persist
                   del x_init_needle
-                  prev_flat_grad = None
                   torch.cuda.empty_cache()
                   gc.collect()
 
