@@ -1351,26 +1351,26 @@ class FBFGS(Optimizer):
                       # After inner loop (or if skipped), reduce norm order for the next outer iteration
                       needle_norm_order -= 0.3 # type: ignore[operator]
                   while not needle_loss_reduced and needle_norm_order >= 0: # Continue until overall reduction or norm order invalid
-                  if needle_loss_reduced:
-                      # Apply the best step found only if loss was reduced
-                      self._add_grad(best_overall_t, best_overall_d_needle) # Use the best step size and best direction
-                      loss = best_overall_needle_loss # Update the main loss
-                      print(f" \n -----------Applied needle step with size: {best_overall_t:.4f} and final loss: \033[92m{loss}\033[0m-----------")
-                      ls_failed = False # Needle succeeded in reducing loss
-                  else:
-                      # Needle failed to reduce loss, skip the step
-                      print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
-                      # Parameters remain at x_init_needle (which is the state before needle)
-                      ls_failed = True # Indicate that no successful step was found # This line is redundant as we return
-                      return orig_loss
-                  del prev_flat_grad
-                  del initial_neg_grad
-                  if best_overall_d_needle is not None: del best_overall_d_needle
-                  if best_overall_t is not None: del best_overall_t
-                  del d_needle # d_needle is cloned inside the loop, but the last one might persist
-                  del x_init_needle
-                  torch.cuda.empty_cache()
-                  gc.collect()
+                if needle_loss_reduced:
+                    # Apply the best step found only if loss was reduced
+                    self._add_grad(best_overall_t, best_overall_d_needle) # Use the best step size and best direction
+                    loss = best_overall_needle_loss # Update the main loss
+                    print(f" \n -----------Applied needle step with size: {best_overall_t:.4f} and final loss: \033[92m{loss}\033[0m-----------")
+                    ls_failed = False # Needle succeeded in reducing loss
+                else:
+                    # Needle failed to reduce loss, skip the step
+                    print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
+                    # Parameters remain at x_init_needle (which is the state before needle)
+                    ls_failed = True # Indicate that no successful step was found # This line is redundant as we return
+                    return orig_loss
+                del prev_flat_grad
+                del initial_neg_grad
+                if best_overall_d_needle is not None: del best_overall_d_needle
+                if best_overall_t is not None: del best_overall_t
+                del d_needle # d_needle is cloned inside the loop, but the last one might persist
+                del x_init_needle
+                torch.cuda.empty_cache()
+                gc.collect()
 
 
                 print("\033[91mLinesearch failure, resetting..\033[0m")
