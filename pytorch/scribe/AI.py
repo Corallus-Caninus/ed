@@ -81,6 +81,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
         print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
         if dataset_indices:
             print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
+    model.gradient_checkpointing_enable()
     else:
         dataset_indices = {}
         seen_indices = []
@@ -92,6 +93,7 @@ else:
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map="balanced")
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map="balanced")
+    model.gradient_checkpointing_enable()
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
@@ -141,8 +143,6 @@ else:
     dataset = load_dataset("codeparrot/github-code", split="train", name="Haskell-all", streaming=False)
     #dataset = load_dataset("codeparrot/github-code", split="train", name="C-all",streaming=True)
     dataset.save_to_disk(dataset_filename)
-
-model.gradient_checkpointing_enable()
 
 batch_train = None
 
