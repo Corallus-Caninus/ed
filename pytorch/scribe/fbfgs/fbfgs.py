@@ -1106,7 +1106,7 @@ class FBFGS(Optimizer):
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
-              total_norm_y = max(1e-9, norm_y)
+              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
               # Handle potential division by zero or very small norm
 #              if total_norm_y > 1e-9:
 #                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
