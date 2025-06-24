@@ -1377,7 +1377,6 @@ class FBFGS(Optimizer):
                   # If needle search also failed to reduce loss, reset history
                   ls_failed = True
               else: # Line search succeeded
-              else: # Line search succeeded
                   ls_failed = False
 
           # TODO: I dont like having to do this but we want l2 for the direction selection.
