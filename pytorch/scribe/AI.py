@@ -183,10 +183,10 @@ def closure(): # Define closure here, outside the if block
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
-    chunk_size=50 #1000
+    chunk_size=100 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 50 #5
+    grad_vector_size = 100 #5
     grad_chunk_size = 50
     num_tokens = input_ids.size(1)
     num_steps = 0
@@ -309,16 +309,16 @@ while True:
         print("got num_tokens: " + str(input_ids.size(1)))
 #        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
 #TODO: warmup linearly, increasing allowed context length over time. Also, does the seen indices work if we reshuffle the dataset?
-        if (input_ids.size(1) > 100 and len(seen_indices) < 25) : #NOTE:warmup period
-            print(f"Truncating index {dataset_idx} (token length {input_ids.size(1)}) to 100 tokens during warmup.")
+        if (input_ids.size(1) > 200 and len(seen_indices) < 50) : #NOTE:warmup period
+            print(f"Truncating index {dataset_idx} (token length {input_ids.size(1)}) to 200 tokens during warmup.")
             # Truncate input_ids and attention_mask
-            max_warmup_length = 100
+            max_warmup_length = 200
             input_ids = input_ids[:, :max_warmup_length]
             attention_mask = attention_mask[:, :max_warmup_length]
             print(f"Truncated token length: {input_ids.size(1)}")
 
-        # Skip if token length is less than 1000 after potential truncation
-        if input_ids.size(1) < 100:
+        # Skip if token length is less than 2000 after potential truncation
+        if input_ids.size(1) < 200:
             print(
                 f"Skipping index {dataset_idx} due to token length ({input_ids.size(1)}) being less than 1000."
             )
