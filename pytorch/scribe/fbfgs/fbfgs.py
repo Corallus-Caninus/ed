@@ -1272,7 +1272,7 @@ class FBFGS(Optimizer):
                       while not needle_loss_reduced and needle_norm_order >= 0:  # Continue until overall reduction or norm order invalid
                           # Start with the initial negative gradient and normalize it
                           d_needle = initial_neg_grad.clone()
-                          print(f"  Needle norm order: {needle_norm_order:.2f}")
+                          print(f"  Needle norm order: {needle_norm_order:.2f}", end=' ')
                           current_norm = torch.linalg.vector_norm(d_needle, ord=needle_norm_order)
 
                           if current_norm < 1e-9 or needle_norm_order < 0:  # Break outer loop if norm too small or order negative
@@ -1283,7 +1283,7 @@ class FBFGS(Optimizer):
                           # --- Inner Loop Starts Here ---
                           # Evaluate loss and gradient at step 1.0 for this norm order
                           current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for this norm order iteration
-                          current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop
+                          # current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop
                           loss_at_step_1, grad_at_step_1 = self._directional_evaluate(closure, None, current_step_t, d_needle) # Pass None for x_dummy
                           gtd_at_step_1 = (grad_at_step_1.to("cuda") * d_needle.to("cuda")).sum()
                           loss_baseline_for_step_increase = loss_at_step_1  # Baseline for Armijo and loss reduction check
@@ -1311,7 +1311,7 @@ class FBFGS(Optimizer):
                                   # Apply step
                                   # We need to evaluate at x_init_needle + current_step_t * d_needle
                                   # _directional_evaluate handles adding/removing the step and evaluating closure
-                                  # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature. #TODO: fix this comment
+                                  # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature.
                                   current_loss_at_step, _ = self._directional_evaluate(closure, None, current_step_t, d_needle) # Pass None for x_dummy
                                   # Evaluate loss at the new point # Evaluate loss # Evaluate loss # Evaluate loss # Evaluate loss
                                   # Evaluate loss
@@ -1373,7 +1373,7 @@ class FBFGS(Optimizer):
                   print("\033[91mLinesearch failure, resetting..\033[0m")
                   # If needle search also failed to reduce loss, reset history
                   ls_failed = True
-              else:
+              else: # Line search succeeded
                   ls_failed = False
 
           # TODO: I dont like having to do this but we want l2 for the direction selection.
