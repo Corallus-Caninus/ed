@@ -295,9 +295,7 @@ def _strong_wolfe(
 #      f_new, g_new = obj_func(x, torch.tensor(1), d)
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
-    gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
-    gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
-    del gtd_new_sparse_product
+    gtd_new = (g_new.to("cuda") * d.to("cuda")).sum() # Keep as scalar tensor
 #    g_new = g_new#
 #    gtd_new = gtd_new#
     success = False
@@ -383,9 +381,7 @@ def _strong_wolfe(
         gtd_prev = gtd_new # type: ignore[assignment] # type: ignore[assignment]
         f_new, g_new = obj_func(t, d)
         ls_func_evals += 1 # Increment func evals after new evaluation
-        gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
-        gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
-        del gtd_new_sparse_product
+        gtd_new = (g_new.to("cuda") * d.to("cuda")).sum() # Keep as scalar tensor
 #        g_new = g_new#
         ls_iter += 1
         #RELAXED WOLFE CONDITION
@@ -489,12 +485,9 @@ def _strong_wolfe(
             insuf_progress = False
 
         # Evaluate new point
-        f_new, g_new = obj_func(t, d)
-        f_new, g_new = obj_func(t, d)
-        ls_func_evals += 1
-        gtd_new_sparse_product = g_new.to("cuda") * d.to("cuda")
-        gtd_new = gtd_new_sparse_product.sum().item() # Get scalar value
-        del gtd_new_sparse_product
+        f_new, g_new = obj_func(t, d) # Single evaluation
+        ls_func_evals += 1 # Increment func evals
+        gtd_new = (g_new.to("cuda") * d.to("cuda")).sum() # Keep as scalar tensor
 #        g_new = g_new#
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
