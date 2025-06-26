@@ -1279,7 +1279,7 @@ class FBFGS(Optimizer):
                           current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for this norm order iteration
                           # current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop
                           # current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop
-                          loss_at_step_1, grad_at_step_1 = self._directional_evaluate(closure, None, current_step_t, d_needle) # Pass None for x_dummy
+                          loss_at_step_1, grad_at_step_1 = self._directional_evaluate(closure, current_step_t, d_needle)
                           gtd_at_step_1 = (grad_at_step_1.to("cuda") * d_needle.to("cuda")).sum()
                           loss_baseline_for_step_increase = loss_at_step_1  # Baseline for Armijo and loss reduction check
 
@@ -1308,7 +1308,7 @@ class FBFGS(Optimizer):
                                   # _directional_evaluate handles adding/removing the step and evaluating closure
                                   # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature.
                                   # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature.
-                                  current_loss_at_step, _ = self._directional_evaluate(closure, None, current_step_t, d_needle) # Pass None for x_dummy
+                                  current_loss_at_step, _ = self._directional_evaluate(closure, current_step_t, d_needle)
                                   # Evaluate loss at the new point # Evaluate loss # Evaluate loss # Evaluate loss # Evaluate loss
                                   # Evaluate loss
                                   # Undo step
