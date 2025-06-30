@@ -211,9 +211,10 @@ def closure(): # Define closure here, outside the if block
           with torch.no_grad():
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
+#        outputs.loss.backward()
         num_steps += 1
-        current_loss = outputs.loss
-        avg_loss += current_loss # Accumulate loss values
+#TODO: handle NaN here since sequences can be arbitrarily long
+        avg_loss += outputs.loss # Accumulate loss values
 #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
   
       gc.collect()
@@ -226,10 +227,13 @@ def closure(): # Define closure here, outside the if block
 #      cache_position=torch.tensor([i])
 #      outputs = model(input_ids[:, -grad_vector_size//2:], attention_mask=attention_mask[:, -grad_vector_size//2:],labels = input_ids[:, -grad_vector_size//2:], cache_params = cache)
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
-      loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
-      total_loss += loss
-      total_loss += avg_loss
-      total_loss.backward()
+      num_steps += 1
+      avg_loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+#      avg_loss = avg_loss/num_steps
+#      total_loss += loss
+#      total_loss += avg_loss
+#      total_loss.backward()
+      outputs.loss.backward()
       cache = outputs.cache_params # redundant assignment
 # Process grad_vector_size in chunks of grad_chunk_size
 #      start_grad_idx = num_tokens - grad_vector_size
@@ -247,14 +251,14 @@ def closure(): # Define closure here, outside the if block
 
 
     print(str(avg_loss))
-    print(str(outputs.loss))
-    print(str(total_loss))
+#    print(str(outputs.loss))
+#    print(str(total_loss))
 
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
 #  loss = np.nan_to_num(loss, nan=np.finfo(float).max)
-  return total_loss
+  return avg_loss
 
 
 while True:
@@ -300,7 +304,7 @@ while True:
         print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
         batch_train = dataset[dataset_idx]['code']
         print(str(batch_train))
-        dataset_index += 1 # Increment dataset_index - not used anymore, but keep for now
+        dataset_index += 1  Increment dataset_index - not used anymore, but keep for now
         if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now
             dataset_index = 0 # Reset dataset_index - not used anymore, but keep for now
 
@@ -318,9 +322,9 @@ while True:
             print(f"Truncated token length: {input_ids.size(1)}")
 
         # Skip if token length is less than 2000 after potential truncation
-        if input_ids.size(1) < 200:
+        if input_ids.size(1) < 200 or input_ids.size(1) > 4000:
             print(
-                f"Skipping index {dataset_idx} due to token length ({input_ids.size(1)}) being less than 1000."
+                f"Skipping index {dataset_idx} due to token length ({input_ids.size(1)}) being less than 200 or greater than 4000."
             )
             continue  # Skip to the next iteration of the inner while loop
 
