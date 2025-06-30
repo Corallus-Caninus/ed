@@ -304,13 +304,17 @@ while True:
         print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
         batch_train = dataset[dataset_idx]['code']
         print(str(batch_train))
-        dataset_index += 1  Increment dataset_index - not used anymore, but keep for now
-        if dataset_index >= dataset_size: # Reset dataset_index - not used anymore, but keep for now
-            dataset_index = 0 # Reset dataset_index - not used anymore, but keep for now
 
         tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
+# Select a random index and truncate if token length > 100
+        current_num_tokens = input_ids.size(1)
+        if current_num_tokens > 100:
+            truncation_index = random.randint(101, current_num_tokens)
+            input_ids = input_ids[:, :truncation_index]
+            attention_mask = attention_mask[:, :truncation_index]
+            print(f"Randomly truncated to {truncation_index} tokens.")
 #        if input_ids.size(1) > 1000  and len(seen_indices) < 25:
 #TODO: warmup linearly, increasing allowed context length over time. Also, does the seen indices work if we reshuffle the dataset?
         if (input_ids.size(1) > 200 and len(seen_indices) < 50) : #NOTE:warmup period
