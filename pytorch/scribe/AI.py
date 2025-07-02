@@ -204,17 +204,18 @@ def closure(): # Define closure here, outside the if block
 #        cache_position = torch.tensor([i])
   
         if cache is not None:
-          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+#          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
 #            cache_position =  torch.tensor(i, dtype=torch.long)
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
+          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
         else:
-          with torch.no_grad():
-            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
+#          with torch.no_grad():
+          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
 #        outputs.loss.backward()
         num_steps += 1
 #TODO: handle NaN here since sequences can be arbitrarily long
         avg_loss += outputs.loss # Accumulate loss values
+        avg_loss = avg_loss /2
 #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
   
       gc.collect()
@@ -227,13 +228,14 @@ def closure(): # Define closure here, outside the if block
 #      cache_position=torch.tensor([i])
 #      outputs = model(input_ids[:, -grad_vector_size//2:], attention_mask=attention_mask[:, -grad_vector_size//2:],labels = input_ids[:, -grad_vector_size//2:], cache_params = cache)
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
+      outputs.loss.backward()
       num_steps += 1
       avg_loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+#      avg_loss = avg_loss /2
 #      avg_loss = avg_loss/num_steps
 #      total_loss += loss
 #      total_loss += avg_loss
 #      total_loss.backward()
-      outputs.loss.backward()
       cache = outputs.cache_params # redundant assignment
 # Process grad_vector_size in chunks of grad_chunk_size
 #      start_grad_idx = num_tokens - grad_vector_size
@@ -319,13 +321,13 @@ while True:
             print(f"Truncated token length: {current_num_tokens}")
 
 #TODO: warmup linearly, increasing allowed context length over time. Also, does the seen indices work if we reshuffle the dataset?
-#        if (current_num_tokens > 200 and len(seen_indices) < 50) : #NOTE:warmup period
-#            print(f"Truncating index {dataset_idx} (token length {current_num_tokens}) to 200 tokens during warmup.")
-#            max_warmup_length = 200
-#            input_ids = input_ids[:, :max_warmup_length]
-#            attention_mask = attention_mask[:, :max_warmup_length]
-#            current_num_tokens = input_ids.size(1) # Update current_num_tokens after truncation
-#            print(f"Truncated token length: {current_num_tokens}")
+        if (current_num_tokens > 200 and len(seen_indices) < 50) : #NOTE:warmup period
+            print(f"Truncating index {dataset_idx} (token length {current_num_tokens}) to 200 tokens during warmup.")
+            max_warmup_length = 200
+            input_ids = input_ids[:, :max_warmup_length]
+            attention_mask = attention_mask[:, :max_warmup_length]
+            current_num_tokens = input_ids.size(1) # Update current_num_tokens after truncation
+            print(f"Truncated token length: {current_num_tokens}")
 
 # Select a random index and truncate if token length > 100
         if current_num_tokens > 100:
@@ -369,7 +371,7 @@ while True:
     torch.cuda.empty_cache()
     gc.collect()
 
-    if step_count % 1 == 0:
+    if step_count % 10 == 0:
         #      unwrapped_model = accelerator.unwrap_model(model)
         current_dataset_filename = dataset_filename  # Define current dataset filename
         dataset_indices[current_dataset_filename] = seen_indices
