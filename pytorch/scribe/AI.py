@@ -218,16 +218,11 @@ def closure(): # Define closure here, outside the if block
         avg_loss = avg_loss /2
 #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
   
+
       gc.collect()
       torch.cuda.empty_cache()
 
-#      outputs = model(input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], attention_mask=attention_mask[:, -grad_vector_size:1+ (-grad_vector_size//2) ],labels = input_ids[:, -grad_vector_size:1+ (-grad_vector_size//2) ], use_cache=True, cache_params=cache, cache_position=cache_position)
-#      loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
-#      loss.backward()
-#      cache = outputs.cache_params # redundant assignment
-#      cache_position=torch.tensor([i])
-#      outputs = model(input_ids[:, -grad_vector_size//2:], attention_mask=attention_mask[:, -grad_vector_size//2:],labels = input_ids[:, -grad_vector_size//2:], cache_params = cache)
-      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
+      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
       outputs.loss.backward()
       avg_loss += outputs.loss # Perform backward pass only on the last grad_vector_size tokens
       num_steps += 1 # Increment num_steps for this final chunk
@@ -251,7 +246,6 @@ def closure(): # Define closure here, outside the if block
 #          loss.backward() # Backward pass for each chunk
 #          cache = outputs.cache_params # Update cache
 
-      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:], labels=input_ids[:, -grad_vector_size:], cache_params=cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
     print(str(avg_loss))
 #    print(str(outputs.loss))
 #    print(str(total_loss))
