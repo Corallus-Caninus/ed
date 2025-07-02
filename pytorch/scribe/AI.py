@@ -214,8 +214,8 @@ def closure(): # Define closure here, outside the if block
 #          with torch.no_grad():
           outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
-        outputs.loss.backward()
-        total_loss_sum += outputs.loss.item() # Accumulate scalar loss value
+#        outputs.loss.backward()
+        total_loss_sum += outputs.loss # Accumulate scalar loss value
         num_steps += 1 # Count chunks for averaging
 #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
   
@@ -225,8 +225,8 @@ def closure(): # Define closure here, outside the if block
 
       print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
-      outputs.loss.backward() # Gradients are accumulated
-      total_loss_sum += outputs.loss.item() # Accumulate scalar loss value
+#      outputs.loss.backward() # Gradients are accumulated
+      total_loss_sum += outputs.loss # Accumulate scalar loss value
       num_steps += 1 # Count chunks for averaging
 #      avg_loss = avg_loss/num_steps
 #      total_loss += loss
@@ -238,6 +238,7 @@ def closure(): # Define closure here, outside the if block
 
   # Calculate the average loss over all processed chunks
   avg_loss = total_loss_sum / num_steps if num_steps > 0 else 0.0
+  avg_loss.backward() # Gradients are accumulated
 
 #      for i in range(start_grad_idx, num_tokens, grad_chunk_size): # This loop is commented out, so it won't be executed
 #          end_grad_idx = min(i + grad_chunk_size, num_tokens)
@@ -254,7 +255,6 @@ def closure(): # Define closure here, outside the if block
   print(str(avg_loss))
 #    print(str(outputs.loss))
 #    print(str(total_loss))
-  return torch.tensor(avg_loss) # Return the average loss as a tensor
   return torch.tensor(avg_loss) # Return the average loss as a tensor
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
