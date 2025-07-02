@@ -214,7 +214,8 @@ def closure(): # Define closure here, outside the if block
 #          with torch.no_grad():
           outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
-#        outputs.loss.backward()
+        outputs.loss.backward() # Backpropagate gradients for this chunk
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # Clip gradients
         total_loss_sum += outputs.loss # Accumulate scalar loss value
         num_steps += 1 # Count chunks for averaging
 #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
@@ -225,12 +226,11 @@ def closure(): # Define closure here, outside the if block
 
       print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
-#      outputs.loss.backward() # Gradients are accumulated
+      outputs.loss.backward() # Backpropagate gradients for the final chunk
+      torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # Clip gradients
       total_loss_sum += outputs.loss # Accumulate scalar loss value
       num_steps += 1 # Count chunks for averaging
-#      avg_loss = avg_loss/num_steps
-#      total_loss += loss
-#      total_loss += avg_loss
+
 #      total_loss.backward()
       cache = outputs.cache_params # redundant assignment
 # Process grad_vector_size in chunks of grad_chunk_size
@@ -250,7 +250,7 @@ def closure(): # Define closure here, outside the if block
 #          loss = outputs.loss
 #          total_loss += loss
 #          loss.backward() # Backward pass for each chunk
-#          cache = outputs.cache_params # Update cache
+
 
   print(str(avg_loss))
 #    print(str(outputs.loss))
