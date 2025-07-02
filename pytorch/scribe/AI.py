@@ -175,8 +175,8 @@ def closure(): # Define closure here, outside the if block
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
 #  global cache
   total_loss= 0
+  total_loss_sum = 0. # Initialize a sum for all chunk losses
   start_time = time.time()
-  loss = 0
   i = 0
   torch.cuda.empty_cache()
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
@@ -215,10 +215,8 @@ def closure(): # Define closure here, outside the if block
           outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
         outputs.loss.backward()
-        num_steps += 1
-#TODO: handle NaN here since sequences can be arbitrarily long
-        avg_loss += outputs.loss # Accumulate loss values
-        avg_loss = avg_loss /2
+        total_loss_sum += outputs.loss.item() # Accumulate scalar loss value
+        num_steps += 1 # Count chunks for averaging
 #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
   
 
@@ -227,10 +225,9 @@ def closure(): # Define closure here, outside the if block
 
       print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
-      outputs.loss.backward()
-      avg_loss += outputs.loss # Perform backward pass only on the last grad_vector_size tokens
-      num_steps += 1 # Increment num_steps for this final chunk
-      avg_loss = avg_loss /2
+      outputs.loss.backward() # Gradients are accumulated
+      total_loss_sum += outputs.loss.item() # Accumulate scalar loss value
+      num_steps += 1 # Count chunks for averaging
 #      avg_loss = avg_loss/num_steps
 #      total_loss += loss
 #      total_loss += avg_loss
@@ -238,7 +235,11 @@ def closure(): # Define closure here, outside the if block
       cache = outputs.cache_params # redundant assignment
 # Process grad_vector_size in chunks of grad_chunk_size
 #      start_grad_idx = num_tokens - grad_vector_size
-#      for i in range(start_grad_idx, num_tokens, grad_chunk_size):
+
+  # Calculate the average loss over all processed chunks
+  avg_loss = total_loss_sum / num_steps if num_steps > 0 else 0.0
+
+#      for i in range(start_grad_idx, num_tokens, grad_chunk_size): # This loop is commented out, so it won't be executed
 #          end_grad_idx = min(i + grad_chunk_size, num_tokens)
 #          cur_input_ids = input_ids[:, i:end_grad_idx]
 #          cur_attention_mask = attention_mask[:, i:end_grad_idx]
@@ -250,15 +251,13 @@ def closure(): # Define closure here, outside the if block
 #          loss.backward() # Backward pass for each chunk
 #          cache = outputs.cache_params # Update cache
 
-    print(str(avg_loss))
+  print(str(avg_loss))
 #    print(str(outputs.loss))
 #    print(str(total_loss))
-
+  return torch.tensor(avg_loss) # Return the average loss as a tensor
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
-#  loss = np.nan_to_num(loss, nan=np.finfo(float).max)
-  return avg_loss
 
 
 while True:
