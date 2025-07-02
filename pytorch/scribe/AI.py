@@ -211,7 +211,7 @@ def closure(): # Define closure here, outside the if block
 #          with torch.no_grad():
           outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
-#        outputs.loss.backward()
+        outputs.loss.backward()
         num_steps += 1
 #TODO: handle NaN here since sequences can be arbitrarily long
         avg_loss += outputs.loss # Accumulate loss values
@@ -229,9 +229,9 @@ def closure(): # Define closure here, outside the if block
 #      outputs = model(input_ids[:, -grad_vector_size//2:], attention_mask=attention_mask[:, -grad_vector_size//2:],labels = input_ids[:, -grad_vector_size//2:], cache_params = cache)
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
       outputs.loss.backward()
-      avg_loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+      avg_loss += outputs.loss # Perform backward pass only on the last grad_vector_size tokens
       num_steps += 1 # Increment num_steps for this final chunk
-#      avg_loss = avg_loss /2
+      avg_loss = avg_loss /2
 #      avg_loss = avg_loss/num_steps
 #      total_loss += loss
 #      total_loss += avg_loss
