@@ -213,8 +213,9 @@ def closure(): # Define closure here, outside the if block
         else:
           outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
-        total_loss_sum += outputs.loss # Accumulate scalar loss value
-        num_steps += 1 # Count chunks for averaging
+        if not torch.isnan(outputs.loss): # Check for NaN before accumulating
+            total_loss_sum += outputs.loss # Accumulate scalar loss value
+            num_steps += 1 # Count chunks for averaging
 #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
   
 
@@ -223,8 +224,9 @@ def closure(): # Define closure here, outside the if block
 
       print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
-      total_loss_sum += outputs.loss # Accumulate scalar loss value
-      num_steps += 1 # Count chunks for averaging
+      if not torch.isnan(outputs.loss): # Check for NaN before accumulating
+          total_loss_sum += outputs.loss # Accumulate scalar loss value
+          num_steps += 1 # Count chunks for averaging
 
 #      total_loss.backward()
 
