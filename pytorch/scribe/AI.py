@@ -202,10 +202,13 @@ def closure(): # Define closure here, outside the if block
         cur_input_ids = cur_input_ids.to("cuda") # Ensure input_ids are on CUDA
         cur_attention_mask = cur_attention_mask.to("cuda") # Ensure attention_mask are on CUDA
 #        cache_position = torch.tensor([i])
+        print(f"Cache position: {i}")
+
   
         if cache is not None:
 #          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
 #            cache_position =  torch.tensor(i, dtype=torch.long)
+
           outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
         else:
 #          with torch.no_grad():
@@ -222,6 +225,7 @@ def closure(): # Define closure here, outside the if block
       gc.collect()
       torch.cuda.empty_cache()
 
+      print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
       outputs.loss.backward()
       avg_loss += outputs.loss # Perform backward pass only on the last grad_vector_size tokens
