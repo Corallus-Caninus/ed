@@ -229,8 +229,8 @@ def closure(): # Define closure here, outside the if block
 #      outputs = model(input_ids[:, -grad_vector_size//2:], attention_mask=attention_mask[:, -grad_vector_size//2:],labels = input_ids[:, -grad_vector_size//2:], cache_params = cache)
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache)
       outputs.loss.backward()
-      num_steps += 1
       avg_loss = outputs.loss # Perform backward pass only on the last grad_vector_size tokens
+      num_steps += 1 # Increment num_steps for this final chunk
 #      avg_loss = avg_loss /2
 #      avg_loss = avg_loss/num_steps
 #      total_loss += loss
@@ -251,7 +251,7 @@ def closure(): # Define closure here, outside the if block
 #          loss.backward() # Backward pass for each chunk
 #          cache = outputs.cache_params # Update cache
 
-
+      outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:], labels=input_ids[:, -grad_vector_size:], cache_params=cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
     print(str(avg_loss))
 #    print(str(outputs.loss))
 #    print(str(total_loss))
