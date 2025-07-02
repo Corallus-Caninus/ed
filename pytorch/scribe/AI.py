@@ -255,6 +255,7 @@ def closure(): # Define closure here, outside the if block
 #    print(str(outputs.loss))
 #    print(str(total_loss))
   return torch.tensor(avg_loss) # Return the average loss as a tensor
+  return torch.tensor(avg_loss) # Return the average loss as a tensor
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
