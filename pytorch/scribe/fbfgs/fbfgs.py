@@ -1093,10 +1093,12 @@ class FBFGS(Optimizer):
               del prev_norm_flat_grad # Free memory for temporary normalized prev_grad
 
               s_dense = (d.mul(t)) # Define s_dense here
+#TODO: TESTME. Was after the clop
 #              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 #Clop
 #TODO: can we scale after norm to prevent the magnitude after clopping from being epsilon? I think this would be mathematically unstable but would help with the direction approximation's curvature
 #TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
+#TODO: EDIT HERE: try just masking the s elements onto a l2 y term. (We can get rid of the l2 for the grad and just l2 the curvature)
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
               total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
@@ -1123,7 +1125,7 @@ class FBFGS(Optimizer):
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ') # s_dense is still dense here
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-              if  ys >= 1e-4  :
+              if  ys >= 1e-3  :
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1357,7 +1359,7 @@ class FBFGS(Optimizer):
                           # Parameters remain at x_init_needle (which is the state before needle)
                           ls_failed = True  # Indicate that no successful step was found # This line is redundant as we return
                           return orig_loss
-                      del prev_flat_grad
+#                      del prev_flat_grad
                       del initial_neg_grad
                       if best_overall_d_needle is not None: del best_overall_d_needle
                       if best_overall_t is not None: del best_overall_t
