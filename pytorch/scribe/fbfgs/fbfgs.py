@@ -1095,10 +1095,12 @@ class FBFGS(Optimizer):
               s_dense = (d.mul(t)) # Define s_dense here
 #TODO: TESTME. Was after the clop
 #              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
-#Clop
-#TODO: can we scale after norm to prevent the magnitude after clopping from being epsilon? I think this would be mathematically unstable but would help with the direction approximation's curvature
-#TODO: essentially, scale the result of the clop s.t. the max value is 1. Would this just be the inf ord?
-#TODO: EDIT HERE: try just masking the s elements onto a l2 y term. (We can get rid of the l2 for the grad and just l2 the curvature)
+
+              # Apply s_dense's sparsity mask to y_dense
+              # This ensures y has the same sparsity pattern as s
+              s_mask = (s_dense != 0)
+              y_dense[~s_mask] = 0
+
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
               total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
@@ -1107,8 +1109,6 @@ class FBFGS(Optimizer):
 #                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
 #              else:
 #                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
-              y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
-              y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
 #              s_dense = d
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
               print(f"ys: {ys.item()}")
