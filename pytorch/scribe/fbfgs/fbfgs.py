@@ -1126,7 +1126,7 @@ class FBFGS(Optimizer):
 
 #TODO: add back the values from ys_dense where they have been zeroed but first rescale from norm so everything is delta of l2 with clopping (not second norm, just use the second norm for clopping selection)
               y_mask = (y_dense != 0)
-              ys_mask = (s_mask and ~y_mask)
+              ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
 
