@@ -1129,6 +1129,11 @@ class FBFGS(Optimizer):
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
+              del ys_dense
+              del ys_mask
+              del y_mask
+              torch.cuda.empty_cache()
+              gc.collect()
 
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
               print(f"ys: {ys.item()}")
