@@ -1134,8 +1134,7 @@ class FBFGS(Optimizer):
               print(f"ys: {ys.item()}")
 #              s_dense = s_dense/total_norm_s
 #              s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
-              gc.collect()
-              torch.cuda.empty_cache()
+
               if self.clop != 0:
                 y = dense_to_sparse_flat_tensor(y_dense)
                 s = dense_to_sparse_flat_tensor(s_dense)
@@ -1143,7 +1142,7 @@ class FBFGS(Optimizer):
                 y = y_dense
                 s = s_dense
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
-              print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ') # s_dense is still dense here
+              print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
               if  ys >= 1e-3  :
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
@@ -1191,7 +1190,7 @@ class FBFGS(Optimizer):
               y_squared = y_dense.dot(y_dense)
               H_diag = ys / y_squared # (y*y)
               del y_squared
-
+              gc.collect()
 
               y = y #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
               ys = ys #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
@@ -1212,7 +1211,7 @@ class FBFGS(Optimizer):
               if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
               else:
-                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm=y_norm)
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               torch.cuda.empty_cache()
 
