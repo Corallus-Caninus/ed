@@ -55,8 +55,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 #    config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     config = Mamba2Config.from_pretrained("AI_Checkpoint.ai") # Load config from pretrained
     #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
-    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, device_map="balanced", trust_remote_code=True)
-    model = PeftModel.from_pretrained(model, filename)
+    model = Mamba2ForCausalLM.from_pretrained(filename, config=config, torch_dtype=torch.float16, device_map="balanced", trust_remote_code=True)
 #    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
 #    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
 #    model = LoraModel(model, lora_config, "default") # Load Lora weights
