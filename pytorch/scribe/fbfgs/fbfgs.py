@@ -1028,6 +1028,11 @@ class FBFGS(Optimizer):
         flat_grad = state.get("flat_grad")
       else:
         flat_grad = None
+      if "H_diag" in state:
+        H_diag = state.get("H_diag")
+      else:
+        H_diag = 1
+        H_diag = torch.tensor(H_diag)
 #      flat_grad = None
 #      prev_flat_grad = None
 #
@@ -1050,6 +1055,7 @@ class FBFGS(Optimizer):
           # compute gradient descent direction
           ############################################################
           # If this is the first iteration or history was reset
+#TODO: add a special condition such that if num iters is 1 we start with the direction otherwise we do the gradient.
           if  n_iter == 1 or prev_flat_grad is None:
 #          if prev_flat_grad is None:
               restart = False
@@ -1073,6 +1079,8 @@ class FBFGS(Optimizer):
                 total_norm = max(1e-9, total_norm)
                 d = d/total_norm
                 d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+		#NOTE: end of else
+
 #              d = d.to_sparse()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               gc.collect()
@@ -1093,23 +1101,35 @@ class FBFGS(Optimizer):
               del prev_norm_flat_grad # Free memory for temporary normalized prev_grad
 
               s_dense = (d.mul(t)) # Define s_dense here
+              s_mask = (s_dense != 0)
+              ys_dense = y_dense.clone()
+              ys_dense[~s_mask] = 0
 #TODO: TESTME. Was after the clop
 #              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 
               # Apply s_dense's sparsity mask to y_dense
               # This ensures y has the same sparsity pattern as s
-              s_mask = (s_dense != 0)
-              y_dense[~s_mask] = 0
-
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
               total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
+#TODO: add the y_norm rescaled to the delta-l2 into y where the mask is zero (not already having an entry from the s mask).
               # Handle potential division by zero or very small norm
-#              if total_norm_y > 1e-9:
-#                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
-#              else:
-#                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
+              if total_norm_y > 1e-9:
+                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
+              else:
+#TODO: this should be the bounded norm operation. We need to extract bounded norm to a function and call throughout and expose bounding hyperparameter not just assume based on default precision
+                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
+              y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
+              y_dense.mul_(total_norm_y) #Rescale to l2 delta (norm was just for clopping selection).
+#TODO: is not having this stable?
 #              s_dense = d
+
+#TODO: add back the values from ys_dense where they have been zeroed but first rescale from norm so everything is delta of l2 with clopping (not second norm, just use the second norm for clopping selection)
+              y_mask = (y_dense != 0)
+              ys_mask = (s_mask and ~y_mask)
+              ys_dense[~ys_mask] = 0
+              y_dense.add_(ys_dense)
+
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
               print(f"ys: {ys.item()}")
 #              s_dense = s_dense/total_norm_s
@@ -1162,7 +1182,7 @@ class FBFGS(Optimizer):
                   old_stps.append(s.to(self.direction_device)) # Store s as dense Tensor
                 ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
 #TODO: break here on n_iters
-              if n_iter >= max_iter or loss == 0:
+              if n_iter > max_iter or loss == 0:
                 break
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization. 
                 return orig_loss
@@ -1186,6 +1206,9 @@ class FBFGS(Optimizer):
 
               gc.collect()
               flat_grad = self._gather_flat_grad()
+#TODO: try this.
+              H_diag = 1
+              H_diag = torch.tensor(H_diag)
               if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
               else:
@@ -1471,6 +1494,7 @@ class FBFGS(Optimizer):
             "d": state_dict.get("d", None), # Save direction d
             "prev_flat_grad": state_dict.get("prev_flat_grad", None),
             "flat_grad": state_dict.get("flat_grad", None), # Save flat_grad
+            "H_diag": state_dict.get("H_diag", None), # Save H_diag
             "t": self.t, # Save step size t
             "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
         }
@@ -1489,6 +1513,7 @@ class FBFGS(Optimizer):
             state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Load history and move to direction_device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
             state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
+            state["H_diag"] = history.get("H_diag", None) # Load H_diag
             state["d"] = history.get("d", None) # Load direction d
             t_val = history.get("t", 1) # Load step size t, default to 1 if not found
             if isinstance(t_val, torch.Tensor):
