@@ -58,6 +58,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
 #    peft_config = PeftConfig.from_pretrained("AI_Checkpoint.ai")
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float32, ignore_mismatched_sizes=True, device_map="balanced")
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config,  torch_dtype=torch.float16, device_map="balanced", trust_remote_code=True)
+    model = model.from_pretrained(model, filename)
 #    model = PeftModel.from_pretrained(model, filename)
 #    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
 #    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
