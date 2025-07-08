@@ -81,7 +81,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
         print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
         if dataset_indices:
             print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
-        model.gradient_checkpointing_enable()
+#        model.gradient_checkpointing_enable()
     else: # This else belongs to the inner if
         dataset_indices = {} # Initialize dataset_indices for new run
         seen_indices = [] # Initialize seen_indices for new run
@@ -92,7 +92,7 @@ else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map="balanced")
-    model.gradient_checkpointing_enable()
+#    model.gradient_checkpointing_enable()
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
@@ -101,6 +101,7 @@ else:
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
+model.gradient_checkpointing_enable()
 model.train()
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
 #Get the params ready for passing as flat_grad to fbfgs
@@ -318,7 +319,7 @@ while True:
             print(f"Truncated token length: {current_num_tokens}")
 
 #TODO: warmup linearly, increasing allowed context length over time. Also, does the seen indices work if we reshuffle the dataset?
-        if (current_num_tokens > 200 and len(seen_indices) < 50) : #NOTE:warmup period
+        if (current_num_tokens > 200 and len(seen_indices) < 20) : #NOTE:warmup period
             print(f"Truncating index {dataset_idx} (token length {current_num_tokens}) to 200 tokens during warmup.")
             max_warmup_length = 200
             input_ids = input_ids[:, :max_warmup_length]
