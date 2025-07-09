@@ -99,7 +99,7 @@ else:
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
     #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
-model.gradient_checkpointing_enable()
+#model.gradient_checkpointing_enable()
 model.train()
 #model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
 #Get the params ready for passing as flat_grad to fbfgs
@@ -147,7 +147,7 @@ batch_train = None
 # Initialize optimizer *after* ensuring lora_params is correctly populated
 # NOTE: mathematically optimized wolfe condition for exponential decay
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.15, norm=1., clop=1e-9, c1=1e-1, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=1, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1., clop=1e-9, c1=1e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=1, max_eval=100, line_search_fn="strong_wolfe", y_norm=1., norm=1., clop=1e-9, c1=1e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-8, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-9, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
@@ -205,12 +205,13 @@ def closure(): # Define closure here, outside the if block
 
   
         if cache is not None:
-#          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
 #            cache_position =  torch.tensor(i, dtype=torch.long)
 
-          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
         else:
-          outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
+          with torch.no_grad(): # Keep no_grad context for forward passes in the loop
+            outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
         if not torch.isnan(outputs.loss): # Check for NaN before accumulating
             total_loss_sum += outputs.loss # Accumulate scalar loss value
@@ -223,9 +224,9 @@ def closure(): # Define closure here, outside the if block
 
       print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
-      if not torch.isnan(outputs.loss): # Check for NaN before accumulating
-          total_loss_sum += outputs.loss # Accumulate scalar loss value
-          num_steps += 1 # Count chunks for averaging
+#      if not torch.isnan(outputs.loss): # Check for NaN before accumulating
+#          total_loss_sum += outputs.loss # Accumulate scalar loss value
+#          num_steps += 1 # Count chunks for averaging
 
 #      total_loss.backward()
 
@@ -234,9 +235,10 @@ def closure(): # Define closure here, outside the if block
 #      start_grad_idx = num_tokens - grad_vector_size
 
   # Calculate the average loss over all processed chunks
-  avg_loss = total_loss_sum / num_steps if num_steps > 0 else 0.0
-  avg_loss.backward() # Backpropagate gradients once
-  torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # Clip gradients once
+#  avg_loss = total_loss_sum / num_steps if num_steps > 0 else 0.0
+#  avg_loss.backward() # Backpropagate gradients once
+  outputs.loss.backward() # Backpropagate gradients once
+#  torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # Clip gradients once
 
 #      for i in range(start_grad_idx, num_tokens, grad_chunk_size): # This loop is commented out, so it won't be executed
 #          end_grad_idx = min(i + grad_chunk_size, num_tokens)
@@ -250,10 +252,11 @@ def closure(): # Define closure here, outside the if block
 #          loss.backward() # Backward pass for each chunk
 
 
-  print(str(avg_loss))
-#    print(str(outputs.loss))
+#  print(str(avg_loss))
+  print(str(outputs.loss))
 #    print(str(total_loss))
-  return torch.tensor(avg_loss) # Return the average loss as a tensor
+#  return torch.tensor(avg_loss) # Return the average loss as a tensor
+  return outputs.loss
   print("-", end="") # Indicate step completion
   end_time = time.time() # End time for step duration calculation
   elapsed_time = end_time - start_time
