@@ -705,7 +705,6 @@ class FBFGS(Optimizer):
         grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
 #        total_norm = torch.linalg.vector_norm(grad, ord=2.).to("cuda") # Move total_norm to direction_device
 ##TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
-#        total_norm = max(1e-9, total_norm)
 ##        total_norm = total_norm + 1e-8
 #        grad = grad.div_(total_norm)
         return grad
@@ -831,7 +830,7 @@ class FBFGS(Optimizer):
 ##          similarity = similarity/t
         q = flat_grad.to("cuda").neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
-        total_norm = max(1e-9, total_norm)
+#        total_norm = max(1e-9, total_norm)
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
@@ -885,10 +884,10 @@ class FBFGS(Optimizer):
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
-        total_norm = max(1e-5, total_norm)
-        total_norm = min(1e5, total_norm)
-        if total_norm != total_norm:
-          total_norm = 1e-5
+#        total_norm = max(1e-5, total_norm)
+#        total_norm = min(1e5, total_norm)
+#        if total_norm != total_norm:
+#          total_norm = 1e-5
 #        total_norm = total_norm + 1e-8
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
@@ -1076,7 +1075,7 @@ class FBFGS(Optimizer):
               else:
                 d = self._gather_flat_grad().neg()
                 total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
-                total_norm = max(1e-9, total_norm)
+#                total_norm = max(1e-9, total_norm)
                 d = d/total_norm
                 d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 		#NOTE: end of else
@@ -1086,21 +1085,25 @@ class FBFGS(Optimizer):
               gc.collect()
 #              print("d elements: " + str((d.values() != 0).sum()) )
           else:
-              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
-              total_norm_grad = max(1e-9, total_norm_grad)
-              norm_flat_grad = flat_grad/total_norm_grad
-
-              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
-              total_norm_prev_grad = max(1e-9, total_norm_prev_grad)
-              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
+#              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
+#              norm_flat_grad = flat_grad/total_norm_grad
+#
+#              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
+#              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
 
               # Calculate y_dense using clone and in-place operations to reduce allocations
-              y_dense = norm_flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
-              y_dense.sub_(prev_norm_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
-              del norm_flat_grad # Free memory for temporary normalized grad
-              del prev_norm_flat_grad # Free memory for temporary normalized prev_grad
-
+#              y_dense = norm_flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
+#              y_dense.sub_(prev_norm_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
+              y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
+              y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
+#              del norm_flat_grad # Free memory for temporary normalized grad
+#              del prev_norm_flat_grad # Free memory for temporary normalized prev_grad
               s_dense = (d.mul(t)) # Define s_dense here
+              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
+              norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) # Move total_norm to direction_device
+#              norm_y_dense = max(1e-9, norm_y_dense)
+              y_dense.div_(norm_y_dense)
+
               s_mask = (s_dense != 0)
               ys_dense = y_dense.clone()
               ys_dense[~s_mask] = 0
@@ -1111,20 +1114,20 @@ class FBFGS(Optimizer):
               # This ensures y has the same sparsity pattern as s
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
-              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
+#              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
 #TODO: add the y_norm rescaled to the delta-l2 into y where the mask is zero (not already having an entry from the s mask).
               # Handle potential division by zero or very small norm
-              if total_norm_y > 1e-9:
-                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
-              else:
-#TODO: this should be the bounded norm operation. We need to extract bounded norm to a function and call throughout and expose bounding hyperparameter not just assume based on default precision
-                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
+#              if total_norm_y > 1e-9:
+#                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
+#              else:
+##TODO: this should be the bounded norm operation. We need to extract bounded norm to a function and call throughout and expose bounding hyperparameter not just assume based on default precision
+#                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
+              y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
               y_dense.mul_(total_norm_y) #Rescale to l2 delta (norm was just for clopping selection).
 #TODO: is not having this stable?
 #              s_dense = d
 
-#TODO: add back the values from ys_dense where they have been zeroed but first rescale from norm so everything is delta of l2 with clopping (not second norm, just use the second norm for clopping selection)
               y_mask = (y_dense != 0)
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
@@ -1135,7 +1138,7 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache()
               gc.collect()
 
-              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
+#TODO: ys = Y*S was here
               print(f"ys: {ys.item()}")
 #              s_dense = s_dense/total_norm_s
 #              s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
