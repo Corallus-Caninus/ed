@@ -224,16 +224,13 @@ def closure(): # Define closure here, outside the if block
 
       print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
-      if  torch.isnan(outputs.loss): # Check for NaN before accumulating
-          print("got NaN") # This line is for debugging, not part of the fix
-          outputs.loss = torch.tensor(1e10, dtype=outputs.loss.dtype, device=outputs.loss.device)
 
     outputs.loss.backward() # Backpropagate gradients
 
     # Filter parameters to only include those that have a gradient
-    trainable_params_with_grad = [p for p in model.parameters() if p.grad is not None]
-    if trainable_params_with_grad: # Only clip if there are gradients to clip
-        torch.nn.utils.clip_grad_value_(trainable_params_with_grad, 1e15) # Clip gradients once
+#    trainable_params_with_grad = [p for p in model.parameters() if p.grad is not None]
+#    if trainable_params_with_grad: # Only clip if there are gradients to clip
+    torch.nn.utils.clip_grad_norm_(model.parameters(), norm=2.) # Clip gradients once
 
     print(str(outputs.loss))
     return outputs.loss
