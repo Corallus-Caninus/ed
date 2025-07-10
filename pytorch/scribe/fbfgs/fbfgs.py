@@ -1094,6 +1094,7 @@ class FBFGS(Optimizer):
               # Calculate y_dense using clone and in-place operations to reduce allocations
 #              y_dense = norm_flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
 #              y_dense.sub_(prev_norm_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
+#TODO: clip flat_grad and prev_flat_grad here respectively.
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
 #              del norm_flat_grad # Free memory for temporary normalized grad
