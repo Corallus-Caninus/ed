@@ -770,27 +770,30 @@ class FBFGS(Optimizer):
             if torch.is_complex(p):
                 p = torch.view_as_real(p)
             numel = p.numel()
-            if update.is_sparse:
-                sparse_indices = update.coalesce().indices()
-                sparse_values = update.coalesce().values()
-
-                # Extract relevant slice from sparse tensor
-                mask = torch.logical_and(sparse_indices[0, :] >= offset, sparse_indices[0, :] < offset + numel)
-                view_indices = (sparse_indices[:, mask] - offset).to(p.device) # Adjust indices to be relative to the view
-                view_values = sparse_values[mask].to(p.device)
-                view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=p.device).coalesce() #TODO: verify via profiling if coalesce is necessary
-
-                p_flat = p.view(-1)
-                if view_values.numel() > 0:  # Check if there are any values to update
-                    index = view_indices[0, :]  # Get the indices for index_add_
-                    p_flat.index_add_(0, index.to(p_flat.device), (view_values * torch.tensor(step_size).to(p_flat.device)))  # Use index_add_ for vectorized update
-
-
-            else: #dense path for non-sparse tensors just in case
-                view = update[offset : offset + numel].to(p.device)
-                # view as to avoid deprecated pointwise semantics
-                p.add_(view.view_as(p), alpha=step_size)
-                torch.cuda.empty_cache()
+#            if update.is_sparse:
+#                sparse_indices = update.coalesce().indices()
+#                sparse_values = update.coalesce().values()
+#
+#                # Extract relevant slice from sparse tensor
+#                mask = torch.logical_and(sparse_indices[0, :] >= offset, sparse_indices[0, :] < offset + numel)
+#                view_indices = (sparse_indices[:, mask] - offset).to(p.device) # Adjust indices to be relative to the view
+#                view_values = sparse_values[mask].to(p.device)
+#                view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=p.device).coalesce() #TODO: verify via profiling if coalesce is necessary
+#
+#                p_flat = p.view(-1)
+#                if view_values.numel() > 0:  # Check if there are any values to update
+#                    index = view_indices[0, :]  # Get the indices for index_add_
+#                    p_flat.index_add_(0, index.to(p_flat.device), (view_values * torch.tensor(step_size).to(p_flat.device)))  # Use index_add_ for vectorized update
+#
+#
+#            else: #dense path for non-sparse tensors just in case
+             view = update[offset : offset + numel].to(p.device)
+             # view as to avoid deprecated pointwise semantics
+#             p.add_(view.view_as(p), alpha=step_size)
+             p_temp = p.add(view.view_as(p), alpha=step_size)
+             p = p_temp
+             del p_temp
+             torch.cuda.empty_cache()
             offset += numel
         assert offset == self._numel()
 
@@ -1061,23 +1064,25 @@ class FBFGS(Optimizer):
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
               flat_grad = self._gather_flat_grad()
+              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=2.0)
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag)
 #TODO: t shouldnt be 1 here for insta-wolfes
               t = 1
-              if len(old_dirs) > 0 and prev_flat_grad is not None:
-                if self.clop == 0:
-                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
-                else:
-                  d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
-              else:
-                d = self._gather_flat_grad().neg()
-                total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
+              self.t = 1.
+#              if len(old_dirs) > 0 and prev_flat_grad is not None:
+#                if self.clop == 0:
+#                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
+#                else:
+#                  d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
+#              else:
+              d = self._gather_flat_grad().neg()
+              total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
 #                total_norm = max(1e-9, total_norm)
-                d = d/total_norm
-                d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+              d = d/total_norm
+              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 		#NOTE: end of else
 
 #              d = d.to_sparse()
@@ -1101,10 +1106,10 @@ class FBFGS(Optimizer):
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
               s_dense = (d.mul(t)) # Define s_dense here
-              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
               norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) # Move total_norm to direction_device
-#              norm_y_dense = max(1e-9, norm_y_dense)
               y_dense.div_(norm_y_dense)
+              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
+#              norm_y_dense = max(1e-9, norm_y_dense)
 
               s_mask = (s_dense != 0)
               ys_dense = y_dense.clone()
