@@ -451,7 +451,8 @@ def _strong_wolfe(
 #TODO: bracket collapses when we get NaN. Ensure we reset step size accordingly.
 #TODO: were jumping the border here
         if f_new != f_new:
-          t = torch.tensor(1.)
+#TODO: test this since 1 can cause problems since its the same as the gradient for initialization causing inf delta
+          t = torch.tensor(2.)
           is_nan = True
 #TODO: need to revaluate here.
 #        bracket_gtd[1]#,
@@ -787,13 +788,13 @@ class FBFGS(Optimizer):
 #
 #
 #            else: #dense path for non-sparse tensors just in case
-             view = update[offset : offset + numel].to(p.device)
-             # view as to avoid deprecated pointwise semantics
+            view = update[offset : offset + numel].to(p.device)
+            # view as to avoid deprecated pointwise semantics
 #             p.add_(view.view_as(p), alpha=step_size)
-             p_temp = p.add(view.view_as(p), alpha=step_size)
-             p = p_temp
-             del p_temp
-             torch.cuda.empty_cache()
+            p_temp = p.add(view.view_as(p), alpha=step_size)
+            p = p_temp
+            del p_temp
+            torch.cuda.empty_cache()
             offset += numel
         assert offset == self._numel()
 
@@ -832,6 +833,7 @@ class FBFGS(Optimizer):
         flat_grad = self._gather_flat_grad()
         self._add_grad(-t, d)  # Revert parameters
         return loss, flat_grad
+
     @torch.jit.script
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
@@ -1080,8 +1082,8 @@ class FBFGS(Optimizer):
               H_diag = 1
               H_diag = torch.tensor(H_diag)
 #TODO: t shouldnt be 1 here for insta-wolfes
-              t = 1
-              self.t = 1.
+              t = 2
+              self.t = 2.
 #              if len(old_dirs) > 0 and prev_flat_grad is not None:
 #                if self.clop == 0:
 #                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
@@ -1113,11 +1115,12 @@ class FBFGS(Optimizer):
               if prev_flat_grad is not None:
                   torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=2.0)
 #TODO: clip flat_grad and prev_flat_grad here respectively.
-              y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
+              y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
+#              del prev_norm_flat_grad
+#              del norm_flat_grad
               s_dense = (d.mul(t)) # Define s_dense here
               norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) # Move total_norm to direction_device
-              y_dense.div_(norm_y_dense)
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 #              norm_y_dense = max(1e-9, norm_y_dense)
 
@@ -1139,6 +1142,7 @@ class FBFGS(Optimizer):
 #              else:
 ##TODO: this should be the bounded norm operation. We need to extract bounded norm to a function and call throughout and expose bounding hyperparameter not just assume based on default precision
 #                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
+              #*Shotgun noise*
               y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
               y_dense.mul_(total_norm_y) #Rescale to l2 delta (norm was just for clopping selection).
@@ -1151,6 +1155,7 @@ class FBFGS(Optimizer):
               y_dense.add_(ys_dense)
               del ys_dense
               del ys_mask
+              y_dense.div_(norm_y_dense)
               del y_mask
               torch.cuda.empty_cache()
               gc.collect()
