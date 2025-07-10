@@ -229,8 +229,7 @@ def closure(): # Define closure here, outside the if block
 
     # Filter parameters to only include those that have a gradient
 #    trainable_params_with_grad = [p for p in model.parameters() if p.grad is not None]
-#    if trainable_params_with_grad: # Only clip if there are gradients to clip
-    torch.nn.utils.clip_grad_norm_(model.parameters(), norm=2.) # Clip gradients once
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.) # Clip gradients once
 
     print(str(outputs.loss))
     return outputs.loss
