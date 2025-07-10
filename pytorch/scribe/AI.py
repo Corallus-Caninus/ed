@@ -226,7 +226,7 @@ def closure(): # Define closure here, outside the if block
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
       if  torch.isnan(outputs.loss): # Check for NaN before accumulating
           print("got NaN") # This line is for debugging, not part of the fix
-          outputs.loss.item = torch.tensor(1e10, dtype=torch.float)
+          outputs.loss = torch.tensor(1e10, dtype=outputs.loss.dtype, device=outputs.loss.device)
 
     outputs.loss.backward() # Backpropagate gradients
 
