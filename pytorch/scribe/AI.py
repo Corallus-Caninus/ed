@@ -224,42 +224,19 @@ def closure(): # Define closure here, outside the if block
 
       print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
-#      if not torch.isnan(outputs.loss): # Check for NaN before accumulating
-#          total_loss_sum += outputs.loss # Accumulate scalar loss value
-#          num_steps += 1 # Count chunks for averaging
+      if  torch.isnan(outputs.loss): # Check for NaN before accumulating
+          print("got NaN")
+          outputs.loss.item = torch.tensor(1e10, torch.dtype.float)
 
-#      total_loss.backward()
+    outputs.loss.backward() # Backpropagate gradients
 
-      cache = outputs.cache_params # redundant assignment
-# Process grad_vector_size in chunks of grad_chunk_size
-#      start_grad_idx = num_tokens - grad_vector_size
+    # Filter parameters to only include those that have a gradient
+    trainable_params_with_grad = [p for p in model.parameters() if p.grad is not None]
+    if trainable_params_with_grad: # Only clip if there are gradients to clip
+        torch.nn.utils.clip_grad_value_(trainable_params_with_grad, 1e15) # Clip gradients once
 
-  # Calculate the average loss over all processed chunks
-#  avg_loss = total_loss_sum / num_steps if num_steps > 0 else 0.0
-#  avg_loss.backward() # Backpropagate gradients once
-  outputs.loss.backward() # Backpropagate gradients once
-#  torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # Clip gradients once
-
-#      for i in range(start_grad_idx, num_tokens, grad_chunk_size): # This loop is commented out, so it won't be executed
-#          end_grad_idx = min(i + grad_chunk_size, num_tokens)
-#          cur_input_ids = input_ids[:, i:end_grad_idx]
-#          cur_attention_mask = attention_mask[:, i:end_grad_idx]
-#          cur_input_ids = cur_input_ids.to("cuda")
-#          cur_attention_mask = cur_attention_mask.to("cuda")
-#          outputs = model(input_ids=cur_input_ids, attention_mask=cur_attention_mask, labels=cur_input_ids, cache_params=cache, cache_position=[i])
-#          loss = outputs.loss
-#          total_loss += loss
-#          loss.backward() # Backward pass for each chunk
-
-
-#  print(str(avg_loss))
-  print(str(outputs.loss))
-#    print(str(total_loss))
-#  return torch.tensor(avg_loss) # Return the average loss as a tensor
-  return outputs.loss
-  print("-", end="") # Indicate step completion
-  end_time = time.time() # End time for step duration calculation
-  elapsed_time = end_time - start_time
+    print(str(outputs.loss))
+    return outputs.loss
 
 
 while True:
