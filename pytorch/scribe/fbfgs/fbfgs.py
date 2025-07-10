@@ -800,24 +800,38 @@ class FBFGS(Optimizer):
 #TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
     # def _clone_param(self):
     # #        return [p.clone(memory_format=torch.contiguous_format).to(self.direction_device) for p in self._params]
-    #     return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
-    # #        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+    #     return [p.clone(memory_format=torch.contiguous_format) for p in self._params] #        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
-    # def _set_param(self, params_data):
-    #     for p, pdata in zip(self._params, params_data):
-    #         p.copy_(pdata)
+    # def _set_param(self, params_data): #     for p, pdata in zip(self._params, params_data): #         p.copy_(pdata)
 
-    def _directional_evaluate(self, closure, t, d):
-        self._add_grad(t, d)
+    def _add_grad(self, step_size, update) -> bool:
+        nan_encountered = False
+        offset = 0
+        for p in self._params:
+            if torch.is_complex(p):
+                p = torch.view_as_real(p)
+            numel = p.numel()
+            view = update[offset : offset + numel].to(p.device)
+            p_temp = p.add(view.view_as(p), alpha=step_size)
+            if torch.isnan(p_temp).any():
+                nan_encountered = True
+                break # Exit early if NaN is found
+            p.copy_(p_temp) # Apply update if no NaN
+            del p_temp
+            torch.cuda.empty_cache()
+            offset += numel
+        assert offset == self._numel() or nan_encountered # Ensure all parameters processed or NaN stopped it
+        return nan_encountered
+
+    def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
+        nan_in_add_grad = self._add_grad(t, d)
+        if nan_in_add_grad:
+            # If NaN was encountered during parameter update, return NaN loss and zero grad
+            return float('nan'), torch.zeros_like(d, device=d.device)
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
-        self._add_grad(-t, d) # Revert parameters
+        self._add_grad(-t, d)  # Revert parameters
         return loss, flat_grad
-
-    def _needle_directional_evaluate(self, closure, t, d):
-        # This function is redundant with _directional_evaluate after memory optimization
-        # and is not called anywhere. Removing it.
-        pass
 
 #TODO: NOTE after benchmarking, this is compute bound. Its not waiting to read from RAM its stalled in computation on CUDA. Parallelize this from the flat grads to here with a device_map ASAP.
 #TODO: ys min should probably just scale with history size for stability with very long histories.
