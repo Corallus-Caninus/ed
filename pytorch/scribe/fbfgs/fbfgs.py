@@ -1092,13 +1092,14 @@ class FBFGS(Optimizer):
 #              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
 
               # Calculate y_dense using clone and in-place operations to reduce allocations
-#              y_dense = norm_flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
-#              y_dense.sub_(prev_norm_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
+#TODO: clip flat_grad and prev_flat_grad here respectively.
+              # Apply L2 norm clipping to flat_grad and prev_flat_grad
+              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=2.0)
+              if prev_flat_grad is not None:
+                  torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=2.0)
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
-#              del norm_flat_grad # Free memory for temporary normalized grad
-#              del prev_norm_flat_grad # Free memory for temporary normalized prev_grad
               s_dense = (d.mul(t)) # Define s_dense here
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
               norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) # Move total_norm to direction_device
