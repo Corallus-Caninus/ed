@@ -812,7 +812,7 @@ class FBFGS(Optimizer):
                 p = torch.view_as_real(p)
             numel = p.numel()
             view = update[offset : offset + numel].to(p.device)
-            p_temp = p.add(view.view_as(p), alpha=step_size)
+            p_temp = p.add(view.view_as(p), alpha=step_size) # Apply update to a temporary tensor
             if torch.isnan(p_temp).any():
                 nan_encountered = True
                 break # Exit early if NaN is found
@@ -824,18 +824,14 @@ class FBFGS(Optimizer):
         return nan_encountered
 
     def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
-        nan_in_add_grad = self._add_grad(t, d)
+        nan_in_add_grad = self._add_grad(t, d) # Apply step
         if nan_in_add_grad:
-            # If NaN was encountered during parameter update, return NaN loss and zero grad
+            self._add_grad(-t, d) # Revert parameters that were partially updated
             return float('nan'), torch.zeros_like(d, device=d.device)
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
         self._add_grad(-t, d)  # Revert parameters
         return loss, flat_grad
-
-#TODO: NOTE after benchmarking, this is compute bound. Its not waiting to read from RAM its stalled in computation on CUDA. Parallelize this from the flat grads to here with a device_map ASAP.
-#TODO: ys min should probably just scale with history size for stability with very long histories.
-#TODO: we are getting NaNs here. seemingly its caused by the last update (could need weight decay?) but likely its two very small numbers being multiplied (low rho scaling). Fix with ys?
     @torch.jit.script
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
