@@ -452,7 +452,7 @@ def _strong_wolfe(
 #TODO: were jumping the border here
         if f_new != f_new:
 #TODO: test this since 1 can cause problems since its the same as the gradient for initialization causing inf delta
-          t = torch.tensor(2.)
+          t = torch.tensor(1.)
           is_nan = True
 #TODO: need to revaluate here.
 #        bracket_gtd[1]#,
@@ -775,6 +775,9 @@ class FBFGS(Optimizer):
     def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
         offset = 0
         for p in self._params:
+#TODO we need to just add logging and fix this so we dont NaN brick the model on evaluation.
+#TODO: was >=
+#TODO: >= should be correct since we dont apply the NaN slice
             if limit_offset != -1 and offset >= limit_offset:
                 break # Stop processing if we've reached or passed the limit_offset
 
@@ -1059,14 +1062,14 @@ class FBFGS(Optimizer):
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
               flat_grad = self._gather_flat_grad()
-              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=2.0)
+#              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=2.0)
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag)
 #TODO: t shouldnt be 1 here for insta-wolfes
-              t = 2
-              self.t = 2.
+              t = 1
+              self.t = 1.
 #              if len(old_dirs) > 0 and prev_flat_grad is not None:
 #                if self.clop == 0:
 #                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
@@ -1076,7 +1079,9 @@ class FBFGS(Optimizer):
               d = self._gather_flat_grad().neg()
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               total_norm = max(1e-9, total_norm)
-              print("d norm: " + str((total_norm) )
+              if total_norm == float('inf'):
+                total_norm = 1e-12
+              print("d norm: " + str((total_norm)) )
               d = d/total_norm
               d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 		#NOTE: end of else
@@ -1084,12 +1089,15 @@ class FBFGS(Optimizer):
 #              d = d.to_sparse()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               gc.collect()
-              print("d elements: " + str((d.values() != 0).sum()) )
+#              print("d elements: " + str((d.values() != 0).sum()) )
+              print("direction elements: " + str((d != 0).sum()) )
           else:
 #              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
+#              total_norm_grad = max(1e-9, total_norm_grad)
 #              norm_flat_grad = flat_grad/total_norm_grad
 #
 #              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
+#              total_norm_prev_grad = max(1e-9, total_norm_prev_grad)
 #              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
 
               # Calculate y_dense using clone and in-place operations to reduce allocations
@@ -1129,9 +1137,9 @@ class FBFGS(Optimizer):
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
+              y_dense.div_(norm_y_dense)
               del ys_dense
               del ys_mask
-              y_dense.div_(norm_y_dense)
               del y_mask
               torch.cuda.empty_cache()
               gc.collect()
