@@ -1096,6 +1096,7 @@ class FBFGS(Optimizer):
               d = self._gather_flat_grad().neg()
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               total_norm = max(1e-9, total_norm)
+              print("d norm: " + str((total_norm) )
               d = d/total_norm
               d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 		#NOTE: end of else
@@ -1103,7 +1104,7 @@ class FBFGS(Optimizer):
 #              d = d.to_sparse()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               gc.collect()
-#              print("d elements: " + str((d.values() != 0).sum()) )
+              print("d elements: " + str((d.values() != 0).sum()) )
           else:
 #              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
 #              norm_flat_grad = flat_grad/total_norm_grad
