@@ -827,6 +827,7 @@ class FBFGS(Optimizer):
     def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
         nan_in_add_grad = self._add_grad(t, d) # Apply step
         if nan_in_add_grad:
+#TODO: we cant just sub here because this assumes we will stop at the NaN index. We need to return the terminating index from NaN failsafe
             self._add_grad(-t, d) # Revert parameters that were partially updated
             return float('nan'), torch.zeros_like(d, device=d.device)
         loss = float(closure())
@@ -845,7 +846,7 @@ class FBFGS(Optimizer):
 ##          similarity = similarity/t
         q = flat_grad.to("cuda").neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
-#        total_norm = max(1e-9, total_norm)
+        total_norm = max(1e-9, total_norm)
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
@@ -899,7 +900,9 @@ class FBFGS(Optimizer):
         print(hit_miss)
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
-#        total_norm = max(1e-5, total_norm)
+        total_norm = max(1e-9, total_norm)
+        if total_norm == float('inf'):
+          total_norm = 1e-9
 #        total_norm = min(1e5, total_norm)
 #        if total_norm != total_norm:
 #          total_norm = 1e-5
@@ -1092,7 +1095,7 @@ class FBFGS(Optimizer):
 #              else:
               d = self._gather_flat_grad().neg()
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
-#                total_norm = max(1e-9, total_norm)
+              total_norm = max(1e-9, total_norm)
               d = d/total_norm
               d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 		#NOTE: end of else
@@ -1121,27 +1124,19 @@ class FBFGS(Optimizer):
 #              del norm_flat_grad
               s_dense = (d.mul(t)) # Define s_dense here
               norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) # Move total_norm to direction_device
+              norm_y_dense = max(1e-9, norm_y_dense)
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
-#              norm_y_dense = max(1e-9, norm_y_dense)
 
               s_mask = (s_dense != 0)
               ys_dense = y_dense.clone()
               ys_dense[~s_mask] = 0
-#TODO: TESTME. Was after the clop
-#              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 
               # Apply s_dense's sparsity mask to y_dense
               # This ensures y has the same sparsity pattern as s
               norm_y = norm if y_norm is None else y_norm
               total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
-#              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
+              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
 #TODO: add the y_norm rescaled to the delta-l2 into y where the mask is zero (not already having an entry from the s mask).
-              # Handle potential division by zero or very small norm
-#              if total_norm_y > 1e-9:
-#                  y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
-#              else:
-##TODO: this should be the bounded norm operation. We need to extract bounded norm to a function and call throughout and expose bounding hyperparameter not just assume based on default precision
-#                  y_dense.zero_() # If norm is too small, set y_dense to zero in-place
               #*Shotgun noise*
               y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
