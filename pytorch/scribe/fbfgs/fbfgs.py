@@ -809,15 +809,28 @@ class FBFGS(Optimizer):
         return self._numel() # Return total numel if no NaN
 
     def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
-        nan_index = self._add_grad(t, d) # Apply step
-        if nan_index != self._numel():
-            self._add_grad(-t, d, limit_offset=nan_index) # Revert parameters up to the NaN index
-            return float('nan'), torch.zeros_like(d, device=d.device)
+        # Save current parameters to CPU
+        original_params_cpu = [p.detach().clone().cpu() for p in self._params]
+
+        # Apply step: x_new = x_old + t * d
+        offset = 0
+        for p in self._params:
+            numel = p.numel()
+            if torch.is_complex(p):
+                p_view = torch.view_as_real(p).view(-1)
+            else:
+                p_view = p.view(-1)
+            p_view.add_(d[offset : offset + numel].to(p.device), alpha=t)
+            offset += numel
+
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
-        self._add_grad(-t, d)  # Revert parameters
-        return loss, flat_grad
 
+        # Restore original parameters from CPU
+        for p, original_p_cpu in zip(self._params, original_params_cpu):
+            p.copy_(original_p_cpu.to(p.device))
+
+        return loss, flat_grad
     @torch.jit.script
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
