@@ -765,39 +765,6 @@ class FBFGS(Optimizer):
     #TODO: clip out NaN based on dtype max value
     #        return grad_raw #.to("cpu")
 
-    def _add_grad(self, step_size, update):
-        offset = 0
-        for p in self._params:
-            if torch.is_complex(p):
-                p = torch.view_as_real(p)
-            numel = p.numel()
-#            if update.is_sparse:
-#                sparse_indices = update.coalesce().indices()
-#                sparse_values = update.coalesce().values()
-#
-#                # Extract relevant slice from sparse tensor
-#                mask = torch.logical_and(sparse_indices[0, :] >= offset, sparse_indices[0, :] < offset + numel)
-#                view_indices = (sparse_indices[:, mask] - offset).to(p.device) # Adjust indices to be relative to the view
-#                view_values = sparse_values[mask].to(p.device)
-#                view = torch.sparse_coo_tensor(view_indices, view_values, torch.Size([numel]), dtype=update.dtype, device=p.device).coalesce() #TODO: verify via profiling if coalesce is necessary
-#
-#                p_flat = p.view(-1)
-#                if view_values.numel() > 0:  # Check if there are any values to update
-#                    index = view_indices[0, :]  # Get the indices for index_add_
-#                    p_flat.index_add_(0, index.to(p_flat.device), (view_values * torch.tensor(step_size).to(p_flat.device)))  # Use index_add_ for vectorized update
-#
-#
-#            else: #dense path for non-sparse tensors just in case
-            view = update[offset : offset + numel].to(p.device)
-            # view as to avoid deprecated pointwise semantics
-#             p.add_(view.view_as(p), alpha=step_size)
-            p_temp = p.add(view.view_as(p), alpha=step_size)
-            p = p_temp
-            del p_temp
-            torch.cuda.empty_cache()
-            offset += numel
-        assert offset == self._numel()
-
 #TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
     # def _clone_param(self):
     # #        return [p.clone(memory_format=torch.contiguous_format).to(self.direction_device) for p in self._params]
@@ -805,30 +772,43 @@ class FBFGS(Optimizer):
 
     # def _set_param(self, params_data): #     for p, pdata in zip(self._params, params_data): #         p.copy_(pdata)
 
-    def _add_grad(self, step_size, update) -> bool:
-        nan_encountered = False
+    def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
         offset = 0
         for p in self._params:
+            if limit_offset != -1 and offset >= limit_offset:
+                break # Stop processing if we've reached or passed the limit_offset
+
             if torch.is_complex(p):
                 p = torch.view_as_real(p)
             numel = p.numel()
-            view = update[offset : offset + numel].to(p.device)
-            p_temp = p.add(view.view_as(p), alpha=step_size) # Apply update to a temporary tensor
+
+            current_param_end_offset = offset + numel
+            slice_end = min(current_param_end_offset, limit_offset if limit_offset != -1 else current_param_end_offset)
+            slice_numel = slice_end - offset
+
+            if slice_numel <= 0:
+                offset += numel
+                continue
+
+            view = update[offset : offset + slice_numel].to(p.device)
+            p_flat = p.view(-1)
+            p_slice = p_flat[0:slice_numel]
+
+            p_temp = p_slice.add(view.view_as(p_slice), alpha=step_size)
             if torch.isnan(p_temp).any():
-                nan_encountered = True
-                break # Exit early if NaN is found
-            p.copy_(p_temp) # Apply update if no NaN
+                del p_temp
+                torch.cuda.empty_cache()
+                return offset # Return the offset where NaN was found
+            p_slice.copy_(p_temp) # Only copy if no NaN
             del p_temp
             torch.cuda.empty_cache()
             offset += numel
-        assert offset == self._numel() or nan_encountered # Ensure all parameters processed or NaN stopped it
-        return nan_encountered
+        return self._numel() # Return total numel if no NaN
 
     def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
-        nan_in_add_grad = self._add_grad(t, d) # Apply step
-        if nan_in_add_grad:
-#TODO: we cant just sub here because this assumes we will stop at the NaN index. We need to return the terminating index from NaN failsafe
-            self._add_grad(-t, d) # Revert parameters that were partially updated
+        nan_index = self._add_grad(t, d) # Apply step
+        if nan_index != self._numel():
+            self._add_grad(-t, d, limit_offset=nan_index) # Revert parameters up to the NaN index
             return float('nan'), torch.zeros_like(d, device=d.device)
         loss = float(closure())
         flat_grad = self._gather_flat_grad()
