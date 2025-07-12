@@ -832,6 +832,7 @@ class FBFGS(Optimizer):
 
         return loss, flat_grad
     @torch.jit.script
+#TODO: what causes direction norm to blow up?
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
@@ -841,7 +842,8 @@ class FBFGS(Optimizer):
 ##        if t < 1:
 ##          similarity = similarity/t
         q = flat_grad.to("cuda").neg()
-        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
+#TODO: was ord=2
+        total_norm = torch.linalg.vector_norm(q, ord=norm).to("cuda") # Move total_norm to direction_device
         total_norm = max(1e-9, total_norm)
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
@@ -1116,9 +1118,9 @@ class FBFGS(Optimizer):
               # Calculate y_dense using clone and in-place operations to reduce allocations
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               # Apply L2 norm clipping to flat_grad and prev_flat_grad
-              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=2.0)
+              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e3)
               if prev_flat_grad is not None:
-                  torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=2.0)
+                  torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=1e3)
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
