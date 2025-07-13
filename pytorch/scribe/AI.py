@@ -286,17 +286,17 @@ while True:
         current_num_tokens = input_ids.size(1)
 
         # Truncate to 4000 tokens if longer
-        if current_num_tokens > 4000:
-            print(f"Truncating index {dataset_idx} (token length {current_num_tokens}) to 4000 tokens.")
-            input_ids = input_ids[:, :4000]
-            attention_mask = attention_mask[:, :4000]
+        if current_num_tokens > 2000:
+            print(f"Truncating index {dataset_idx} (token length {current_num_tokens}) to 2000 tokens.")
+            input_ids = input_ids[:, :2000]
+            attention_mask = attention_mask[:, :2000]
             current_num_tokens = input_ids.size(1) # Update current_num_tokens after truncation
             print(f"Truncated token length: {current_num_tokens}")
 
 #TODO: warmup linearly, increasing allowed context length over time. Also, does the seen indices work if we reshuffle the dataset?
-        if (current_num_tokens > 400 and len(seen_indices) < 10) : #NOTE:warmup period
+        if (current_num_tokens > 200 and len(seen_indices) < 250) : #NOTE:warmup period
             print(f"Truncating index {dataset_idx} (token length {current_num_tokens}) to 200 tokens during warmup.")
-            max_warmup_length = 400
+            max_warmup_length = 200
             input_ids = input_ids[:, :max_warmup_length]
             attention_mask = attention_mask[:, :max_warmup_length]
             current_num_tokens = input_ids.size(1) # Update current_num_tokens after truncation
