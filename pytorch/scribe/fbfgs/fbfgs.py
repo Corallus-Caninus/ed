@@ -903,11 +903,13 @@ class FBFGS(Optimizer):
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
         total_norm = max(1e-9, total_norm)
         #Handle type precision overflow for L1-likes
-        if total_norm == float('inf'):
-          total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda")
-          d = d.div_(total_norm)
-          total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
-          print("post-direction norm got inf")
+#TODO: if this isnt stable, we can see if the inf norm sufficiently clops (this should be numerically stable)
+#TODO: include the Hessian. Also do this everytime and maybe it will sync with the approx.
+#        if total_norm == float('inf'):
+        total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda")
+        d = d.div_(total_norm)
+        total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
+#          print("post-direction norm got inf")
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
 
@@ -1241,9 +1243,9 @@ class FBFGS(Optimizer):
 
               gc.collect()
               flat_grad = self._gather_flat_grad()
-#TODO: try this.
-              H_diag = 1
-              H_diag = torch.tensor(H_diag)
+#              H_diag = 1
+#              H_diag = torch.tensor(H_diag)
+              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
               else:
