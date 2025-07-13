@@ -702,11 +702,11 @@ class FBFGS(Optimizer):
         for p in self._params: # Clip after gathering to ensure all grads are included
             if p.grad is not None: # Check if p.grad is not None
                 torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
-        finfo = torch.finfo(grad.dtype)
-        grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
+#        finfo = torch.finfo(grad.dtype)
+#        grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
 #        total_norm = torch.linalg.vector_norm(grad, ord=2.).to("cuda") # Move total_norm to direction_device
-##TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
-##        total_norm = total_norm + 1e-8
+###TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
+###        total_norm = total_norm + 1e-8
 #        grad = grad.div_(total_norm)
         return grad
 
@@ -843,8 +843,11 @@ class FBFGS(Optimizer):
 ##          similarity = similarity/t
         q = flat_grad.to("cuda").neg()
 #TODO: was ord=2
-        total_norm = torch.linalg.vector_norm(q, ord=norm).to("cuda") # Move total_norm to direction_device
+        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
         total_norm = max(1e-9, total_norm)
+        if total_norm == float('inf'):
+          total_norm = 1e-9
+          print("pre-direction l2 norm returned inf")
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
@@ -899,12 +902,12 @@ class FBFGS(Optimizer):
 #TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
         total_norm = max(1e-9, total_norm)
+        #Handle type precision overflow for L1-likes
         if total_norm == float('inf'):
-          total_norm = 1e-9
-#        total_norm = min(1e5, total_norm)
-#        if total_norm != total_norm:
-#          total_norm = 1e-5
-#        total_norm = total_norm + 1e-8
+          total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda")
+          d = d.div_(total_norm)
+          total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
+          print("post-direction norm got inf")
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
 
@@ -1077,7 +1080,8 @@ class FBFGS(Optimizer):
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
               flat_grad = self._gather_flat_grad()
-#              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=2.0)
+#TODO: clip_grad_norm by the l1 norm for a max norm of 1e3
+              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
                 return orig_loss
               H_diag = 1
@@ -1094,8 +1098,11 @@ class FBFGS(Optimizer):
               d = self._gather_flat_grad().neg()
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               total_norm = max(1e-9, total_norm)
+              #Handle type precision overflow for L1-likes
               if total_norm == float('inf'):
-                total_norm = 1e-12
+                total_norm = torch.linalg.vector_norm(d, ord=float("inf")) # Move total_norm to direction_device
+                d = d/total_norm
+                total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               print("d norm: " + str((total_norm)) )
               d = d/total_norm
               d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
@@ -1118,9 +1125,9 @@ class FBFGS(Optimizer):
               # Calculate y_dense using clone and in-place operations to reduce allocations
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               # Apply L2 norm clipping to flat_grad and prev_flat_grad
-              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e3)
+              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if prev_flat_grad is not None:
-                  torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=1e3)
+                  torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=1e9)
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
@@ -1173,7 +1180,7 @@ class FBFGS(Optimizer):
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-              if  ys >= 1e-3  :
+              if  ys >= 1e-5  :
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
