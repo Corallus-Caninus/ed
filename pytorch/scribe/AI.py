@@ -286,28 +286,22 @@ while True:
         current_num_tokens = input_ids.size(1)
 
         # Truncate to 4000 tokens if longer
-        if current_num_tokens > 2000:
-            print(f"Truncating index {dataset_idx} (token length {current_num_tokens}) to 2000 tokens.")
-            input_ids = input_ids[:, :2000]
-            attention_mask = attention_mask[:, :2000]
-            current_num_tokens = input_ids.size(1) # Update current_num_tokens after truncation
-            print(f"Truncated token length: {current_num_tokens}")
+        max_len_global = 2000
+        if current_num_tokens > max_len_global:
+            start_idx = random.randint(0, current_num_tokens - max_len_global)
+            input_ids = input_ids[:, start_idx : start_idx + max_len_global]
+            attention_mask = attention_mask[:, start_idx : start_idx + max_len_global]
+            current_num_tokens = input_ids.size(1)
+            print(f"Truncated index {dataset_idx} to random {max_len_global} tokens. New length: {current_num_tokens}")
 
-#TODO: warmup linearly, increasing allowed context length over time. Also, does the seen indices work if we reshuffle the dataset?
-        if (current_num_tokens > 200 and len(seen_indices) < 250) : #NOTE:warmup period
-            print(f"Truncating index {dataset_idx} (token length {current_num_tokens}) to 200 tokens during warmup.")
-            max_warmup_length = 200
-            input_ids = input_ids[:, :max_warmup_length]
-            attention_mask = attention_mask[:, :max_warmup_length]
-            current_num_tokens = input_ids.size(1) # Update current_num_tokens after truncation
-            print(f"Truncated token length: {current_num_tokens}")
-
-# Select a random index and truncate if token length > 100
-        if current_num_tokens > 100:
-            truncation_index = random.randint(101, current_num_tokens)
-            input_ids = input_ids[:, :truncation_index]
-            attention_mask = attention_mask[:, :truncation_index]
-            print(f"Randomly truncated to {truncation_index} tokens.")
+        # Warmup period truncation
+        max_warmup_length = 200
+        if len(seen_indices) < 250 and current_num_tokens > max_warmup_length:
+            start_idx = random.randint(0, current_num_tokens - max_warmup_length)
+            input_ids = input_ids[:, start_idx : start_idx + max_warmup_length]
+            attention_mask = attention_mask[:, start_idx : start_idx + max_warmup_length]
+            current_num_tokens = input_ids.size(1)
+            print(f"Truncated index {dataset_idx} to random {max_warmup_length} tokens during warmup. New length: {current_num_tokens}")
 
         # Skip if token length is less than 200 after all truncations
         if current_num_tokens < 400:
