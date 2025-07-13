@@ -285,6 +285,7 @@ while True:
 
         current_num_tokens = input_ids.size(1)
 
+#TODO: gradually increase the context length over time.
         # Truncate to 4000 tokens if longer
         max_len_global = 2000
         if current_num_tokens > max_len_global:
@@ -304,9 +305,9 @@ while True:
             print(f"Truncated index {dataset_idx} to random {max_warmup_length} tokens during warmup. New length: {current_num_tokens}")
 
         # Skip if token length is less than 200 after all truncations
-        if current_num_tokens < 400:
+        if current_num_tokens < max_warmup_length:
             print(
-                f"Skipping index {dataset_idx} due to token length ({current_num_tokens}) being less than 400."
+                f"Skipping index {dataset_idx} due to token length ({current_num_tokens}) being less than warmup length."
             )
             continue  # Skip to the next iteration of the inner while loop
 
