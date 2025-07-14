@@ -1128,8 +1128,8 @@ class FBFGS(Optimizer):
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
 #              del prev_norm_flat_grad
-#              del norm_flat_grad
-              s_dense = (d.mul(t)) # Define s_dense here
+              #              del norm_flat_grad
+              s_dense = (d.to(torch.float16).mul(t)) # Define s_dense here
               norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) # Move total_norm to direction_device
               norm_y_dense = max(1e-9, norm_y_dense)
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
