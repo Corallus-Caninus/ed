@@ -837,92 +837,60 @@ class FBFGS(Optimizer):
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
-#        similarity = 1e-4
         similarity = 0.
-##TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
-##        if t < 1:
-##          similarity = similarity/t
-        q = flat_grad.to("cuda").neg()
-#TODO: was ord=2
-        total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
+
+        q = flat_grad.to(torch.float32).to("cuda").neg()
+        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
         total_norm = max(1e-9, total_norm)
         if total_norm == float('inf'):
-          total_norm = 1e-9
+          total_norm = torch.tensor(1e-9, dtype=torch.float32, device="cuda")
           print("pre-direction l2 norm returned inf")
         q = q.div_(total_norm)
-#        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
 
-        al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
+        al = torch.empty(num_old, dtype=q.dtype, device="cuda")
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
         for i in range(num_old - 1, -1, -1):
-            #direction_similarity = (old_dirs[i].to_dense().to("cuda") * q).sum().item() # Convert to dense here
-            sparse_dir_i = old_dirs[i] # Explicitly get old_dirs[i]
-            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i.to("cuda"), q).item() # Use sparse_dir_i
+            sparse_dir_i = old_dirs[i]
+            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i.to("cuda"), q).item()
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
-            dense_old_dir = torch.zeros_like(q) # Initialize dense_old_dir as a zero tensor
             if direction_alignment_mask[i]:
-              al[i] = direction_similarity * ro[i].item() # Use direction_similarity which is now computed with SparseFlatTensor
-              sparse_old_dir_scaled = old_dirs[i].to("cuda") * ((-al[i])) # Scale sparse tensor
-              q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled.to("cuda"), q) # Sparse addition
+              al[i] = direction_similarity * ro[i].item()
+              sparse_old_dir_scaled = old_dirs[i].to("cuda") * ((-al[i]))
+              q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled.to("cuda"), q)
               hit_miss = hit_miss + str("| ")
-# TODO: prevent over-alignment to keep the direction multipathed?
-# Prevent over-alignment by considering the expansion of near-orthogonal entries
-#              if direction_similarity < 1 and direction_similarity > -1:
-##TODO: over-alignment hyperparameter (last one I swear this one is really necessary)
-#                similarity += 0.1*similarity*(1 - abs(direction_similarity)) #TODO: we assume worst case which is variance has doubled ?  We can calculate this based on the alignment. the less aligned the more variance in the solution.
-#              else:
-#                similarity += 5e-8 #TODO: a better way to prevent PowerPoints
-#              similarity += 0.1*similarity
             else:
               hit_miss = hit_miss + str("_ ")
 
-#TODO: nan_to_num can lead to everything going to NaN and is not a fix for ys. It does help with edge cases though.
-        d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
-        be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
+        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
+        be_i = torch.empty_like(d, dtype=q.dtype, device="cuda")
         del q
 
-#TODO: if direction goes to NaN, drop the largest rho entry out iteratively?
-#TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
             if direction_alignment_mask[i]:
-              #be_i.copy_((old_dirs[i].to_dense().to("cuda") * d).to_dense()) # Convert to dense here
-#              dense_old_dir = old_dirs[i].to_dense().to("cuda")
               be_i.copy_((old_dirs[i].to("cuda").to_dense() * d).to_dense())
-              # del dense_old_dir # DEL 11: Initialize dense_old_dir before if block in second loop
-              # d.add_(old_stps[i].to_dense().to("cuda"), alpha=al[i] - be_i.sum() * ro[i].item()) # Convert to dense here
               alpha_val = al[i] - be_i.sum() * ro[i].item()
-              sparse_old_stp_scaled = old_stps[i].to("cuda") * (alpha_val) # Scale sparse tensor
-              d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled.to("cuda"), d) # Sparse addition
-              #del dense_old_stp
+              sparse_old_stp_scaled = old_stps[i].to("cuda") * (alpha_val)
+              d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled.to("cuda"), d)
 
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
         print(hit_miss)
-#TODO: we may increase efficacy and reduce tearing by supplemnting clopping with a lower order norm
-        total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
+        total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to("cuda")
         total_norm = max(1e-9, total_norm)
-        #Handle type precision overflow for L1-likes
-#TODO: if this isnt stable, we can see if the inf norm sufficiently clops (this should be numerically stable)
-#TODO: include the Hessian. Also do this everytime and maybe it will sync with the approx.
-#TODO: this isnt fixing it. This hard clamps the thresholding to precision so if it doesnt help get rid of it.
-#        if total_norm == float('inf'):
-#        total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda")
-#        d = d.div_(total_norm)
-        total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
-#          print("post-direction norm got inf")
+        if total_norm == float('inf'):
+            total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to(torch.float32).to("cuda")
+            d = d.div_(total_norm)
+            total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to("cuda")
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
 
-#TODO: we can clop here if we can get sparse flat tensors supporting all the ops
-        mask = torch.logical_and(d > -clop, d < clop) #TODO: extract to sub_variance hyperparameter
+        mask = torch.logical_and(d > -clop, d < clop)
         d[mask] = 0
-#TODO: need to debug if this is causing vanishing. Can iteratively increase the norm until max is above tolerance_change min.
-#        d = direction.to_sparse()
         print("direction elements: " + str((d != 0).sum()) )
         print("total_norm: " + str(total_norm))
-        del mask # DEL 9: mask is no longer needed
+        del mask
         return d
 
     @torch.jit.script
