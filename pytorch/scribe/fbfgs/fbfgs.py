@@ -1132,7 +1132,7 @@ class FBFGS(Optimizer):
 #              del prev_norm_flat_grad
               #              del norm_flat_grad
               s_dense = (d.mul(t)) # Define s_dense here
-              norm_y_dense = torch.linalg.vector_norm(y_dense.to(torch.float32), ord=2.)
+              norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
               torch.cuda.empty_cache()
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
@@ -1144,10 +1144,12 @@ class FBFGS(Optimizer):
               # Apply s_dense's sparsity mask to y_dense
               # This ensures y has the same sparsity pattern as s
               norm_y = norm if y_norm is None else y_norm
-              total_norm_y = torch.linalg.vector_norm(y_dense, ord=norm_y) # Move total_norm to direction_device
-              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
+              total_norm_y = torch.linalg.vector_norm(y_dense.to(dtype=torch.float32), ord=norm_y) # Move total_norm to direction_device
+              print("total norm y:" + str(total_norm_y))
+#              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
 #TODO: add the y_norm rescaled to the delta-l2 into y where the mask is zero (not already having an entry from the s mask).
               #*Shotgun noise*
+#TODO: perform feature selection on positive and negative y respectively to prevent exploding or vanishing
               y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
               y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
               y_dense.mul_(total_norm_y) #Rescale to l2 delta (norm was just for clopping selection).
@@ -1243,8 +1245,9 @@ class FBFGS(Optimizer):
               flat_grad = self._gather_flat_grad()
               gc.collect()
               torch.cuda.empty_cache()
-#              H_diag = 1
-#              H_diag = torch.tensor(H_diag)
+#TODO: may need to try this again? the hessian doesnt pertain as much given that the next direction is likely orthogonal to the last.
+              H_diag = 1
+              H_diag = torch.tensor(H_diag)
               torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
