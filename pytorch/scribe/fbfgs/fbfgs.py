@@ -851,14 +851,14 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
         for i in range(num_old - 1, -1, -1):
-            sparse_dir_i = old_dirs[i]
-            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i.to("cuda"), q).item()
+            sparse_dir_i = old_dirs[i].to("cuda").to(dtype=torch.float32)
+            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item()
-              sparse_old_dir_scaled = old_dirs[i].to("cuda") * ((-al[i]))
-              q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled.to("cuda"), q)
+              sparse_old_dir_scaled = old_dirs[i].to("cuda").to(dtype=torch.float32) * ((-al[i]))
+              q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
               hit_miss = hit_miss + str("| ")
             else:
               hit_miss = hit_miss + str("_ ")
@@ -869,10 +869,10 @@ class FBFGS(Optimizer):
 
         for i in range(num_old):
             if direction_alignment_mask[i]:
-              be_i.copy_((old_dirs[i].to("cuda").to_dense() * d).to_dense())
+              be_i.copy_((old_dirs[i].to("cuda").to(dtype=torch.float32).to_dense() * d).to_dense())
               alpha_val = al[i] - be_i.sum() * ro[i].item()
-              sparse_old_stp_scaled = old_stps[i].to("cuda") * (alpha_val)
-              d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled.to("cuda"), d)
+              sparse_old_stp_scaled = old_stps[i].to("cuda").to(dtype=torch.float32) * (alpha_val)
+              d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
 
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
