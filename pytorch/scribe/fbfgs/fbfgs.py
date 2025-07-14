@@ -1132,7 +1132,7 @@ class FBFGS(Optimizer):
 #              del prev_norm_flat_grad
               #              del norm_flat_grad
               s_dense = (d.mul(t)) # Define s_dense here
-              norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) # Move total_norm to direction_device
+              norm_y_dense = torch.linalg.vector_norm(y_dense.to(torch.float32), ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
               torch.cuda.empty_cache()
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
