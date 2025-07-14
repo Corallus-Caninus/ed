@@ -908,12 +908,13 @@ class FBFGS(Optimizer):
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
 
+        d = d.to(torch.float16)
         mask = torch.logical_and(d > -clop, d < clop)
         d[mask] = 0
-        print("direction elements: " + str((d != 0).sum()) )
+#        print("direction elements: " + str((d != 0).sum()) )
         print("total_norm: " + str(total_norm))
         del mask
-        return d.to(torch.float16)
+        return d
 
     @torch.jit.script
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
@@ -1239,8 +1240,9 @@ class FBFGS(Optimizer):
               gc.collect()
               torch.cuda.empty_cache()
 
-              gc.collect()
               flat_grad = self._gather_flat_grad()
+              gc.collect()
+              torch.cuda.empty_cache()
 #              H_diag = 1
 #              H_diag = torch.tensor(H_diag)
               torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
@@ -1249,7 +1251,6 @@ class FBFGS(Optimizer):
               else:
                 d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm=y_norm)
               gc.collect()
-              torch.cuda.empty_cache()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               torch.cuda.empty_cache()
 
