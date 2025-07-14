@@ -833,6 +833,7 @@ class FBFGS(Optimizer):
         return loss, flat_grad
     @torch.jit.script
 #TODO: what causes direction norm to blow up?
+#TODO: if we increase the type precision we may fix the exploding direction which could result in very large and efficient step sizes.
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
@@ -905,9 +906,10 @@ class FBFGS(Optimizer):
         #Handle type precision overflow for L1-likes
 #TODO: if this isnt stable, we can see if the inf norm sufficiently clops (this should be numerically stable)
 #TODO: include the Hessian. Also do this everytime and maybe it will sync with the approx.
+#TODO: this isnt fixing it. This hard clamps the thresholding to precision so if it doesnt help get rid of it.
 #        if total_norm == float('inf'):
-        total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda")
-        d = d.div_(total_norm)
+#        total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda")
+#        d = d.div_(total_norm)
         total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda")
 #          print("post-direction norm got inf")
         print("max value pre-norm direction: " + str(d.max()))
@@ -1098,6 +1100,7 @@ class FBFGS(Optimizer):
 #                  d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
 #              else:
               d = self._gather_flat_grad().neg()
+              #TODO: should we also do norm float("inf") here to match direction S?
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
               total_norm = max(1e-9, total_norm)
               #Handle type precision overflow for L1-likes
