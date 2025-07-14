@@ -1129,17 +1129,14 @@ class FBFGS(Optimizer):
               # to free up memory.
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
-#              del prev_norm_flat_grad
-              #              del norm_flat_grad
               s_dense = (d.mul(t)) # Define s_dense here
-              norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.)
+
+              original_y_dtype = y_dense.dtype
+              y_dense_float32 = y_dense.to(torch.float32)
+              norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
               torch.cuda.empty_cache()
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
-
-              s_mask = (s_dense != 0)
-              ys_dense = y_dense.clone()
-              ys_dense[~s_mask] = 0
 
               # Apply s_dense's sparsity mask to y_dense
               # This ensures y has the same sparsity pattern as s
@@ -1150,9 +1147,15 @@ class FBFGS(Optimizer):
 #TODO: add the y_norm rescaled to the delta-l2 into y where the mask is zero (not already having an entry from the s mask).
               #*Shotgun noise*
 #TODO: perform feature selection on positive and negative y respectively to prevent exploding or vanishing
-              y_dense.div_(total_norm_y) # Perform division in-place (avoids new tensor for scaled result)
-              y_dense[torch.logical_and(y_dense > -self.clop,y_dense < self.clop)] = 0
-              y_dense.mul_(total_norm_y) #Rescale to l2 delta (norm was just for clopping selection).
+              y_dense_float32.div_(total_norm_y) # Perform division on float32 copy
+              y_dense = y_dense_float32.to(original_y_dtype) # Cast back to original dtype
+
+              s_mask = (s_dense != 0)
+              ys_dense = y_dense.clone()
+              ys_dense[~s_mask] = 0
+
+              y_dense[torch.logical_and(y_dense > -self.clop, y_dense < self.clop)] = 0
+              y_dense.mul_(total_norm_y.to(original_y_dtype)) # Rescale to l2 delta (norm was just for clopping selection).
 #TODO: is not having this stable?
 #              s_dense = d
 
