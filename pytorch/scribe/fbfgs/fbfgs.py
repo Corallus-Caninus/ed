@@ -1148,11 +1148,9 @@ class FBFGS(Optimizer):
               total_norm_y = torch.linalg.vector_norm(y_dense_float32, ord=norm_y) # Move total_norm to direction_device
               print("total norm y:" + str(total_norm_y))
 #              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
-#TODO: add the y_norm rescaled to the delta-l2 into y where the mask is zero (not already having an entry from the s mask).
+
               #*Shotgun noise*
-#TODO: perform feature selection on positive and negative y respectively to prevent exploding or vanishing
-
-
+              #TODO: perform feature selection on positive and negative y respectively to prevent exploding or vanishing
               y_dense_float32.div_(total_norm_y) # Perform division on float32 copy
               y_dense = y_dense_float32.to(original_y_dtype) # Cast back to original dtype
               y_dense[torch.logical_and(y_dense > -self.clop, y_dense < self.clop)] = 0
