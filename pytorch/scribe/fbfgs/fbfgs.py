@@ -1124,6 +1124,8 @@ class FBFGS(Optimizer):
               if prev_flat_grad is not None:
                   torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=1e9)
 #TODO: clip flat_grad and prev_flat_grad here respectively.
+              # prev_flat_grad is moved to CUDA for calculation, then immediately deleted
+              # to free up memory.
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
 #              del prev_norm_flat_grad
@@ -1131,6 +1133,8 @@ class FBFGS(Optimizer):
               s_dense = (d.mul(t)) # Define s_dense here
               norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) # Move total_norm to direction_device
               norm_y_dense = max(1e-9, norm_y_dense)
+              del prev_flat_grad # Immediately delete after use
+              torch.cuda.empty_cache()
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
 
               s_mask = (s_dense != 0)
@@ -1233,6 +1237,8 @@ class FBFGS(Optimizer):
               # compute the approximate (L-BFGS) inverse Hessian
               # multiplied by the gradient
               num_old = len(old_dirs)
+              gc.collect()
+              torch.cuda.empty_cache()
 
               gc.collect()
               flat_grad = self._gather_flat_grad()
@@ -1243,6 +1249,8 @@ class FBFGS(Optimizer):
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
               else:
                 d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm=y_norm)
+              gc.collect()
+              torch.cuda.empty_cache()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               torch.cuda.empty_cache()
 
@@ -1251,11 +1259,11 @@ class FBFGS(Optimizer):
 #TODO: this or the above should be redundant trace and remove redundancy
 #          if n_iter >= max_iter or loss == 0:
 #            break
-
           if prev_flat_grad is None : #or state["n_iter"] == 1:
-              prev_flat_grad = flat_grad#NOTE: was self.direction_device
+              # Store flat_grad on CPU for the next iteration
+              prev_flat_grad = flat_grad.cpu()
           else:
-              prev_flat_grad = flat_grad#NOTE: was self.direction_device
+              prev_flat_grad = flat_grad.cpu()
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
