@@ -878,18 +878,17 @@ class FBFGS(Optimizer):
               hit_miss = hit_miss + str("_ ")
 
         d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
-        be_i = torch.empty_like(d, dtype=q.dtype, device="cuda")
         del q
 
         for i in range(num_old):
             if direction_alignment_mask[i]:
               temp_old_dir_for_dense = old_dirs[i].to("cuda")
               old_dir_for_dense = SparseFlatTensor(
-                  temp_old_dir_for_dense.starts, temp_old_dir_for_dense.ends, temp_old_dir_for_dense.values.to(dtype=torch.float32),
+                  temp_old_dir_for_dense.starts, temp_old_dir_for_dense.ends, temp_old_dir_for_dense.values.to(dtype=torch.float32), # type: ignore[arg-type]
                   temp_old_dir_for_dense.total_size, temp_old_dir_for_dense.unit_indices, temp_old_dir_for_dense.unit_values.to(dtype=torch.float32)
               )
-              be_i.copy_((old_dir_for_dense.to_dense() * d).to_dense())
-              alpha_val = al[i] - be_i.sum() * ro[i].item()
+              dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
+              alpha_val = al[i] - dot_product_val * ro[i].item()
               temp_sparse_old_stp = old_stps[i].to("cuda")
               sparse_old_stp_scaled = SparseFlatTensor(
                   temp_sparse_old_stp.starts, temp_sparse_old_stp.ends, temp_sparse_old_stp.values.to(dtype=torch.float32),
