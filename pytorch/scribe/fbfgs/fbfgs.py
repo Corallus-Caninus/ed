@@ -914,7 +914,7 @@ class FBFGS(Optimizer):
         print("direction elements: " + str((d != 0).sum()) )
         print("total_norm: " + str(total_norm))
         del mask
-        return d
+        return d.to(torch.float16)
 
     @torch.jit.script
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
