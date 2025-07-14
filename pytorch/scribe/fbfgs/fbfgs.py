@@ -851,13 +851,27 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
         for i in range(num_old - 1, -1, -1):
-            sparse_dir_i = old_dirs[i].to("cuda").to(dtype=torch.float32)
+            # Move SparseFlatTensor to CUDA first
+            temp_sparse_dir = old_dirs[i].to("cuda")
+            # Create a new SparseFlatTensor with internal values cast to float32
+            sparse_dir_i = SparseFlatTensor(
+                temp_sparse_dir.starts,
+                temp_sparse_dir.ends,
+                temp_sparse_dir.values.to(dtype=torch.float32),
+                temp_sparse_dir.total_size,
+                temp_sparse_dir.unit_indices,
+                temp_sparse_dir.unit_values.to(dtype=torch.float32)
+            )
             direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item()
-              sparse_old_dir_scaled = old_dirs[i].to("cuda").to(dtype=torch.float32) * ((-al[i]))
+              temp_sparse_old_dir = old_dirs[i].to("cuda")
+              sparse_old_dir_scaled = SparseFlatTensor(
+                  temp_sparse_old_dir.starts, temp_sparse_old_dir.ends, temp_sparse_old_dir.values.to(dtype=torch.float32),
+                  temp_sparse_old_dir.total_size, temp_sparse_old_dir.unit_indices, temp_sparse_old_dir.unit_values.to(dtype=torch.float32)
+              ) * ((-al[i]))
               q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
               hit_miss = hit_miss + str("| ")
             else:
@@ -869,9 +883,18 @@ class FBFGS(Optimizer):
 
         for i in range(num_old):
             if direction_alignment_mask[i]:
-              be_i.copy_((old_dirs[i].to("cuda").to(dtype=torch.float32).to_dense() * d).to_dense())
+              temp_old_dir_for_dense = old_dirs[i].to("cuda")
+              old_dir_for_dense = SparseFlatTensor(
+                  temp_old_dir_for_dense.starts, temp_old_dir_for_dense.ends, temp_old_dir_for_dense.values.to(dtype=torch.float32),
+                  temp_old_dir_for_dense.total_size, temp_old_dir_for_dense.unit_indices, temp_old_dir_for_dense.unit_values.to(dtype=torch.float32)
+              )
+              be_i.copy_((old_dir_for_dense.to_dense() * d).to_dense())
               alpha_val = al[i] - be_i.sum() * ro[i].item()
-              sparse_old_stp_scaled = old_stps[i].to("cuda").to(dtype=torch.float32) * (alpha_val)
+              temp_sparse_old_stp = old_stps[i].to("cuda")
+              sparse_old_stp_scaled = SparseFlatTensor(
+                  temp_sparse_old_stp.starts, temp_sparse_old_stp.ends, temp_sparse_old_stp.values.to(dtype=torch.float32),
+                  temp_sparse_old_stp.total_size, temp_sparse_old_stp.unit_indices, temp_sparse_old_stp.unit_values.to(dtype=torch.float32)
+              ) * (alpha_val)
               d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
 
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
