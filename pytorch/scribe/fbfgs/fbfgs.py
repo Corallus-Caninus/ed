@@ -1307,6 +1307,7 @@ class FBFGS(Optimizer):
                   )
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
+              return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
               Needle = False
               if not success:  # TODO: we chase misprinted lines
                   if ls_failed:  # TODO: we chase misprinted lines
