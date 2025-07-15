@@ -1075,7 +1075,7 @@ class FBFGS(Optimizer):
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
               flat_grad = self._gather_flat_grad()
-#TODO: clip_grad_norm by the l1 norm for a max norm of 1e3
+#TODO: clip_grad_norm by the l1 norm for a max norm of 1e9
               torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
                 return orig_loss
@@ -1133,21 +1133,22 @@ class FBFGS(Optimizer):
 
               original_y_dtype = y_dense.dtype
               y_dense_float32 = y_dense.to(torch.float32)
-              ys = y_dense_float32.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
+              ys = y_dense.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
               torch.cuda.empty_cache()
 
-              y_dense_float32.div_(norm_y_dense)
+
+              #Shotgun noise
+              norm_y = torch.linalg.vector_norm(y_dense_float32, ord=y_norm)
+              y_dense_float32.div_(norm_y)
               y_dense.copy_(y_dense_float32.to(original_y_dtype))
-#TODO clop here
               # Apply clopping to y_dense
               if self.clop != 0:
                   y_dense_mask = torch.logical_and(y_dense > -self.clop, y_dense < self.clop)
                   y_dense[y_dense_mask] = 0
                   del y_dense_mask
-
-              y_dense.mul_(norm_y_dense.to(original_y_dtype))
+              y_dense.mul_(norm_y)
 
               s_mask = (s_dense != 0)
               ys_dense = y_dense.clone()
@@ -1158,6 +1159,7 @@ class FBFGS(Optimizer):
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
+              y_dense.div_(norm_y_dense)
               del ys_dense
               del ys_mask
               del y_mask
@@ -1243,6 +1245,7 @@ class FBFGS(Optimizer):
               gc.collect()
               torch.cuda.empty_cache()
 #TODO: may need to try this again? the hessian doesnt pertain as much given that the next direction is likely orthogonal to the last.
+#TODO: it might make sense to divide by the history size so we keep curvature normalized to prevent explosions in direction approx.
 #              H_diag = 1
 #              H_diag = torch.tensor(H_diag)
               torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
