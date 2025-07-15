@@ -1133,15 +1133,16 @@ class FBFGS(Optimizer):
 
               original_y_dtype = y_dense.dtype
               y_dense_float32 = y_dense.to(torch.float32)
+              ys = y_dense_float32.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
               torch.cuda.empty_cache()
 
               y_dense_float32.div_(norm_y_dense)
               y_dense.copy_(y_dense_float32.to(original_y_dtype))
+#TODO clop here
               y_dense.mul_(norm_y_dense.to(original_y_dtype))
 
-              ys = y_dense.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
               s_mask = (s_dense != 0)
               ys_dense = y_dense.clone()
               ys_dense[~s_mask] = 0
