@@ -1144,33 +1144,38 @@ class FBFGS(Optimizer):
               norm_y = norm if y_norm is None else y_norm
 
               # Separate positive and negative parts of y_dense_float32
-              y_positive = torch.relu(y_dense_float32)
-              y_negative = torch.relu(-y_dense_float32) # Store as positive values for norm calculation
+              y_positive_temp = torch.relu(y_dense_float32)
+              y_negative_temp = torch.relu(-y_dense_float32) # Store as positive values for norm calculation
 
               # Calculate norms for positive and negative parts
-              total_norm_y_pos = torch.linalg.vector_norm(y_positive, ord=norm_y)
-              total_norm_y_neg = torch.linalg.vector_norm(y_negative, ord=norm_y)
+              total_norm_y_pos = torch.linalg.vector_norm(y_positive_temp, ord=norm_y)
+              total_norm_y_neg = torch.linalg.vector_norm(y_negative_temp, ord=norm_y)
 
               # Handle potential division by zero or very small norms
               total_norm_y_pos = max(1e-9, total_norm_y_pos)
               total_norm_y_neg = max(1e-9, total_norm_y_neg)
 
               # Normalize positive and negative parts separately
-              y_positive.div_(total_norm_y_pos)
-              y_negative.div_(total_norm_y_neg)
+              y_positive_temp.div_(total_norm_y_pos)
+              y_negative_temp.div_(total_norm_y_neg)
 
               # Apply clopping to normalized positive and negative parts
-              y_positive[torch.logical_and(y_positive > -self.clop, y_positive < self.clop)] = 0
-              y_negative[torch.logical_and(y_negative > -self.clop, y_negative < self.clop)] = 0
+              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = 0
+              y_negative_temp[torch.logical_and(y_negative_temp > -self.clop, y_negative_temp < self.clop)] = 0
 
               # Scale back up positive and negative parts
-              y_positive.mul_(total_norm_y_pos)
-              y_negative.mul_(total_norm_y_neg)
+              y_positive_temp.mul_(total_norm_y_pos)
+              y_negative_temp.mul_(total_norm_y_neg)
 
-              # Recombine into y_dense_float32 and cast back to original dtype
-              y_dense = (y_positive - y_negative).to(original_y_dtype)
-              # The y_norm feature selection and clopping are now applied to positive and negative
-              # components separately, and then scaled back up before recombination.
+              # Recombine into y_dense_float32 in-place to minimize memory
+              y_dense_float32.copy_(y_positive_temp)
+              y_dense_float32.sub_(y_negative_temp)
+
+              # Copy the final float32 result back to the original y_dense tensor, handling dtype conversion
+              y_dense.copy_(y_dense_float32)
+
+              del y_positive_temp
+              del y_negative_temp
 
               y_mask = (y_dense != 0)
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
