@@ -1159,15 +1159,17 @@ class FBFGS(Optimizer):
               y_positive_temp.div_(total_norm_y_pos)
               y_negative_temp.div_(total_norm_y_neg)
 
-#TODO: now cast back to original_y_dtype both positive and negative tensors
+              # Cast back to original_y_dtype before clopping and scaling
+              y_positive_temp = y_positive_temp.to(original_y_dtype)
+              y_negative_temp = y_negative_temp.to(original_y_dtype)
 
               # Apply clopping to normalized positive and negative parts
-              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = 0
-              y_negative_temp[torch.logical_and(y_negative_temp > -self.clop, y_negative_temp < self.clop)] = 0
+              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_positive_temp.device)
+              y_negative_temp[torch.logical_and(y_negative_temp > -self.clop, y_negative_temp < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_negative_temp.device)
 
               # Scale back up positive and negative parts
-              y_positive_temp.mul_(total_norm_y_pos)
-              y_negative_temp.mul_(total_norm_y_neg)
+              y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
+              y_negative_temp.mul_(total_norm_y_neg.to(original_y_dtype))
 
               # Recombine into y_dense_float32 in-place to minimize memory
               y_dense_float32.copy_(y_positive_temp)
