@@ -1160,6 +1160,7 @@ class FBFGS(Optimizer):
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
               y_dense.div_(norm_y_dense)
+              s_dense = d
               del ys_dense
               del ys_mask
               del y_mask
