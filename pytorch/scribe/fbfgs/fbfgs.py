@@ -1147,7 +1147,7 @@ class FBFGS(Optimizer):
               y_positive_temp = torch.relu(y_dense_float32)
 
               total_norm_y_pos = torch.linalg.vector_norm(y_positive_temp, ord=norm_y)
-              total_norm_y_pos = max(1e-9, total_norm_y_pos) # Handle potential division by zero
+#              total_norm_y_pos = max(1e-9, total_norm_y_pos) # Handle potential division by zero
 
               y_positive_temp.div_(total_norm_y_pos)
               y_positive_temp = y_positive_temp.to(original_y_dtype)
@@ -1162,7 +1162,7 @@ class FBFGS(Optimizer):
               y_dense_float32.relu_() # In-place ReLU. y_dense_float32 now holds y_negative_temp values.
 
               total_norm_y_neg = torch.linalg.vector_norm(y_dense_float32, ord=norm_y)
-              total_norm_y_neg = max(1e-9, total_norm_y_neg) # Handle potential division by zero
+#              total_norm_y_neg = max(1e-9, total_norm_y_neg) # Handle potential division by zero
 
               y_dense_float32.div_(total_norm_y_neg) # In-place normalization
               y_dense_float32 = y_dense_float32.to(original_y_dtype) # Convert to original_y_dtype
