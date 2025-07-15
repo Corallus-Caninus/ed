@@ -147,7 +147,7 @@ batch_train = None
 # Initialize optimizer *after* ensuring lora_params is correctly populated
 # NOTE: mathematically optimized wolfe condition for exponential decay
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.15, norm=1., clop=1e-9, c1=1e-1, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1., norm=1., clop=1e-9, c1=1e-4, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-8, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-9, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 #optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
@@ -183,32 +183,33 @@ def closure(): # Define closure here, outside the if block
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
     torch.cuda.empty_cache()
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
-    chunk_size=100 #1000
+    chunk_size=200 #1000
     cache=None
 #NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
-    grad_vector_size = 100 #5
+#TODO we may need to debug this.
+    grad_vector_size = 200 #5
     grad_chunk_size = 50
     num_tokens = input_ids.size(1)
     num_steps = 0
     avg_loss = 0.
     cache_position = None
-    if num_tokens == chunk_size+1:
-      chunk_size += 1
-    if chunk_size > 0:
+#    if num_tokens == chunk_size+1:
+#      chunk_size += 1
+    if chunk_size > 0 :
       for i in range(0, num_tokens - grad_vector_size, chunk_size):
         end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
         cur_input_ids = input_ids[:, i:end_idx]
         cur_attention_mask = attention_mask[:, i:end_idx]
         cur_input_ids = cur_input_ids.to("cuda") # Ensure input_ids are on CUDA
         cur_attention_mask = cur_attention_mask.to("cuda") # Ensure attention_mask are on CUDA
-#        cache_position = torch.tensor([i])
+  #        cache_position = torch.tensor([i])
         print(f"Cache position: {i}")
-
+  
   
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-#            cache_position =  torch.tensor(i, dtype=torch.long)
-
+  #            cache_position =  torch.tensor(i, dtype=torch.long)
+  
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
         else:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
@@ -217,7 +218,7 @@ def closure(): # Define closure here, outside the if block
         if not torch.isnan(outputs.loss): # Check for NaN before accumulating
             total_loss_sum += outputs.loss # Accumulate scalar loss value
             num_steps += 1 # Count chunks for averaging
-#        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
+  #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
   
 
       gc.collect()
@@ -297,7 +298,7 @@ while True:
 
         # Warmup period truncation
         max_warmup_length = 200
-        if len(seen_indices) < 250 and current_num_tokens > max_warmup_length:
+        if len(seen_indices) < 999999999999 and current_num_tokens > max_warmup_length:
             start_idx = random.randint(0, current_num_tokens - max_warmup_length)
             input_ids = input_ids[:, start_idx : start_idx + max_warmup_length]
             attention_mask = attention_mask[:, start_idx : start_idx + max_warmup_length]
