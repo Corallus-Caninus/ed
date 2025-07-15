@@ -1177,6 +1177,7 @@ class FBFGS(Optimizer):
               del y_positive_temp
               del y_negative_temp
 
+              print("y_norm elements: " + str((y_dense != 0).sum()))
               y_mask = (y_dense != 0)
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
