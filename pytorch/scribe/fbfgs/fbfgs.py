@@ -1141,6 +1141,12 @@ class FBFGS(Optimizer):
               y_dense_float32.div_(norm_y_dense)
               y_dense.copy_(y_dense_float32.to(original_y_dtype))
 #TODO clop here
+              # Apply clopping to y_dense
+              if self.clop != 0:
+                  y_dense_mask = torch.logical_and(y_dense > -self.clop, y_dense < self.clop)
+                  y_dense[y_dense_mask] = 0
+                  del y_dense_mask
+
               y_dense.mul_(norm_y_dense.to(original_y_dtype))
 
               s_mask = (s_dense != 0)
