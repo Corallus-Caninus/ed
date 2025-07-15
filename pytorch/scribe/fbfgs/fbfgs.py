@@ -1137,71 +1137,20 @@ class FBFGS(Optimizer):
               norm_y_dense = max(1e-9, norm_y_dense)
               torch.cuda.empty_cache()
 
-              ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
+              y_dense_float32.div_(norm_y_dense)
+              y_dense.copy_(y_dense_float32.to(original_y_dtype))
+              y_dense.mul_(norm_y_dense.to(original_y_dtype))
+
+              ys = y_dense.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
               s_mask = (s_dense != 0)
               ys_dense = y_dense.clone()
               ys_dense[~s_mask] = 0
               norm_y = norm if y_norm is None else y_norm
-
-              # Process positive part:
-              # y_positive_temp will be float32 initially, then converted to original_y_dtype
-#              y_positive_temp = torch.relu(y_dense_float32)
-#
-#              total_norm_y_pos = torch.linalg.vector_norm(y_positive_temp, ord=norm_y)
-##              total_norm_y_pos = max(1e-9, total_norm_y_pos) # Handle potential division by zero
-#
-#              y_positive_temp.div_(total_norm_y_pos)
-#              y_positive_temp = y_positive_temp.to(original_y_dtype)
-##              total_norm_y_pos = max(1e-9, total_norm_y_pos)
-##              total_norm_y_neg = max(1e-9, total_norm_y_neg)
-#
-#              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_positive_temp.device)
-#              y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
-#
-#              # Process negative part, reusing y_dense_float32:
-#
-#              # Calculate norm for positive part
-#              total_norm_y_pos = torch.linalg.vector_norm(y_positive_temp, ord=norm_y)
-#              total_norm_y_pos = max(1e-9, total_norm_y_pos) # Handle potential division by zero
-#
-#              # Normalize positive part
-#              y_positive_temp.div_(total_norm_y_pos)
-#
-#              # Convert positive part to original_y_dtype (e.g., float16)
-#              y_positive_temp = y_positive_temp.to(original_y_dtype)
-#
-#              # Apply clopping to normalized positive part (now in original_y_dtype)
-#              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_positive_temp.device)
-#
-#              # Scale back up positive part
-#              y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
-#
-#              # Process negative part:
-#              y_negative_temp_val = torch.relu(-y_dense_float32) # Calculate negative part (still float32)
-#              total_norm_y_neg = torch.linalg.vector_norm(y_negative_temp_val, ord=norm_y)
-#              total_norm_y_neg = max(1e-9, total_norm_y_neg) # Handle potential division by zero
-#              y_negative_temp_val.div_(total_norm_y_neg) # Normalize (in-place, float32)
-#              y_negative_temp_val = y_negative_temp_val.to(original_y_dtype) # Convert to original_y_dtype
-#
-#              # Apply clopping to normalized negative part (now in original_y_dtype)
-#              y_negative_temp_val[torch.logical_and(y_negative_temp_val > -self.clop, y_negative_temp_val < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_negative_temp_val.device)
-#
-#              # Scale back up negative part
-#              y_negative_temp_val.mul_(total_norm_y_neg.to(original_y_dtype))
-#
-#              # Recombine into original y_dense (which is original_y_dtype)
-##TODO: test the predictor corrector only needing true positive (plus Rho setpoint)
-#              y_dense.copy_(y_positive_temp).sub_(y_negative_temp_val)
-#
-#              del y_positive_temp
-#              del y_negative_temp_val
-
               print("y_norm elements: " + str((y_dense != 0).sum()))
               y_mask = (y_dense != 0)
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
-              y_dense.div_(norm_y_dense)
               del ys_dense
               del ys_mask
               del y_mask
