@@ -1152,12 +1152,14 @@ class FBFGS(Optimizer):
               total_norm_y_neg = torch.linalg.vector_norm(y_negative_temp, ord=norm_y)
 
               # Handle potential division by zero or very small norms
-              total_norm_y_pos = max(1e-9, total_norm_y_pos)
-              total_norm_y_neg = max(1e-9, total_norm_y_neg)
+#              total_norm_y_pos = max(1e-9, total_norm_y_pos)
+#              total_norm_y_neg = max(1e-9, total_norm_y_neg)
 
               # Normalize positive and negative parts separately
               y_positive_temp.div_(total_norm_y_pos)
               y_negative_temp.div_(total_norm_y_neg)
+
+#TODO: now cast back to original_y_dtype both positive and negative tensors
 
               # Apply clopping to normalized positive and negative parts
               y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = 0
