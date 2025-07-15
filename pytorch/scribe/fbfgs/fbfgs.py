@@ -1136,26 +1136,39 @@ class FBFGS(Optimizer):
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
               torch.cuda.empty_cache()
-
               ys = y_dense.dot(s_dense) # Calculate ys here after s is SparseFlatTensor
               s_mask = (s_dense != 0)
               ys_dense = y_dense.clone()
               ys_dense[~s_mask] = 0
-
               # Apply s_dense's sparsity mask to y_dense
               # This ensures y has the same sparsity pattern as s
               norm_y = norm if y_norm is None else y_norm
-              total_norm_y = torch.linalg.vector_norm(y_dense_float32, ord=norm_y) # Move total_norm to direction_device
-              print("total norm y:" + str(total_norm_y))
-#              total_norm_y = max(1e-9, torch.linalg.vector_norm(y_dense, ord=norm_y))
-
               #*Shotgun noise*
               #TODO: perform feature selection on positive and negative y respectively to prevent exploding or vanishing
-              y_dense_float32.div_(total_norm_y) # Perform division on float32 copy
-              y_dense = y_dense_float32.to(original_y_dtype) # Cast back to original dtype
+              # Separate positive and negative parts of y_dense_float32
+              y_positive = torch.relu(y_dense_float32)
+              y_negative = torch.relu(-y_dense_float32) # Store as positive values for norm calculation
+
+              # Calculate norms for positive and negative parts
+              total_norm_y_pos = torch.linalg.vector_norm(y_positive, ord=norm_y)
+              total_norm_y_neg = torch.linalg.vector_norm(y_negative, ord=norm_y)
+
+              # Handle potential division by zero or very small norms
+              total_norm_y_pos = max(1e-9, total_norm_y_pos)
+              total_norm_y_neg = max(1e-9, total_norm_y_neg)
+
+              # Normalize positive and negative parts separately
+              y_positive.div_(total_norm_y_pos)
+              y_negative.div_(total_norm_y_neg)
+
+              # Recombine into y_dense_float32 and cast back to original dtype
+              y_dense = (y_positive - y_negative).to(original_y_dtype)
               y_dense[torch.logical_and(y_dense > -self.clop, y_dense < self.clop)] = 0
-              y_dense.mul_(total_norm_y.to(original_y_dtype)) # Rescale to l2 delta (norm was just for clopping selection).
-#TODO: is not having this stable?
+              # The original line `y_dense.mul_(total_norm_y.to(original_y_dtype))` is removed
+              # as the intent is to apply the norm_y as a selection, and then the final
+              # y_dense.div_(norm_y_dense) will handle the overall L2 normalization.
+
+              #TODO: is not having this stable?
 #              s_dense = d
 
               y_mask = (y_dense != 0)
