@@ -1145,55 +1145,56 @@ class FBFGS(Optimizer):
 
               # Process positive part:
               # y_positive_temp will be float32 initially, then converted to original_y_dtype
-              y_positive_temp = torch.relu(y_dense_float32)
-
-              total_norm_y_pos = torch.linalg.vector_norm(y_positive_temp, ord=norm_y)
+#              y_positive_temp = torch.relu(y_dense_float32)
+#
+#              total_norm_y_pos = torch.linalg.vector_norm(y_positive_temp, ord=norm_y)
+##              total_norm_y_pos = max(1e-9, total_norm_y_pos) # Handle potential division by zero
+#
+#              y_positive_temp.div_(total_norm_y_pos)
+#              y_positive_temp = y_positive_temp.to(original_y_dtype)
+##              total_norm_y_pos = max(1e-9, total_norm_y_pos)
+##              total_norm_y_neg = max(1e-9, total_norm_y_neg)
+#
+#              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_positive_temp.device)
+#              y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
+#
+#              # Process negative part, reusing y_dense_float32:
+#
+#              # Calculate norm for positive part
+#              total_norm_y_pos = torch.linalg.vector_norm(y_positive_temp, ord=norm_y)
 #              total_norm_y_pos = max(1e-9, total_norm_y_pos) # Handle potential division by zero
-
-              y_positive_temp.div_(total_norm_y_pos)
-              y_positive_temp = y_positive_temp.to(original_y_dtype)
-#              total_norm_y_pos = max(1e-9, total_norm_y_pos)
-#              total_norm_y_neg = max(1e-9, total_norm_y_neg)
-
-              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_positive_temp.device)
-              y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
-
-              # Process negative part, reusing y_dense_float32:
-
-              # Calculate norm for positive part
-              total_norm_y_pos = torch.linalg.vector_norm(y_positive_temp, ord=norm_y)
-              total_norm_y_pos = max(1e-9, total_norm_y_pos) # Handle potential division by zero
-
-              # Normalize positive part
-              y_positive_temp.div_(total_norm_y_pos)
-
-              # Convert positive part to original_y_dtype (e.g., float16)
-              y_positive_temp = y_positive_temp.to(original_y_dtype)
-
-              # Apply clopping to normalized positive part (now in original_y_dtype)
-              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_positive_temp.device)
-
-              # Scale back up positive part
-              y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
-
-              # Process negative part:
-              y_negative_temp_val = torch.relu(-y_dense_float32) # Calculate negative part (still float32)
-              total_norm_y_neg = torch.linalg.vector_norm(y_negative_temp_val, ord=norm_y)
-              total_norm_y_neg = max(1e-9, total_norm_y_neg) # Handle potential division by zero
-              y_negative_temp_val.div_(total_norm_y_neg) # Normalize (in-place, float32)
-              y_negative_temp_val = y_negative_temp_val.to(original_y_dtype) # Convert to original_y_dtype
-
-              # Apply clopping to normalized negative part (now in original_y_dtype)
-              y_negative_temp_val[torch.logical_and(y_negative_temp_val > -self.clop, y_negative_temp_val < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_negative_temp_val.device)
-
-              # Scale back up negative part
-              y_negative_temp_val.mul_(total_norm_y_neg.to(original_y_dtype))
-
-              # Recombine into original y_dense (which is original_y_dtype)
-              y_dense.copy_(y_positive_temp).sub_(y_negative_temp_val)
-
-              del y_positive_temp
-              del y_negative_temp_val
+#
+#              # Normalize positive part
+#              y_positive_temp.div_(total_norm_y_pos)
+#
+#              # Convert positive part to original_y_dtype (e.g., float16)
+#              y_positive_temp = y_positive_temp.to(original_y_dtype)
+#
+#              # Apply clopping to normalized positive part (now in original_y_dtype)
+#              y_positive_temp[torch.logical_and(y_positive_temp > -self.clop, y_positive_temp < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_positive_temp.device)
+#
+#              # Scale back up positive part
+#              y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
+#
+#              # Process negative part:
+#              y_negative_temp_val = torch.relu(-y_dense_float32) # Calculate negative part (still float32)
+#              total_norm_y_neg = torch.linalg.vector_norm(y_negative_temp_val, ord=norm_y)
+#              total_norm_y_neg = max(1e-9, total_norm_y_neg) # Handle potential division by zero
+#              y_negative_temp_val.div_(total_norm_y_neg) # Normalize (in-place, float32)
+#              y_negative_temp_val = y_negative_temp_val.to(original_y_dtype) # Convert to original_y_dtype
+#
+#              # Apply clopping to normalized negative part (now in original_y_dtype)
+#              y_negative_temp_val[torch.logical_and(y_negative_temp_val > -self.clop, y_negative_temp_val < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_negative_temp_val.device)
+#
+#              # Scale back up negative part
+#              y_negative_temp_val.mul_(total_norm_y_neg.to(original_y_dtype))
+#
+#              # Recombine into original y_dense (which is original_y_dtype)
+##TODO: test the predictor corrector only needing true positive (plus Rho setpoint)
+#              y_dense.copy_(y_positive_temp).sub_(y_negative_temp_val)
+#
+#              del y_positive_temp
+#              del y_negative_temp_val
 
               print("y_norm elements: " + str((y_dense != 0).sum()))
               y_mask = (y_dense != 0)
@@ -1221,7 +1222,7 @@ class FBFGS(Optimizer):
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-              if  ys >= 1e-5  :
+              if  ys >= 1e-3  :
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1286,8 +1287,8 @@ class FBFGS(Optimizer):
               gc.collect()
               torch.cuda.empty_cache()
 #TODO: may need to try this again? the hessian doesnt pertain as much given that the next direction is likely orthogonal to the last.
-              H_diag = 1
-              H_diag = torch.tensor(H_diag)
+#              H_diag = 1
+#              H_diag = torch.tensor(H_diag)
               torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if self.clop == 0:
                 d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
