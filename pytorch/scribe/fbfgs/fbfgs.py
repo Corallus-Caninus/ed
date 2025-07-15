@@ -1158,31 +1158,30 @@ class FBFGS(Optimizer):
               y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
 
               # Process negative part, reusing y_dense_float32:
-              y_dense_float32.neg_() # In-place negation
-              y_dense_float32.relu_() # In-place ReLU. y_dense_float32 now holds y_negative_temp values.
+              y_negative_temp_val = torch.relu(-y_dense_float32) # Calculate negative part
+              total_norm_y_neg = torch.linalg.vector_norm(y_negative_temp_val, ord=norm_y)
+              total_norm_y_neg = max(1e-9, total_norm_y_neg) # Handle potential division by zero
+              y_negative_temp_val.div_(total_norm_y_neg) # Normalize
+              y_negative_temp_val = y_negative_temp_val.to(original_y_dtype) # Convert to original_y_dtype
 
-              total_norm_y_neg = torch.linalg.vector_norm(y_dense_float32, ord=norm_y)
-#              total_norm_y_neg = max(1e-9, total_norm_y_neg) # Handle potential division by zero
-
-              y_dense_float32.div_(total_norm_y_neg) # In-place normalization
-              y_dense_float32 = y_dense_float32.to(original_y_dtype) # Convert to original_y_dtype
 
               # Apply clopping to normalized negative part
               y_dense_float32[torch.logical_and(y_dense_float32 > -self.clop, y_dense_float32 < self.clop)] = torch.tensor(0.0, dtype=original_y_dtype, device=y_dense_float32.device)
 
               # Scale back up positive and negative parts
               y_positive_temp.mul_(total_norm_y_pos.to(original_y_dtype))
-              y_negative_temp.mul_(total_norm_y_neg.to(original_y_dtype))
+              y_negative_temp_val.mul_(total_norm_y_neg.to(original_y_dtype))
 
               # Recombine into y_dense_float32 in-place to minimize memory
               y_dense_float32.copy_(y_positive_temp)
-              y_dense_float32.sub_(y_negative_temp)
+              y_dense_float32.sub_(y_negative_temp_val)
 
               # Copy the final float32 result back to the original y_dense tensor, handling dtype conversion
-              y_dense.copy_(y_positive_temp).sub_(y_dense_float32) # y_dense_float32 now holds the negative part
+              y_dense.copy_(y_dense_float32)
+
 
               del y_positive_temp
-              del y_negative_temp
+              del y_negative_temp_val
 
               print("y_norm elements: " + str((y_dense != 0).sum()))
               y_mask = (y_dense != 0)
