@@ -877,6 +877,7 @@ class FBFGS(Optimizer):
             else:
               hit_miss = hit_miss + str("_ ")
 
+        print("q after first loop elements: " + str((q != 0).sum()))
         d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
         del q
 
