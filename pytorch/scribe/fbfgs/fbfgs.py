@@ -1139,9 +1139,11 @@ class FBFGS(Optimizer):
 
               original_y_dtype = y_dense.dtype
               y_dense_float32 = y_dense.to(torch.float32)
-              ys = y_dense.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
+              y_dense.div_(norm_y_dense)
+              ys = y_dense.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
+              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
               torch.cuda.empty_cache()
 
 
@@ -1165,7 +1167,6 @@ class FBFGS(Optimizer):
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
-              y_dense.div_(norm_y_dense)
               s_dense = d
               del ys_dense
               del ys_mask
@@ -1187,7 +1188,7 @@ class FBFGS(Optimizer):
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-              if  ys >= 1e-3  :
+              if  ys >= 1.  :
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
