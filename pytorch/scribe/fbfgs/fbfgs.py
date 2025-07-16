@@ -879,7 +879,11 @@ class FBFGS(Optimizer):
               hit_miss = hit_miss + str("_ ")
 
         print("q after first loop elements: " + str((q != 0).sum()))
+        print("q max value: " + str(q.max()))
         d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
+#TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
+        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to("cuda")
+        d.div_(total_norm)
         del q
 
         for i in range(num_old):
