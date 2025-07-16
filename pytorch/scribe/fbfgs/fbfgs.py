@@ -842,6 +842,7 @@ class FBFGS(Optimizer):
         q = flat_grad.to(torch.float32).to("cuda").neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
 #        total_norm = max(1e-9, total_norm)
+        print("q max value: " + str(q.max()))
         if total_norm == float('inf'):
 #          total_norm = torch.tensor(1e-9, dtype=torch.float32, device="cuda")
           print("pre-direction l2 norm returned inf")
