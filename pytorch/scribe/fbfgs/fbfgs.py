@@ -1141,8 +1141,8 @@ class FBFGS(Optimizer):
               y_dense_float32 = y_dense.to(torch.float32)
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
-              y_dense.div_(norm_y_dense)
               ys = y_dense.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
+#TODO: would ys * norm_y_dense make sense? since this is essentially a metric of how lossy the curvature is? possibly with a hyperparameter scalar coefficient?
               ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
               torch.cuda.empty_cache()
 
@@ -1167,7 +1167,9 @@ class FBFGS(Optimizer):
               ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
+              #TODO: should we instead take the l2 of s(t) to keep everything in the same norm order in the approximation?
               s_dense = d
+              y_dense.div_(norm_y_dense)
               del ys_dense
               del ys_mask
               del y_mask
