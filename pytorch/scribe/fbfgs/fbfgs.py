@@ -1,3 +1,4 @@
+#In Memory of Oshkosh, my pet Dalmatian.
 import os
 #os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:64'
 from typing import Optional, Union
