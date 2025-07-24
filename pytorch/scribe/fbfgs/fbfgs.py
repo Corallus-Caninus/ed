@@ -737,7 +737,7 @@ class FBFGS(Optimizer):
 
     # gather flat grads with L2 Normalization
 #TODO: rename
-    def _gather_norm_flat_grad(self, norm, isClop = True):
+    def _gather_norm_flat_grad(self, isClop = True):
         views = []
         total = 0
         for p in self._params:
@@ -752,15 +752,15 @@ class FBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view)
         views = torch.cat(views, 0)
-#        norm = torch.linalg.vector_norm(views, 2)
-#        views.div_(norm)
+        norm = torch.linalg.vector_norm(views, self.norm)
+        views.div_(norm)
 #TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
 #TODO: what if we normaling by the max value and let clopping handle what the l1 would do anyways? we would only need to tune the clopping hyperparameter and would get essentially what we want with l1
         #Clop
 #TODO: may be worth taking the top K here to have deterministic memory, do this after clopping to create a floor for allocation since we want to allow very sparse outlier gradients
-#        if isClop:
-#          print("gradient elements: " + str((views != 0).sum()) + " total: " + str(views.numel()), end=' ')
-#          views[torch.logical_and(views > -self.clop,views < self.clop)] = 0
+        if isClop:
+          print("gradient elements: " + str((views != 0).sum()) + " total: " + str(views.numel()), end=' ')
+          views[torch.logical_and(views > -self.clop,views < self.clop)] = 0
 #          views = views.to_sparse()
         return views #.to("cpu")
     #TODO: clip out NaN based on dtype max value
@@ -825,7 +825,7 @@ class FBFGS(Optimizer):
             offset += numel
 
         loss = float(closure())
-        flat_grad = self._gather_flat_grad()
+        flat_grad = self._gather_norm_flat_grad()
 
         # Restore original parameters from CPU
         for p, original_p_cpu in zip(self._params, original_params_cpu):
@@ -879,12 +879,11 @@ class FBFGS(Optimizer):
             else:
               hit_miss = hit_miss + str("_ ")
 
-        print("q after first loop elements: " + str((q != 0).sum()))
         print("q max value: " + str(q.max()))
         d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
 #TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
-        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to("cuda")
-        d.div_(total_norm)
+#        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to("cuda")
+#        d.div_(total_norm)
         del q
 
         for i in range(num_old):
@@ -1143,8 +1142,9 @@ class FBFGS(Optimizer):
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
               norm_y_dense = max(1e-9, norm_y_dense)
               ys = y_dense.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
+#              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
 #TODO: would ys * norm_y_dense make sense? since this is essentially a metric of how lossy the curvature is? possibly with a hyperparameter scalar coefficient?
-              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
+#              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
               torch.cuda.empty_cache()
 
 
@@ -1169,7 +1169,7 @@ class FBFGS(Optimizer):
               ys_dense[~ys_mask] = 0
               y_dense.add_(ys_dense)
               #TODO: should we instead take the l2 of s(t) to keep everything in the same norm order in the approximation?
-              s_dense = d
+#              s_dense = d
               y_dense.div_(norm_y_dense)
               del ys_dense
               del ys_mask
@@ -1177,8 +1177,15 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache()
               gc.collect()
 
+#              yf = self._numel() / (y_dense != 0).sum()
+#              ys = ys * yf
+#NOTE: 0.1 is approx 368/30Mill. we may have a better way to formulate this by clipping according to an inverse of yf
+              yf =  (y_dense != 0).sum() / self._numel()
+              if ys <= yf: #NOTE: was 0.1
+                ys = yf
+
 #TODO: ys = Y*S was here
-              print(f"ys: {ys.item()}")
+              print(f"ys: {ys}")
 #              s_dense = s_dense/total_norm_s
 #              s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
 
@@ -1191,7 +1198,7 @@ class FBFGS(Optimizer):
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-              if  ys >= 1.  :
+              if  ys >= 1e-2  :
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
