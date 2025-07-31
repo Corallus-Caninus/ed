@@ -324,7 +324,7 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a linear equation or a ratio
         # check conditions #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition #TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
-        if (f_new > (f + c1 * t * gtd)) or (f_new != f_new and is_nan == True): # or f_new >= f_prev: #NOTE: Ward condition
+        if f_new > (f + c1 * t * gtd)  or (f_new != f_new and is_nan == True): # or f_new >= f_prev: #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -333,7 +333,7 @@ def _strong_wolfe(
             break
 
 #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if abs(gtd_new) <= -c2 * gtd and f_new < f_best:
+        if abs(gtd_new) <= -c2 * gtd and f_new < f_best :
             bracket = [t] # type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -438,6 +438,7 @@ def _strong_wolfe(
          #TODO: return the wolfe pack here
        #            break
 
+        t_prev = t
         # compute new trial value
         t = _cubic_interpolate(
             bracket[0],
@@ -489,12 +490,22 @@ def _strong_wolfe(
         # Evaluate new point
         f_new, g_new = obj_func(t, d) # Single evaluation
         ls_func_evals += 1 # Increment func evals
+        gtd_prev = gtd_new
         gtd_new = (g_new.to("cuda") * d.to("cuda")).sum() # Keep as scalar tensor
-#        g_new = g_new#
+
+#TODO: something like this. we need to move t by the amount that linearly should bring it into c3 notch if we are over converged.
+#TODO: also this should happen before evaluation and probably be an if condition against push/shove routine
+#TODO: prompt it..
+#        if abs(gtd_new) <= -0.4 * gtd:
+#          gtd_delta = gtd_new - gtd_prev
+#          t_delta = t - t_prev
+#TODO: we also need the distance to the notch.
+#          t = t*t_delta/gtd_delta
+
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
-        if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition
+        if f_new > (f + c1 * t * gtd)  or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
@@ -608,8 +619,8 @@ class FBFGS(Optimizer):
         bracket_shove: float =(1/3),
         capture_min_step: float =1.,
         capture_max_step: float =100,
-        clop: float = 5e-7,
-        direction_device: str = 'cuda',
+        clop: float = 0,
+        direction_device: str = 'cpu',
         norm: float = 1.0,
         y_norm: Optional[float] = None
     ):
@@ -700,14 +711,14 @@ class FBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view.to(grad_device))
         grad = torch.cat(views, 0)
-        for p in self._params: # Clip after gathering to ensure all grads are included
-            if p.grad is not None: # Check if p.grad is not None
-                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
+#        for p in self._params: # Clip after gathering to ensure all grads are included
+#            if p.grad is not None: # Check if p.grad is not None
+#                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
 #        finfo = torch.finfo(grad.dtype)
 #        grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
 #        total_norm = torch.linalg.vector_norm(grad, ord=2.).to("cuda") # Move total_norm to direction_device
-###TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
-###        total_norm = total_norm + 1e-8
+#####TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
+#####        total_norm = total_norm + 1e-8
 #        grad = grad.div_(total_norm)
         return grad
 
@@ -825,7 +836,7 @@ class FBFGS(Optimizer):
             offset += numel
 
         loss = float(closure())
-        flat_grad = self._gather_norm_flat_grad()
+        flat_grad = self._gather_flat_grad()
 
         # Restore original parameters from CPU
         for p, original_p_cpu in zip(self._params, original_params_cpu):
@@ -838,6 +849,7 @@ class FBFGS(Optimizer):
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         num_old = len(old_dirs)
         hit_miss = str("")
+#        similarity = 5e-5
         similarity = 0.
 
         q = flat_grad.to(torch.float32).to("cuda").neg()
@@ -868,6 +880,8 @@ class FBFGS(Optimizer):
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
+#              similarity = similarity + similarity/direction_similarity #TODO: fix this, it should scale based on the difference
+#              similarity = 2*similarity 
               al[i] = direction_similarity * ro[i].item()
               temp_sparse_old_dir = old_dirs[i].to("cuda")
               sparse_old_dir_scaled = SparseFlatTensor(
@@ -875,15 +889,19 @@ class FBFGS(Optimizer):
                   temp_sparse_old_dir.total_size, temp_sparse_old_dir.unit_indices, temp_sparse_old_dir.unit_values.to(dtype=torch.float32)
               ) * ((-al[i]))
               q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
+#              total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
+#              q.div_(total_norm)
+#TODO: try l2 here again? The original reasoning was this breaks the math since division of a term isnt distributive
               hit_miss = hit_miss + str("| ")
             else:
               hit_miss = hit_miss + str("_ ")
 
         print("q max value: " + str(q.max()))
-        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
 #TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
-#        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to("cuda")
-#        d.div_(total_norm)
+#TODO: it may be better to crash out on NaN
+#        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
+        d = q.mul(H_diag.to(torch.float32))
+#        d = q
         del q
 
         for i in range(num_old):
@@ -901,16 +919,19 @@ class FBFGS(Optimizer):
                   temp_sparse_old_stp.total_size, temp_sparse_old_stp.unit_indices, temp_sparse_old_stp.unit_values.to(dtype=torch.float32)
               ) * (alpha_val)
               d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
+#TODO: try removing normalization from only second loop
+#              total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to("cuda")
+#              d.div_(total_norm)
 
-        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+#        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
         print(hit_miss)
         total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to("cuda")
 #        total_norm = max(1e-9, total_norm)
-        if total_norm == float('inf'):
-            total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to(torch.float32).to("cuda")
-            d = d.div_(total_norm)
-            total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to("cuda")
+#        if total_norm == float('inf'):
+#            total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to(torch.float32).to("cuda")
+#            d = d.div_(total_norm)
+#            total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to("cuda")
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
 
@@ -1082,14 +1103,14 @@ class FBFGS(Optimizer):
               print("RESET (n_iter=1 or prev_flat_grad is None)")
               flat_grad = self._gather_flat_grad()
 #TODO: clip_grad_norm by the l1 norm for a max norm of 1e9
-              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
+#              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag)
 #TODO: t shouldnt be 1 here for insta-wolfes
-              t = 1
-              self.t = 1.
+#              t = 1
+#              self.t = 1.
 #              if len(old_dirs) > 0 and prev_flat_grad is not None:
 #                if self.clop == 0:
 #                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
@@ -1099,7 +1120,7 @@ class FBFGS(Optimizer):
               d = self._gather_flat_grad().neg()
               #TODO: should we also do norm float("inf") here to match direction S?
               total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
-              total_norm = max(1e-9, total_norm)
+#              total_norm = max(1e-9, total_norm)
               #Handle type precision overflow for L1-likes
               if total_norm == float('inf'):
                 total_norm = torch.linalg.vector_norm(d, ord=float("inf")) # Move total_norm to direction_device
@@ -1116,42 +1137,48 @@ class FBFGS(Optimizer):
 #              print("d elements: " + str((d.values() != 0).sum()) )
               print("direction elements: " + str((d != 0).sum()) )
           else:
-#              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
+              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
 #              total_norm_grad = max(1e-9, total_norm_grad)
-#              norm_flat_grad = flat_grad/total_norm_grad
-#
-#              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
+              norm_flat_grad = flat_grad/total_norm_grad
+
+              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
 #              total_norm_prev_grad = max(1e-9, total_norm_prev_grad)
-#              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
+              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
 
               # Calculate y_dense using clone and in-place operations to reduce allocations
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               # Apply L2 norm clipping to flat_grad and prev_flat_grad
-              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
-              if prev_flat_grad is not None:
-                  torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=1e9)
+#              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
+#              if prev_flat_grad is not None:
+#                  torch.nn.utils.clip_grad_norm_(prev_flat_grad, max_norm=1e9)
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               # prev_flat_grad is moved to CUDA for calculation, then immediately deleted
               # to free up memory.
-              y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
-              y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
+              y_dense = norm_flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
+              y_dense.sub_(prev_norm_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
               s_dense = (d.mul(t)) # Define s_dense here
 
               original_y_dtype = y_dense.dtype
               y_dense_float32 = y_dense.to(torch.float32)
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
-              norm_y_dense = max(1e-9, norm_y_dense)
-              ys = y_dense.dot(s_dense)  # Calculate ys here after s is SparseFlatTensor
+#              norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
+#TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
+#              norm_y_dense = max(1e-9, norm_y_dense)
+              y_dense_float32.div_(norm_y_dense)
+              norm_s = torch.linalg.vector_norm(s_dense, ord=2.)
+#TODO: try without norming d now that we have decent alpha deflection
+              ys = y_dense_float32.dot(s_dense.div(norm_s).to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
+#              ys = y_dense_float32.dot(s_dense.to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
 #              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
 #TODO: would ys * norm_y_dense make sense? since this is essentially a metric of how lossy the curvature is? possibly with a hyperparameter scalar coefficient?
 #              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
               torch.cuda.empty_cache()
 
-
               #Shotgun noise
               norm_y = torch.linalg.vector_norm(y_dense_float32, ord=y_norm)
               y_dense_float32.div_(norm_y)
               y_dense.copy_(y_dense_float32.to(original_y_dtype))
+              del y_dense_float32
               # Apply clopping to y_dense
               if self.clop != 0:
                   y_dense_mask = torch.logical_and(y_dense > -self.clop, y_dense < self.clop)
@@ -1159,46 +1186,59 @@ class FBFGS(Optimizer):
                   del y_dense_mask
               y_dense.mul_(norm_y)
 
-              s_mask = (s_dense != 0)
-              ys_dense = y_dense.clone()
-              ys_dense[~s_mask] = 0
-              norm_y = norm if y_norm is None else y_norm
-              print("y_norm elements: " + str((y_dense != 0).sum()))
-              y_mask = (y_dense != 0)
-              ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
-              ys_dense[~ys_mask] = 0
-              y_dense.add_(ys_dense)
-              #TODO: should we instead take the l2 of s(t) to keep everything in the same norm order in the approximation?
-#              s_dense = d
-              y_dense.div_(norm_y_dense)
-              del ys_dense
-              del ys_mask
-              del y_mask
+#TODO: this isnt working, can verify by setting norm higher than y norm, y norm wont be at least d numel
+#TODO: fix this.
+#              s_mask = (s_dense != 0)
+#              ys_dense = y_dense.clone()
+#              ys_dense[~s_mask] = 0
+#              norm_y = norm if y_norm is None else y_norm
+##              print("y_norm elements: " + str((y_dense != 0).sum()))
+#              y_mask = (y_dense != 0)
+#              ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
+#              ys_dense[~ys_mask] = 0
+#              y_dense.add_(ys_dense)
+#              TODO: should we instead take the l2 of s(t) to keep everything in the same norm order in the approximation?
+#              s_dense = d #TODO: again? with letting I first loop scale
+
+              norm_yf = torch.linalg.vector_norm(y_dense, ord=2.)
+              y_dense.div_(norm_yf)
+#              s_dense.div_(norm_s)
+#              yf = self._numel() / (y_dense != 0).sum()
+#              y_dense.div_(yf)
+
+#              norm_y_dense = norm_y_dense * yf #if the full vector is the unit distance, this should be proportional
+#              del ys_dense
+#              del ys_mask
+#              del y_mask
               torch.cuda.empty_cache()
               gc.collect()
 
+#TODO consider scale aware thresholding s.t. ys >= 1e-1* s.dot(s).sqr()
+#TODO: maybe this should be rho so we dont throw off the Hessian diag
 #              yf = self._numel() / (y_dense != 0).sum()
 #              ys = ys * yf
+#              ys = ys * 1e2
 #NOTE: 0.1 is approx 368/30Mill. we may have a better way to formulate this by clipping according to an inverse of yf
-              yf =  (y_dense != 0).sum() / self._numel()
-              if ys <= yf: #NOTE: was 0.1
-                ys = yf
+#              yf =  (y_dense != 0).sum() / self._numel()
+#              if ys <= 0.1 and ys > 0 and t > 1: #NOTE: was 0.1
+#                ys = 0.1
 
 #TODO: ys = Y*S was here
               print(f"ys: {ys}")
 #              s_dense = s_dense/total_norm_s
 #              s_dense[torch.logical_and(s_dense > -self.clop,s_dense < self.clop)] = 0
 
-              if self.clop != 0:
-                y = dense_to_sparse_flat_tensor(y_dense)
-                s = dense_to_sparse_flat_tensor(s_dense)
-              else:
-                y = y_dense
-                s = s_dense
+#              if self.clop != 0:
+              y = dense_to_sparse_flat_tensor(y_dense)
+              s = dense_to_sparse_flat_tensor(s_dense)
+#              else:
+#                y = y_dense
+#                s = s_dense
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-              if  ys >= 1e-2  :
+#TODO theres a pop bug here where we pop unecessarily
+              if  ys >= 1e-5  :
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1227,13 +1267,16 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-                if self.clop != 0:
-                  old_dirs.append(y.to(self.direction_device)) # Store y as SparseFlatTensor
-                  old_stps.append(s.to(self.direction_device)) # Store s as SparseFlatTensor
-                else:
-                  old_dirs.append(y.to(self.direction_device)) # Store y as dense Tensor
-                  old_stps.append(s.to(self.direction_device)) # Store s as dense Tensor
-                ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+#                if self.clop != 0:
+                old_dirs.append(y.to(self.direction_device)) # Store y as SparseFlatTensor
+                old_stps.append(s.to(self.direction_device)) # Store s as SparseFlatTensor
+#                else:
+#                  old_dirs.append(y.to(self.direction_device)) # Store y as dense Tensor
+#                  old_stps.append(s.to(self.direction_device)) # Store s as dense Tensor
+                ro.append(torch.tensor([(1. / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                state["old_stps"] = old_stps
+                state["ro"] = ro
+                state["old_dirs"] = old_dirs
 #TODO: break here on n_iters
               if n_iter > max_iter or loss == 0:
                 break
@@ -1266,11 +1309,11 @@ class FBFGS(Optimizer):
 #TODO: it might make sense to divide by the history size so we keep curvature normalized to prevent explosions in direction approx.
 #              H_diag = 1
 #              H_diag = torch.tensor(H_diag)
-              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
-              if self.clop == 0:
-                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
-              else:
-                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm=y_norm)
+#              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
+#              if self.clop == 0:
+#                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
+#              else:
+              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm=y_norm)
               gc.collect()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               torch.cuda.empty_cache()
