@@ -901,6 +901,8 @@ class FBFGS(Optimizer):
 #TODO: it may be better to crash out on NaN
 #        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
         d = q.mul(H_diag.to(torch.float32))
+#        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
+#        q.div_(total_norm)
 #        d = q
         del q
 
@@ -1137,13 +1139,11 @@ class FBFGS(Optimizer):
 #              print("d elements: " + str((d.values() != 0).sum()) )
               print("direction elements: " + str((d != 0).sum()) )
           else:
-              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
-#              total_norm_grad = max(1e-9, total_norm_grad)
-              norm_flat_grad = flat_grad/total_norm_grad
-
-              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
-#              total_norm_prev_grad = max(1e-9, total_norm_prev_grad)
-              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
+#              total_norm_grad = torch.linalg.vector_norm(flat_grad, ord=2.) # Move total_norm to direction_device
+#              norm_flat_grad = flat_grad/total_norm_grad
+#
+#              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
+#              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
 
               # Calculate y_dense using clone and in-place operations to reduce allocations
 #TODO: clip flat_grad and prev_flat_grad here respectively.
@@ -1154,8 +1154,8 @@ class FBFGS(Optimizer):
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               # prev_flat_grad is moved to CUDA for calculation, then immediately deleted
               # to free up memory.
-              y_dense = norm_flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
-              y_dense.sub_(prev_norm_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
+              y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
+              y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
               s_dense = (d.mul(t)) # Define s_dense here
 
               original_y_dtype = y_dense.dtype
@@ -1164,10 +1164,10 @@ class FBFGS(Optimizer):
 #              norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
 #              norm_y_dense = max(1e-9, norm_y_dense)
-              y_dense_float32.div_(norm_y_dense)
+              y_dense_float32.div_(norm_y_dense) #TODO: this isnt necessary 
               norm_s = torch.linalg.vector_norm(s_dense, ord=2.)
 #TODO: try without norming d now that we have decent alpha deflection
-              ys = y_dense_float32.dot(s_dense.div(norm_s).to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
+#              ys = y_dense_float32.dot(s_dense.div(norm_s).to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
 #              ys = y_dense_float32.dot(s_dense.to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
 #              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
 #TODO: would ys * norm_y_dense make sense? since this is essentially a metric of how lossy the curvature is? possibly with a hyperparameter scalar coefficient?
@@ -1200,8 +1200,13 @@ class FBFGS(Optimizer):
 #              TODO: should we instead take the l2 of s(t) to keep everything in the same norm order in the approximation?
 #              s_dense = d #TODO: again? with letting I first loop scale
 
+
+#              ys = y_dense.mul(norm_y_dense).dot(s_dense.div(norm_s))
+#              ys = y_dense.mul(norm_y_dense).dot(s_dense)
               norm_yf = torch.linalg.vector_norm(y_dense, ord=2.)
               y_dense.div_(norm_yf)
+              ys = y_dense.dot(s_dense.div(norm_s))
+
 #              s_dense.div_(norm_s)
 #              yf = self._numel() / (y_dense != 0).sum()
 #              y_dense.div_(yf)
@@ -1238,7 +1243,7 @@ class FBFGS(Optimizer):
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
 #TODO theres a pop bug here where we pop unecessarily
-              if  ys >= 1e-5  :
+              if  ys >= 1e-1  :
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1287,6 +1292,8 @@ class FBFGS(Optimizer):
               y_squared = y_dense.dot(y_dense)
               H_diag = ys / y_squared # (y*y)
               del y_squared
+#              H_diag = ys #TODO: just 1?
+#              H_diag = ys #TODO: just 1?
               gc.collect()
 
               y = y #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
