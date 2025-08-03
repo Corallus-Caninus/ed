@@ -308,7 +308,6 @@ def _strong_wolfe(
     done = False
     ls_iter = 0
 
-#TODO: this can hit to NaN pretty easily
     t_best = t
     t = torch.tensor(t) # Ensure t is a tensor before the loop
     device = gtd.device
@@ -940,6 +939,7 @@ class FBFGS(Optimizer):
         d = d.to(torch.float16)
         mask = torch.logical_and(d > -clop, d < clop)
         d[mask] = 0
+#        d = d.mul_(total_norm)
 #        print("direction elements: " + str((d != 0).sum()) )
         print("total_norm: " + str(total_norm))
         del mask
@@ -1135,6 +1135,7 @@ class FBFGS(Optimizer):
 
 #              d = d.to_sparse()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+#              d = d*total_norm
               gc.collect()
 #              print("d elements: " + str((d.values() != 0).sum()) )
               print("direction elements: " + str((d != 0).sum()) )
@@ -1157,6 +1158,7 @@ class FBFGS(Optimizer):
               y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
               y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
               s_dense = (d.mul(t)) # Define s_dense here
+              ys = y_dense.dot(s_dense)
 
               original_y_dtype = y_dense.dtype
               y_dense_float32 = y_dense.to(torch.float32)
@@ -1173,6 +1175,10 @@ class FBFGS(Optimizer):
 #TODO: would ys * norm_y_dense make sense? since this is essentially a metric of how lossy the curvature is? possibly with a hyperparameter scalar coefficient?
 #              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
               torch.cuda.empty_cache()
+
+              s_mask = (s_dense != 0)
+              ys_dense = y_dense.clone()
+              ys_dense[~s_mask] = 0
 
               #Shotgun noise
               norm_y = torch.linalg.vector_norm(y_dense_float32, ord=y_norm)
@@ -1193,10 +1199,13 @@ class FBFGS(Optimizer):
 #              ys_dense[~s_mask] = 0
 #              norm_y = norm if y_norm is None else y_norm
 ##              print("y_norm elements: " + str((y_dense != 0).sum()))
-#              y_mask = (y_dense != 0)
-#              ys_mask = torch.logical_and(s_mask, torch.logical_not(y_mask))
-#              ys_dense[~ys_mask] = 0
-#              y_dense.add_(ys_dense)
+              y_mask = (y_dense == 0)
+              ys_mask = torch.logical_and(s_mask, y_mask)
+              ys_dense[~ys_mask] = 0
+              print("y dense pre s-mask " + str((y_dense != 0).sum()))
+              print("s mask: " + str((s_mask!=0).sum()))
+              y_dense.add_(ys_dense)
+              print("y dense + s_mask  " + str((y_dense != 0).sum()))
 #              TODO: should we instead take the l2 of s(t) to keep everything in the same norm order in the approximation?
 #              s_dense = d #TODO: again? with letting I first loop scale
 
@@ -1205,16 +1214,17 @@ class FBFGS(Optimizer):
 #              ys = y_dense.mul(norm_y_dense).dot(s_dense)
               norm_yf = torch.linalg.vector_norm(y_dense, ord=2.)
               y_dense.div_(norm_yf)
-              ys = y_dense.dot(s_dense.div(norm_s))
+#              ys = y_dense.dot(s_dense.div(norm_s))
+#              ys = y_dense.dot(s_dense)
 
 #              s_dense.div_(norm_s)
 #              yf = self._numel() / (y_dense != 0).sum()
 #              y_dense.div_(yf)
 
 #              norm_y_dense = norm_y_dense * yf #if the full vector is the unit distance, this should be proportional
-#              del ys_dense
-#              del ys_mask
-#              del y_mask
+              del ys_dense
+              del ys_mask
+              del y_mask
               torch.cuda.empty_cache()
               gc.collect()
 
@@ -1243,7 +1253,7 @@ class FBFGS(Optimizer):
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
 #TODO theres a pop bug here where we pop unecessarily
-              if  ys >= 1e-1  :
+              if  ys >= 1e-4  and t >=1:
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
