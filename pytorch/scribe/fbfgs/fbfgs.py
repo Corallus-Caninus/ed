@@ -1253,7 +1253,7 @@ class FBFGS(Optimizer):
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
 #TODO theres a pop bug here where we pop unecessarily
-              if  ys >= 1e-4  and t >=1:
+              if  ys >= 1e-2  and t >=1:
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1299,9 +1299,13 @@ class FBFGS(Optimizer):
                 return orig_loss
               # Update scale of initial Hessian approximation
 # TODO: was this also shifted? check the original implementation
-              y_squared = y_dense.dot(y_dense)
-              H_diag = ys / y_squared # (y*y)
-              del y_squared
+              if ys > 0:
+                y_squared = y_dense.dot(y_dense)
+                H_diag = ys / y_squared # (y*y)
+                del y_squared
+              else:
+                H_diag = 1.
+                H_diag = torch.tensor(H_diag)
 #              H_diag = ys #TODO: just 1?
 #              H_diag = ys #TODO: just 1?
               gc.collect()
