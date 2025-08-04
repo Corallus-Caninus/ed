@@ -1390,6 +1390,15 @@ class FBFGS(Optimizer):
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
               Needle = False
               if not success:  # TODO: we chase misprinted lines
+                  # Line search failed. Remove the largest rho entry from history.
+                  if len(ro) > 0:
+                      rho_scalars = [r.item() for r in ro]
+                      max_rho_value = max(rho_scalars)
+                      max_rho_idx = rho_scalars.index(max_rho_value)
+                      old_dirs.pop(max_rho_idx)
+                      old_stps.pop(max_rho_idx)
+                      ro.pop(max_rho_idx)
+                      print(f"Removed largest rho entry from history. New history size: {len(ro)}")
 #TODO: remove the largest rho entry from the history (s, y and rho)
                   if ls_failed:  # TODO: we chase misprinted lines
                       return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
