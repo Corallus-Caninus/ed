@@ -1253,7 +1253,8 @@ class FBFGS(Optimizer):
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
 #TODO theres a pop bug here where we pop unecessarily
-              if  ys >= 1e-2  and t >=1:
+#TODO: what if we instead removed the largest ro from the history?
+              if  ys >= 1e-1  and t >=1:
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1389,6 +1390,7 @@ class FBFGS(Optimizer):
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
               Needle = False
               if not success:  # TODO: we chase misprinted lines
+#TODO: remove the largest rho entry from the history (s, y and rho)
                   if ls_failed:  # TODO: we chase misprinted lines
                       return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
                       t = 1  # Reset t to 1 for after needling
