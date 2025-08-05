@@ -1392,16 +1392,14 @@ class FBFGS(Optimizer):
               if not success:  # TODO: we chase misprinted lines
                   # Line search failed. Remove the largest rho entry from history.
                   if len(ro) > 0:
-                      indices_to_remove = []
-                      for i in range(len(ro)):
+                      removed_count = 0
+                      # Iterate backward to safely remove elements without affecting indices of unprocessed elements
+                      for i in range(len(ro) - 1, -1, -1):
                           if ro[i].item() > 10.0: # 1 / 1e-1 = 10.0
-                              indices_to_remove.append(i)
-
-                      removed_count = len(indices_to_remove)
-                      for i in sorted(indices_to_remove, reverse=True):
-                          old_dirs.pop(i)
-                          old_stps.pop(i)
-                          ro.pop(i)
+                              old_dirs.pop(i)
+                              old_stps.pop(i)
+                              ro.pop(i)
+                              removed_count += 1
                       if removed_count > 0:
                           print(f"Removed {removed_count} rho entries > 10.0 from history. New history size: {len(ro)}")
                       else:
