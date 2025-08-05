@@ -1254,7 +1254,7 @@ class FBFGS(Optimizer):
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
 #TODO theres a pop bug here where we pop unecessarily
 #TODO: what if we instead removed the largest ro from the history?
-              if  ys >= 1e-1  and t >=1:
+              if  ys >= 1e-4  and t >=1:
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
