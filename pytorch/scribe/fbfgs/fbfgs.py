@@ -66,17 +66,17 @@ class SparseFlatTensor:
         return dense_tensor
 
 
-    def to(self, device: str):
+    def to(self, device: str, non_blocking: bool = False, pin_memory: bool = False):
         """
         Moves all internal tensors to the specified device and returns a new SparseFlatTensor, including unit indices.
         """
         return SparseFlatTensor(
-            self.starts.to(device),
-            self.ends.to(device),
-            self.values.to(device),
-            self.total_size.to(device),
-            self.unit_indices.to(device),
-            self.unit_values.to(device)
+            self.starts.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.ends.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.values.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.total_size.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.unit_indices.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.unit_values.to(device, non_blocking=non_blocking, pin_memory=pin_memory)
         )
 
     def dot(self, other):
