@@ -846,6 +846,7 @@ class FBFGS(Optimizer):
 #TODO: what causes direction norm to blow up?
 #TODO: if we increase the type precision we may fix the exploding direction which could result in very large and efficient step sizes.
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
+        torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to CPU history
         num_old = len(old_dirs)
         hit_miss = str("")
 #        similarity = 5e-5
@@ -947,6 +948,7 @@ class FBFGS(Optimizer):
 
     @torch.jit.script
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
+        torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to CPU history
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 0.
