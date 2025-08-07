@@ -1166,7 +1166,7 @@ class FBFGS(Optimizer):
 #              norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
 #              norm_y_dense = max(1e-9, norm_y_dense)
-              y_dense_float32.div_(norm_y_dense) #TODO: this isnt necessary 
+              y_dense_float32.div_(norm_y_dense) 
               norm_s = torch.linalg.vector_norm(s_dense, ord=2.)
 #TODO: try without norming d now that we have decent alpha deflection
 #              ys = y_dense_float32.dot(s_dense.div(norm_s).to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
@@ -1213,7 +1213,7 @@ class FBFGS(Optimizer):
 #              ys = y_dense.mul(norm_y_dense).dot(s_dense.div(norm_s))
 #              ys = y_dense.mul(norm_y_dense).dot(s_dense)
               norm_yf = torch.linalg.vector_norm(y_dense, ord=2.)
-              y_dense.div_(norm_yf)
+              y_dense.div_(norm_yf) 
 #              ys = y_dense.dot(s_dense.div(norm_s))
 #              ys = y_dense.dot(s_dense)
 
@@ -1252,9 +1252,10 @@ class FBFGS(Optimizer):
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
               print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ')
               print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
-#TODO theres a pop bug here where we pop unecessarily
-#TODO: what if we instead removed the largest ro from the history?
-              if  ys >= 1e-4  and t >=1:
+#TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be modeled as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
+#TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
+#TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
+              if  ys >= 1e-3  and t >=1:
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
