@@ -1284,13 +1284,9 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # store new direction/step
-#                if self.clop != 0:
-                old_dirs.append(y.to(self.direction_device)) # Store y as SparseFlatTensor
-                old_stps.append(s.to(self.direction_device)) # Store s as SparseFlatTensor
-#                else:
-#                  old_dirs.append(y.to(self.direction_device)) # Store y as dense Tensor
-#                  old_stps.append(s.to(self.direction_device)) # Store s as dense Tensor
-                ro.append(torch.tensor([(1. / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                old_dirs.append(y.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store y as SparseFlatTensor
+                old_stps.append(s.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store s as SparseFlatTensor
+                ro.append(torch.tensor([(1. / ys)], device=self.direction_device, non_blocking=True, pin_memory=True)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
@@ -1646,11 +1642,11 @@ class FBFGS(Optimizer):
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
             state["old_dirs"] = [tensor.to(device) for tensor in history.get("old_dirs", [])] # Load history and move to direction_device
-            state["old_stps"] = [tensor.to(device) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
-            state["ro"] = [tensor.to(device) for tensor in history.get("ro", [])] # Load history and move to direction_device
+            state["old_stps"] = [tensor.to(device, non_blocking=True, pin_memory=True) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
+            state["ro"] = [tensor.to(device, non_blocking=True, pin_memory=True) for tensor in history.get("ro", [])] # Load history and move to direction_device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
             state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
-            state["H_diag"] = history.get("H_diag", None) # Load H_diag
+            state["H_diag"] = history.get("H_diag", None) # Load H_diag #TODO: this should be direction_device
             state["d"] = history.get("d", None) # Load direction d
             t_val = history.get("t", 1) # Load step size t, default to 1 if not found
             if isinstance(t_val, torch.Tensor):
@@ -1659,12 +1655,15 @@ class FBFGS(Optimizer):
                 self.t = t_val
             state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
 
+            # Move other state tensors to the direction_device with non_blocking and pin_memory
             if state["prev_flat_grad"] is not None:
-                state["prev_flat_grad"] = state["prev_flat_grad"].to(device) # Move prev_flat_grad to direction_device if it exists
+                state["prev_flat_grad"] = state["prev_flat_grad"].to(device, non_blocking=True, pin_memory=True) # Move prev_flat_grad to direction_device if it exists
             if state["d"] is not None:
-                state["d"] = state["d"].to(device) # Move d to direction_device if it exists #TODO: this should be direction_device
+                state["d"] = state["d"].to(device, non_blocking=True, pin_memory=True) # Move d to direction_device if it exists
             if state["flat_grad"] is not None:
-                state["flat_grad"] = state["flat_grad"].to(device) # Move flat_grad to direction_device if it exists #TODO: this should be direction_device
+                state["flat_grad"] = state["flat_grad"].to(device, non_blocking=True, pin_memory=True) # Move flat_grad to direction_device if it exists
+            if state["H_diag"] is not None:
+                state["H_diag"] = state["H_diag"].to(device, non_blocking=True, pin_memory=True) # Move H_diag to direction_device if it exists
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
