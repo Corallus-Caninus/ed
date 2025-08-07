@@ -864,6 +864,11 @@ class FBFGS(Optimizer):
         al = torch.empty(num_old, dtype=q.dtype, device="cuda")
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
+        # Prefetch the first element for the backward loop
+        next_sparse_dir_prefetch: Optional[SparseFlatTensor] = None
+        if num_old > 0:
+            next_sparse_dir_prefetch = old_dirs[num_old - 1].to("cuda", non_blocking=True)
+
         for i in range(num_old - 1, -1, -1):
             # Move SparseFlatTensor to CUDA first
             temp_sparse_dir = old_dirs[i].to("cuda")
@@ -876,7 +881,11 @@ class FBFGS(Optimizer):
                 temp_sparse_dir.unit_indices,
                 temp_sparse_dir.unit_values.to(dtype=torch.float32)
             )
-            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
+            # Get the current prefetched tensor and initiate prefetch for the next
+            current_sparse_dir = next_sparse_dir_prefetch
+            if i > 0:
+                next_sparse_dir_prefetch = old_dirs[i - 1].to("cuda", non_blocking=True)
+            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item() # Use sparse_dir_i which is derived from current_sparse_dir
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned
             if direction_alignment_mask[i]:
@@ -906,17 +915,30 @@ class FBFGS(Optimizer):
 #        d = q
         del q
 
+        # Prefetch the first elements for the forward loop
+        next_old_dir_prefetch_fwd: Optional[SparseFlatTensor] = None
+        next_old_stp_prefetch_fwd: Optional[SparseFlatTensor] = None
+        if num_old > 0:
+            next_old_dir_prefetch_fwd = old_dirs[0].to("cuda", non_blocking=True)
+            next_old_stp_prefetch_fwd = old_stps[0].to("cuda", non_blocking=True)
+
         for i in range(num_old):
+            # Get the current prefetched tensors and initiate prefetch for the next
+            current_old_dir = next_old_dir_prefetch_fwd
+            current_old_stp = next_old_stp_prefetch_fwd
+            if i < num_old - 1:
+                next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
+                next_old_stp_prefetch_fwd = old_stps[i + 1].to("cuda", non_blocking=True)
+
             if direction_alignment_mask[i]:
-              temp_old_dir_for_dense = old_dirs[i].to("cuda")
-              old_dir_for_dense = SparseFlatTensor(
+              old_dir_for_dense = SparseFlatTensor( # Use current_old_dir
                   temp_old_dir_for_dense.starts, temp_old_dir_for_dense.ends, temp_old_dir_for_dense.values.to(dtype=torch.float32), # type: ignore[arg-type]
                   temp_old_dir_for_dense.total_size, temp_old_dir_for_dense.unit_indices, temp_old_dir_for_dense.unit_values.to(dtype=torch.float32)
               )
               dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
               alpha_val = al[i] - dot_product_val * ro[i].item()
               temp_sparse_old_stp = old_stps[i].to("cuda")
-              sparse_old_stp_scaled = SparseFlatTensor(
+              sparse_old_stp_scaled = SparseFlatTensor( # Use current_old_stp
                   temp_sparse_old_stp.starts, temp_sparse_old_stp.ends, temp_sparse_old_stp.values.to(dtype=torch.float32),
                   temp_sparse_old_stp.total_size, temp_sparse_old_stp.unit_indices, temp_sparse_old_stp.unit_values.to(dtype=torch.float32)
               ) * (alpha_val)
@@ -963,10 +985,19 @@ class FBFGS(Optimizer):
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device="cuda")
 
+        # Prefetch the first element for the backward loop
+        next_old_dir_prefetch_bwd: Optional[Tensor] = None
+        if num_old > 0:
+            next_old_dir_prefetch_bwd = old_dirs[num_old - 1].to("cuda", non_blocking=True)
+
         for i in range(num_old - 1, -1, -1):
-            direction_similarity = (old_dirs[i].to("cuda") * q).sum().item()
-            aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
-            direction_alignment_mask[i] = aligned
+            # Get the current prefetched tensor and initiate prefetch for the next
+            current_old_dir = next_old_dir_prefetch_bwd
+            if i > 0:
+                next_old_dir_prefetch_bwd = old_dirs[i - 1].to("cuda", non_blocking=True)
+            direction_similarity = (current_old_dir * q).sum().item() # Use current_old_dir
+            aligned = direction_similarity >= similarity or direction_similarity <= -similarity
+            direction_alignment_mask[i] = aligned # Store alignment for current index
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item()
               q = q + (old_dirs[i].to("cuda") * ((-al[i])))
@@ -986,12 +1017,33 @@ class FBFGS(Optimizer):
         be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
         del q
 
+        # Prefetch the first elements for the forward loop
+        next_old_dir_prefetch_fwd: Optional[Tensor] = None
+        next_old_stp_prefetch_fwd: Optional[Tensor] = None
+        if num_old > 0:
+            next_old_dir_prefetch_fwd = old_dirs[0].to("cuda", non_blocking=True)
+            next_old_stp_prefetch_fwd = old_stps[0].to("cuda", non_blocking=True)
+
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
-            if direction_alignment_mask[i]:
-              be_i.copy_((old_dirs[i].to("cuda") * d))
-              alpha_val = al[i] - be_i.sum() * ro[i].item()
-              d = d + (old_stps[i].to("cuda") * (alpha_val))
+            # Get the current prefetched tensors and initiate prefetch for the next
+            current_old_dir = next_old_dir_prefetch_fwd
+            current_old_stp = next_old_stp_prefetch_fwd
+            if i < num_old - 1:
+                next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
+                next_old_stp_prefetch_fwd = old_stps[i + 1].to("cuda", non_blocking=True)
+
+            # Get the current prefetched tensors and initiate prefetch for the next
+            current_old_dir = next_old_dir_prefetch_fwd
+            current_old_stp = next_old_stp_prefetch_fwd
+            if i < num_old - 1:
+                next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
+                next_old_stp_prefetch_fwd = old_stps[i + 1].to("cuda", non_blocking=True)
+
+            if direction_alignment_mask[i]: # Check alignment for current index
+              be_i.copy_((current_old_dir * d)) # Use current_old_dir
+              alpha_val = al[i] - be_i.sum() * ro[i].item() # Use al[i] and ro[i]
+              d = d + (current_old_stp * (alpha_val)) # Use current_old_stp
 
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
