@@ -333,7 +333,6 @@ while True:
       print(f"Model response: {generated_text}")
 
     print("-----------------------step---------------------")
-    step_count += 1
     optimizer.step(closure)
     torch.cuda.empty_cache()
   
