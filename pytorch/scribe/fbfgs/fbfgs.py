@@ -1664,6 +1664,14 @@ class FBFGS(Optimizer):
         }
         torch.save(history, filename)
 
+    def _move_item_to_device(self, item, device_obj, non_blocking=False):
+        if item is None:
+            return None
+        if isinstance(item, SparseFlatTensor):
+            return item.to(device=device_obj, non_blocking=non_blocking)
+        else: # torch.Tensor
+            return item.to(device=device_obj, dtype=item.dtype, non_blocking=non_blocking)
+
     def load_history(self, filename):
         """Load FBFGS history from a file."""
         try:
@@ -1675,52 +1683,20 @@ class FBFGS(Optimizer):
             # Convert string device to torch.device object for JIT compatibility
             device_obj = torch.device(device)
 
-            # Handle old_dirs
-            if "old_dirs" in history:
-                old_dirs_list = history["old_dirs"]
-                for i in range(len(old_dirs_list)):
-                    current_item = old_dirs_list[i]
-                    if isinstance(current_item, SparseFlatTensor):
-                        moved_item = current_item.to(device=device_obj, non_blocking=True)
-                    else: # torch.Tensor
-                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=True)
-                    old_dirs_list[i] = moved_item
-                state["old_dirs"] = old_dirs_list
-            else:
-                state["old_dirs"] = []
+            # Use list comprehensions for history lists
+            state["old_dirs"] = [self._move_item_to_device(item, device_obj, non_blocking=True)
+                                 for item in history.get("old_dirs", [])]
+            state["old_stps"] = [self._move_item_to_device(item, device_obj, non_blocking=True)
+                                 for item in history.get("old_stps", [])]
+            state["ro"] = [self._move_item_to_device(item, device_obj, non_blocking=True)
+                           for item in history.get("ro", [])]
 
-            # Handle old_stps
-            if "old_stps" in history:
-                old_stps_list = history["old_stps"]
-                for i in range(len(old_stps_list)):
-                    current_item = old_stps_list[i]
-                    if isinstance(current_item, SparseFlatTensor):
-                        moved_item = current_item.to(device=device_obj, non_blocking=True)
-                    else: # torch.Tensor
-                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=True)
-                    old_stps_list[i] = moved_item
-                state["old_stps"] = old_stps_list
-            else:
-                state["old_stps"] = []
+            # Directly assign and move single tensors
+            state["prev_flat_grad"] = self._move_item_to_device(history.get("prev_flat_grad", None), device_obj, non_blocking=False)
+            state["flat_grad"] = self._move_item_to_device(history.get("flat_grad", None), device_obj, non_blocking=False)
+            state["H_diag"] = self._move_item_to_device(history.get("H_diag", None), device_obj, non_blocking=False)
+            state["d"] = self._move_item_to_device(history.get("d", None), device_obj, non_blocking=False)
 
-            # Handle ro
-            if "ro" in history:
-                ro_list = history["ro"]
-                for i in range(len(ro_list)):
-                    current_item = ro_list[i]
-                    if isinstance(current_item, SparseFlatTensor):
-                        moved_item = current_item.to(device=device_obj, non_blocking=True)
-                    else: # torch.Tensor
-                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=True)
-                    ro_list[i] = moved_item
-                state["ro"] = ro_list
-            else:
-                state["ro"] = []
-
-            state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
-            state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
-            state["H_diag"] = history.get("H_diag", None) # Load H_diag #TODO: this should be direction_device
-            state["d"] = history.get("d", None) # Load direction d
             t_val = history.get("t", 1) # Load step size t, default to 1 if not found
             if isinstance(t_val, torch.Tensor):
                 self.t = t_val.item()
@@ -1728,35 +1704,6 @@ class FBFGS(Optimizer):
                 self.t = t_val
             state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
 
-            # Move other state tensors to the direction_device with non_blocking and pin_memory
-            if state["prev_flat_grad"] is not None:
-                current_item = history["prev_flat_grad"]
-                if isinstance(current_item, SparseFlatTensor):
-                    moved_item = current_item.to(device=device_obj, non_blocking=False)
-                else: # torch.Tensor
-                    moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                state["prev_flat_grad"] = moved_item
-            if state["d"] is not None:
-                current_item = history["d"]
-                if isinstance(current_item, SparseFlatTensor):
-                    moved_item = current_item.to(device=device_obj, non_blocking=False)
-                else: # torch.Tensor
-                    moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                state["d"] = moved_item
-            if state["flat_grad"] is not None:
-                current_item = history["flat_grad"]
-                if isinstance(current_item, SparseFlatTensor):
-                    moved_item = current_item.to(device=device_obj, non_blocking=False)
-                else: # torch.Tensor
-                    moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                state["flat_grad"] = moved_item
-            if state["H_diag"] is not None:
-                current_item = history["H_diag"]
-                if isinstance(current_item, SparseFlatTensor):
-                    moved_item = current_item.to(device=device_obj, non_blocking=False)
-                else: # torch.Tensor
-                    moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                state["H_diag"] = moved_item
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
