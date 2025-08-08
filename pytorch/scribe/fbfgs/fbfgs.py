@@ -72,12 +72,12 @@ class SparseFlatTensor:
         Moves all internal tensors to the specified device and returns a new SparseFlatTensor, including unit indices.
         """
         return SparseFlatTensor(
-            self.starts.to(device, non_blocking=non_blocking),
-            self.ends.to(device, non_blocking=non_blocking),
-            self.values.to(device, non_blocking=non_blocking),
-            self.total_size.to(device, non_blocking=non_blocking),
-            self.unit_indices.to(device, non_blocking=non_blocking),
-            self.unit_values.to(device, non_blocking=non_blocking)
+            self.starts.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.ends.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.values.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.total_size.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.unit_indices.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
+            self.unit_values.to(device, non_blocking=non_blocking, pin_memory=pin_memory)
         )
 
     def dot(self, other):
@@ -1083,28 +1083,15 @@ class FBFGS(Optimizer):
       al = []
 
 #TODO: put old_dirs, steps and ro on self.direction_device. Perform the direction calculation as efficiently as possible with this constraint so we can use main memory for history size
-      # tensors cached in state (for tracing)
-#      d = state.get("d")
-#      t = state.get("t")
-      if "old_dirs" in state:
-        old_dirs = state.get("old_dirs")
-        old_stps = state.get("old_stps")
-        d = state.get("d")
-        ro = state.get("ro")
-      else:
-        old_dirs= []
-        old_stps= []
-        ro= []
-        d = None
-#TODO: the else conditions should already be covered by the load and save state methods.
-      if "prev_flat_grad" in state:
-        prev_flat_grad = state.get("prev_flat_grad")
-      else:
-        prev_flat_grad = None
-      if "flat_grad" in state:
-        flat_grad = state.get("flat_grad")
-      else:
-        flat_grad = None
+      # tensors cached in state (for tracing) - ensure they are always lists
+      old_dirs = state.get("old_dirs", [])
+      old_stps = state.get("old_stps", [])
+      ro = state.get("ro", [])
+      d = state.get("d", None) # d can be None initially
+
+      # Initialize prev_flat_grad, flat_grad, and H_diag
+      prev_flat_grad = state.get("prev_flat_grad", None)
+      flat_grad = state.get("flat_grad", None)
       if "H_diag" in state:
         H_diag = state.get("H_diag")
       else:
