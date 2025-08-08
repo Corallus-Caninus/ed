@@ -866,9 +866,8 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
         # Prefetch the first element for the backward loop
-        next_sparse_dir_prefetch: Optional[SparseFlatTensor] = None
         if num_old > 0:
-            next_sparse_dir_prefetch = old_dirs[num_old - 1].to(torch.device("cuda"), non_blocking=True)
+            next_sparse_dir_prefetch: SparseFlatTensor = old_dirs[num_old - 1].to(torch.device("cuda"), non_blocking=True)
 
         for i in range(num_old - 1, -1, -1):
             torch.cuda.synchronize() # Ensure current_sparse_dir is ready
@@ -912,11 +911,9 @@ class FBFGS(Optimizer):
         del q
 
         # Prefetch the first elements for the forward loop
-        next_old_dir_prefetch_fwd: Optional[SparseFlatTensor] = None
-        next_old_stp_prefetch_fwd: Optional[SparseFlatTensor] = None
         if num_old > 0:
-            next_old_dir_prefetch_fwd = old_dirs[0].to(torch.device("cuda"), non_blocking=True)
-            next_old_stp_prefetch_fwd = old_stps[0].to(torch.device("cuda"), non_blocking=True)
+            next_old_dir_prefetch_fwd: SparseFlatTensor = old_dirs[0].to(torch.device("cuda"), non_blocking=True)
+            next_old_stp_prefetch_fwd: SparseFlatTensor = old_stps[0].to(torch.device("cuda"), non_blocking=True)
 
         for i in range(num_old):
             torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
@@ -981,9 +978,8 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device="cuda")
 
         # Prefetch the first element for the backward loop
-        next_old_dir_prefetch_bwd: Optional[Tensor] = None
         if num_old > 0:
-            next_old_dir_prefetch_bwd = old_dirs[num_old - 1].to("cuda", non_blocking=True)
+            next_old_dir_prefetch_bwd: Tensor = old_dirs[num_old - 1].to("cuda", non_blocking=True)
 
         for i in range(num_old - 1, -1, -1):
             torch.cuda.synchronize() # Ensure current_old_dir is ready
@@ -1014,11 +1010,9 @@ class FBFGS(Optimizer):
         del q
 
         # Prefetch the first elements for the forward loop
-        next_old_dir_prefetch_fwd: Optional[Tensor] = None
-        next_old_stp_prefetch_fwd: Optional[Tensor] = None
         if num_old > 0:
-            next_old_dir_prefetch_fwd = old_dirs[0].to("cuda", non_blocking=True)
-            next_old_stp_prefetch_fwd = old_stps[0].to("cuda", non_blocking=True)
+            next_old_dir_prefetch_fwd: Tensor = old_dirs[0].to("cuda", non_blocking=True)
+            next_old_stp_prefetch_fwd: Tensor = old_stps[0].to("cuda", non_blocking=True)
 
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
