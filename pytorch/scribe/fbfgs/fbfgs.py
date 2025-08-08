@@ -988,9 +988,9 @@ class FBFGS(Optimizer):
         for i in range(num_old - 1, -1, -1):
             torch.cuda.synchronize() # Ensure current_old_dir is ready
             current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_bwd)
+            current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_bwd)
             if i > 0:
                 next_old_dir_prefetch_bwd = old_dirs[i - 1].to("cuda", non_blocking=True)
-            direction_similarity = (current_old_dir * q).sum().item()
             direction_similarity = (current_old_dir_val * q).sum().item() # Use current_old_dir_val
             aligned = direction_similarity >= similarity or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned # Store alignment for current index
@@ -1023,16 +1023,16 @@ class FBFGS(Optimizer):
 #TODO: vectorize alignment mask here since its immutable
         for i in range(num_old):
             torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
-            current_old_dir = next_old_dir_prefetch_fwd
-            current_old_stp = next_old_stp_prefetch_fwd
+            current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_fwd)
+            current_old_stp_val = torch.jit.annotate(Tensor, next_old_stp_prefetch_fwd)
             if i < num_old - 1:
                 next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
                 next_old_stp_prefetch_fwd = old_stps[i + 1].to("cuda", non_blocking=True)
 
             if direction_alignment_mask[i]: # Check alignment for current index
-              be_i.copy_((current_old_dir * d)) # Use current_old_dir
+              be_i.copy_((current_old_dir_val * d)) # Use current_old_dir_val
               alpha_val = al[i] - be_i.sum() * ro[i].item() # Use al[i] and ro[i]
-              d = d + (current_old_stp * (alpha_val)) # Use current_old_stp
+              d = d + (current_old_stp_val * (alpha_val)) # Use current_old_stp_val
 
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
