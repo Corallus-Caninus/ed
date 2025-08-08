@@ -720,7 +720,7 @@ class FBFGS(Optimizer):
                 view = p.grad.view(-1) # Move dense grad to direction_device
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
-            views.append(view.to(grad_device))
+            views.append(view.to("cuda"))
         grad = torch.cat(views, 0)
 #        for p in self._params: # Clip after gathering to ensure all grads are included
 #            if p.grad is not None: # Check if p.grad is not None
