@@ -1677,35 +1677,19 @@ class FBFGS(Optimizer):
             # Convert string device to torch.device object for JIT compatibility
             device_obj = torch.device(device)
 
-            # Helper function to move/pin tensors correctly based on target device
-            def _move_and_pin(t_in: Union[Tensor, SparseFlatTensor], target_device: torch.device, non_blocking: bool) -> Union[Tensor, SparseFlatTensor]: # type: ignore[return]
-                moved_tensor: Union[Tensor, SparseFlatTensor]
-                if isinstance(t_in, SparseFlatTensor):
-                    moved_tensor = t_in.to(device=target_device, non_blocking=non_blocking)
-                    if target_device.type == 'cpu':
-                        moved_tensor = moved_tensor.pin_memory()
-                else: # t_in is a torch.Tensor
-                    moved_tensor = t_in.to(device=target_device, dtype=t_in.dtype, non_blocking=non_blocking)
-                    if target_device.type == 'cpu':
-                        moved_tensor = moved_tensor.pin_memory()
-                return moved_tensor
-
-            # Process history lists and single tensors to reduce peak memory usage
-            # by explicitly deleting references and calling GC
-
             # Handle old_dirs
             if "old_dirs" in history:
                 old_dirs_list = history["old_dirs"]
                 for i in range(len(old_dirs_list)):
-                    original_tensor = old_dirs_list[i]
-                    old_dirs_list[i] = _move_and_pin(original_tensor, device_obj, False)
-                    del original_tensor
-                    original_tensor = None # Explicitly break reference
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                    current_item = old_dirs_list[i]
+                    if isinstance(current_item, SparseFlatTensor):
+                        moved_item = current_item.to(device=device_obj, non_blocking=False)
+                    else: # torch.Tensor
+                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                    if device_obj.type == 'cpu':
+                        moved_item = moved_item.pin_memory()
+                    old_dirs_list[i] = moved_item
                 state["old_dirs"] = old_dirs_list
-                del history["old_dirs"] # Remove reference from history dict
-                history["old_dirs"] = None # Explicitly break reference
             else:
                 state["old_dirs"] = []
 
@@ -1713,15 +1697,15 @@ class FBFGS(Optimizer):
             if "old_stps" in history:
                 old_stps_list = history["old_stps"]
                 for i in range(len(old_stps_list)):
-                    original_tensor = old_stps_list[i]
-                    old_stps_list[i] = _move_and_pin(original_tensor, device_obj, False)
-                    del original_tensor
-                    original_tensor = None # Explicitly break reference
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                    current_item = old_stps_list[i]
+                    if isinstance(current_item, SparseFlatTensor):
+                        moved_item = current_item.to(device=device_obj, non_blocking=False)
+                    else: # torch.Tensor
+                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                    if device_obj.type == 'cpu':
+                        moved_item = moved_item.pin_memory()
+                    old_stps_list[i] = moved_item
                 state["old_stps"] = old_stps_list
-                del history["old_stps"]
-                history["old_stps"] = None # Explicitly break reference
             else:
                 state["old_stps"] = []
 
@@ -1729,15 +1713,15 @@ class FBFGS(Optimizer):
             if "ro" in history:
                 ro_list = history["ro"]
                 for i in range(len(ro_list)):
-                    original_tensor = ro_list[i]
-                    ro_list[i] = _move_and_pin(original_tensor, device_obj, False)
-                    del original_tensor
-                    original_tensor = None # Explicitly break reference
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                    current_item = ro_list[i]
+                    if isinstance(current_item, SparseFlatTensor):
+                        moved_item = current_item.to(device=device_obj, non_blocking=False)
+                    else: # torch.Tensor
+                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                    if device_obj.type == 'cpu':
+                        moved_item = moved_item.pin_memory()
+                    ro_list[i] = moved_item
                 state["ro"] = ro_list
-                del history["ro"]
-                history["ro"] = None # Explicitly break reference
             else:
                 state["ro"] = []
 
@@ -1754,49 +1738,42 @@ class FBFGS(Optimizer):
 
             # Move other state tensors to the direction_device with non_blocking and pin_memory
             if state["prev_flat_grad"] is not None:
-                original_tensor = history["prev_flat_grad"]
-                state["prev_flat_grad"] = _move_and_pin(original_tensor, device_obj, False)
-                del original_tensor
-                del history["prev_flat_grad"]
-                original_tensor = None # Explicitly break reference
-                history["prev_flat_grad"] = None # Explicitly break reference
-                gc.collect()
-                torch.cuda.empty_cache()
+                current_item = history["prev_flat_grad"]
+                if isinstance(current_item, SparseFlatTensor):
+                    moved_item = current_item.to(device=device_obj, non_blocking=False)
+                else: # torch.Tensor
+                    moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                if device_obj.type == 'cpu':
+                    moved_item = moved_item.pin_memory()
+                state["prev_flat_grad"] = moved_item
             if state["d"] is not None:
-                original_tensor = history["d"]
-                state["d"] = _move_and_pin(original_tensor, device_obj, False)
-                del original_tensor
-                del history["d"]
-                original_tensor = None # Explicitly break reference
-                history["d"] = None # Explicitly break reference
-                gc.collect()
-                torch.cuda.empty_cache()
+                current_item = history["d"]
+                if isinstance(current_item, SparseFlatTensor):
+                    moved_item = current_item.to(device=device_obj, non_blocking=False)
+                else: # torch.Tensor
+                    moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                if device_obj.type == 'cpu':
+                    moved_item = moved_item.pin_memory()
+                state["d"] = moved_item
             if state["flat_grad"] is not None:
-                original_tensor = history["flat_grad"]
-                state["flat_grad"] = _move_and_pin(original_tensor, device_obj, False)
-                del original_tensor
-                del history["flat_grad"]
-                original_tensor = None # Explicitly break reference
-                history["flat_grad"] = None # Explicitly break reference
-                gc.collect()
-                torch.cuda.empty_cache()
+                current_item = history["flat_grad"]
+                if isinstance(current_item, SparseFlatTensor):
+                    moved_item = current_item.to(device=device_obj, non_blocking=False)
+                else: # torch.Tensor
+                    moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                if device_obj.type == 'cpu':
+                    moved_item = moved_item.pin_memory()
+                state["flat_grad"] = moved_item
             if state["H_diag"] is not None:
-                original_tensor = history["H_diag"]
-                state["H_diag"] = _move_and_pin(original_tensor, device_obj, False)
-                del original_tensor
-                del history["H_diag"]
-                original_tensor = None # Explicitly break reference
-                history["H_diag"] = None # Explicitly break reference
-                gc.collect()
-                torch.cuda.empty_cache()
+                current_item = history["H_diag"]
+                if isinstance(current_item, SparseFlatTensor):
+                    moved_item = current_item.to(device=device_obj, non_blocking=False)
+                else: # torch.Tensor
+                    moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                if device_obj.type == 'cpu':
+                    moved_item = moved_item.pin_memory()
+                state["H_diag"] = moved_item
             print(f"FBFGS history loaded from {filename}")
-
-            # Explicitly delete the history dictionary after all contents are processed
-            del history
-            history = None # Explicitly break reference
-            gc.collect()
-            torch.cuda.empty_cache()
-
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
         except Exception as e:
