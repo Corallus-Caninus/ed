@@ -1700,10 +1700,12 @@ class FBFGS(Optimizer):
                     original_tensor = old_dirs_list[i]
                     old_dirs_list[i] = _move_and_pin(original_tensor, device_obj, False)
                     del original_tensor
+                    original_tensor = None # Explicitly break reference
                     gc.collect()
                     torch.cuda.empty_cache()
                 state["old_dirs"] = old_dirs_list
                 del history["old_dirs"] # Remove reference from history dict
+                history["old_dirs"] = None # Explicitly break reference
             else:
                 state["old_dirs"] = []
 
@@ -1714,10 +1716,12 @@ class FBFGS(Optimizer):
                     original_tensor = old_stps_list[i]
                     old_stps_list[i] = _move_and_pin(original_tensor, device_obj, False)
                     del original_tensor
+                    original_tensor = None # Explicitly break reference
                     gc.collect()
                     torch.cuda.empty_cache()
                 state["old_stps"] = old_stps_list
                 del history["old_stps"]
+                history["old_stps"] = None # Explicitly break reference
             else:
                 state["old_stps"] = []
 
@@ -1728,10 +1732,12 @@ class FBFGS(Optimizer):
                     original_tensor = ro_list[i]
                     ro_list[i] = _move_and_pin(original_tensor, device_obj, False)
                     del original_tensor
+                    original_tensor = None # Explicitly break reference
                     gc.collect()
                     torch.cuda.empty_cache()
                 state["ro"] = ro_list
                 del history["ro"]
+                history["ro"] = None # Explicitly break reference
             else:
                 state["ro"] = []
 
@@ -1752,6 +1758,8 @@ class FBFGS(Optimizer):
                 state["prev_flat_grad"] = _move_and_pin(original_tensor, device_obj, False)
                 del original_tensor
                 del history["prev_flat_grad"]
+                original_tensor = None # Explicitly break reference
+                history["prev_flat_grad"] = None # Explicitly break reference
                 gc.collect()
                 torch.cuda.empty_cache()
             if state["d"] is not None:
@@ -1759,6 +1767,8 @@ class FBFGS(Optimizer):
                 state["d"] = _move_and_pin(original_tensor, device_obj, False)
                 del original_tensor
                 del history["d"]
+                original_tensor = None # Explicitly break reference
+                history["d"] = None # Explicitly break reference
                 gc.collect()
                 torch.cuda.empty_cache()
             if state["flat_grad"] is not None:
@@ -1766,6 +1776,8 @@ class FBFGS(Optimizer):
                 state["flat_grad"] = _move_and_pin(original_tensor, device_obj, False)
                 del original_tensor
                 del history["flat_grad"]
+                original_tensor = None # Explicitly break reference
+                history["flat_grad"] = None # Explicitly break reference
                 gc.collect()
                 torch.cuda.empty_cache()
             if state["H_diag"] is not None:
@@ -1773,12 +1785,15 @@ class FBFGS(Optimizer):
                 state["H_diag"] = _move_and_pin(original_tensor, device_obj, False)
                 del original_tensor
                 del history["H_diag"]
+                original_tensor = None # Explicitly break reference
+                history["H_diag"] = None # Explicitly break reference
                 gc.collect()
                 torch.cuda.empty_cache()
             print(f"FBFGS history loaded from {filename}")
 
             # Explicitly delete the history dictionary after all contents are processed
             del history
+            history = None # Explicitly break reference
             gc.collect()
             torch.cuda.empty_cache()
 
