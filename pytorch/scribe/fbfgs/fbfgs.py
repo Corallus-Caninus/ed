@@ -72,12 +72,12 @@ class SparseFlatTensor:
         Moves all internal tensors to the specified device and returns a new SparseFlatTensor, including unit indices.
         """
         return SparseFlatTensor(
-            self.starts.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.ends.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.values.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.total_size.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.unit_indices.to(device, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.unit_values.to(device, non_blocking=non_blocking, pin_memory=pin_memory)
+            self.starts.to(device, non_blocking=non_blocking),
+            self.ends.to(device, non_blocking=non_blocking),
+            self.values.to(device, non_blocking=non_blocking),
+            self.total_size.to(device, non_blocking=non_blocking),
+            self.unit_indices.to(device, non_blocking=non_blocking),
+            self.unit_values.to(device, non_blocking=non_blocking)
         )
 
     def dot(self, other):
@@ -1684,8 +1684,8 @@ class FBFGS(Optimizer):
             # Convert string device to torch.device object for JIT compatibility
             device_obj = torch.device(self.direction_device)
             state["old_dirs"] = [tensor.to(device_obj) for tensor in history.get("old_dirs", [])] # Load history and move to direction_device
-            state["old_stps"] = [tensor.to(device_obj, non_blocking=True, pin_memory=True) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
-            state["ro"] = [tensor.to(device_obj, non_blocking=True, pin_memory=True) for tensor in history.get("ro", [])] # Load history and move to direction_device
+            state["old_stps"] = [tensor.to(device_obj, non_blocking=True) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
+            state["ro"] = [tensor.to(device_obj, non_blocking=True) for tensor in history.get("ro", [])] # Load history and move to direction_device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
             state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
             state["H_diag"] = history.get("H_diag", None) # Load H_diag #TODO: this should be direction_device
@@ -1699,13 +1699,13 @@ class FBFGS(Optimizer):
 
             # Move other state tensors to the direction_device with non_blocking and pin_memory
             if state["prev_flat_grad"] is not None:
-                state["prev_flat_grad"] = state["prev_flat_grad"].to(device_obj, non_blocking=True, pin_memory=True) # Move prev_flat_grad to direction_device if it exists
+                state["prev_flat_grad"] = state["prev_flat_grad"].to(device_obj, non_blocking=True) # Move prev_flat_grad to direction_device if it exists
             if state["d"] is not None:
-                state["d"] = state["d"].to(device_obj, non_blocking=True, pin_memory=True) # Move d to direction_device if it exists
+                state["d"] = state["d"].to(device_obj, non_blocking=True) # Move d to direction_device if it exists
             if state["flat_grad"] is not None:
-                state["flat_grad"] = state["flat_grad"].to(device_obj, non_blocking=True, pin_memory=True) # Move flat_grad to direction_device if it exists
+                state["flat_grad"] = state["flat_grad"].to(device_obj, non_blocking=True) # Move flat_grad to direction_device if it exists
             if state["H_diag"] is not None:
-                state["H_diag"] = state["H_diag"].to(device_obj, non_blocking=True, pin_memory=True) # Move H_diag to direction_device if it exists
+                state["H_diag"] = state["H_diag"].to(device_obj, non_blocking=True) # Move H_diag to direction_device if it exists
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
