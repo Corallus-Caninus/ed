@@ -1319,7 +1319,7 @@ class FBFGS(Optimizer):
                 # store new direction/step
                 old_dirs.append(y.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store y as SparseFlatTensor
                 old_stps.append(s.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store s as SparseFlatTensor
-                ro.append(torch.tensor([(1. / ys)], device=self.direction_device, non_blocking=True, pin_memory=True)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                ro.append(torch.tensor([(1. / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
