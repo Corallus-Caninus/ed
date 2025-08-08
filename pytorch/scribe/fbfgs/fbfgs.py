@@ -833,8 +833,8 @@ class FBFGS(Optimizer):
 
     def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
         # Save current parameters to CPU
-        original_params_cpu = [p.detach().clone().cpu() for p in self._params]
-        original_params_cpu = [p.pin_memory() for p in original_params_cpu]
+        original_params_cpu = [p.detach().clone().cpu().pin_memory() for p in self._params]
+#        original_params_cpu = [p.pin_memory() for p in original_params_cpu]
         # Apply step: x_new = x_old + t * d
         offset = 0
         for p in self._params:
@@ -1319,7 +1319,7 @@ class FBFGS(Optimizer):
                 # store new direction/step
                 old_dirs.append(y.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store y as SparseFlatTensor
                 old_stps.append(s.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store s as SparseFlatTensor
-                ro.append(torch.tensor([(1. / ys)], device=self.direction_device)) # NOTE: was cpu #TODO: can we include information on convergence here. This may be an observation of the approximation accuracy. Also consider the alignment (gtd being as close to zero as possible). essentially we would be scaling how much the approximation is influenced by an entry based on its ability to converge.
+                ro.append(torch.tensor([(1. / ys)]))
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
@@ -1683,9 +1683,9 @@ class FBFGS(Optimizer):
                 for i in range(len(old_dirs_list)):
                     current_item = old_dirs_list[i]
                     if isinstance(current_item, SparseFlatTensor):
-                        moved_item = current_item.to(device=device_obj, non_blocking=False)
+                        moved_item = current_item.to(device=device_obj, non_blocking=True)
                     else: # torch.Tensor
-                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=True)
                     old_dirs_list[i] = moved_item
                 state["old_dirs"] = old_dirs_list
             else:
@@ -1697,9 +1697,9 @@ class FBFGS(Optimizer):
                 for i in range(len(old_stps_list)):
                     current_item = old_stps_list[i]
                     if isinstance(current_item, SparseFlatTensor):
-                        moved_item = current_item.to(device=device_obj, non_blocking=False)
+                        moved_item = current_item.to(device=device_obj, non_blocking=True)
                     else: # torch.Tensor
-                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=True)
                     old_stps_list[i] = moved_item
                 state["old_stps"] = old_stps_list
             else:
@@ -1711,9 +1711,9 @@ class FBFGS(Optimizer):
                 for i in range(len(ro_list)):
                     current_item = ro_list[i]
                     if isinstance(current_item, SparseFlatTensor):
-                        moved_item = current_item.to(device=device_obj, non_blocking=False)
+                        moved_item = current_item.to(device=device_obj, non_blocking=True)
                     else: # torch.Tensor
-                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
+                        moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=True)
                     ro_list[i] = moved_item
                 state["ro"] = ro_list
             else:
