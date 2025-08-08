@@ -2,6 +2,7 @@
 import os
 #os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:64'
 from typing import Optional, Union
+from torch import device
 import torch
 from torch import Tensor
 import gc
@@ -66,7 +67,7 @@ class SparseFlatTensor:
         return dense_tensor
 
 
-    def to(self, device: str, non_blocking: bool = False, pin_memory: bool = False):
+    def to(self, device: torch.device, non_blocking: bool = False, pin_memory: bool = False):
         """
         Moves all internal tensors to the specified device and returns a new SparseFlatTensor, including unit indices.
         """
@@ -867,14 +868,14 @@ class FBFGS(Optimizer):
         # Prefetch the first element for the backward loop
         next_sparse_dir_prefetch: Optional[SparseFlatTensor] = None
         if num_old > 0:
-            next_sparse_dir_prefetch = old_dirs[num_old - 1].to("cuda", non_blocking=True)
+            next_sparse_dir_prefetch = old_dirs[num_old - 1].to(torch.device("cuda"), non_blocking=True)
 
         for i in range(num_old - 1, -1, -1):
             torch.cuda.synchronize() # Ensure current_sparse_dir is ready
             current_sparse_dir = next_sparse_dir_prefetch # Get the prefetched tensor
 
             if i > 0:
-                next_sparse_dir_prefetch = old_dirs[i - 1].to("cuda", non_blocking=True) # Initiate prefetch for next iteration
+                next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device("cuda"), non_blocking=True) # Initiate prefetch for next iteration
 
             # Create a new SparseFlatTensor with internal values cast to float32
             sparse_dir_i = SparseFlatTensor(
@@ -914,8 +915,8 @@ class FBFGS(Optimizer):
         next_old_dir_prefetch_fwd: Optional[SparseFlatTensor] = None
         next_old_stp_prefetch_fwd: Optional[SparseFlatTensor] = None
         if num_old > 0:
-            next_old_dir_prefetch_fwd = old_dirs[0].to("cuda", non_blocking=True)
-            next_old_stp_prefetch_fwd = old_stps[0].to("cuda", non_blocking=True)
+            next_old_dir_prefetch_fwd = old_dirs[0].to(torch.device("cuda"), non_blocking=True)
+            next_old_stp_prefetch_fwd = old_stps[0].to(torch.device("cuda"), non_blocking=True)
 
         for i in range(num_old):
             torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
@@ -923,7 +924,7 @@ class FBFGS(Optimizer):
             current_old_stp = next_old_stp_prefetch_fwd
             if i < num_old - 1:
                 next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
-                next_old_stp_prefetch_fwd = old_stps[i + 1].to("cuda", non_blocking=True)
+                next_old_stp_prefetch_fwd = old_stps[i + 1].to(torch.device("cuda"), non_blocking=True)
 
             if direction_alignment_mask[i]:
               old_dir_for_dense = SparseFlatTensor( # Use current_old_dir, which is prefetched
@@ -1680,11 +1681,11 @@ class FBFGS(Optimizer):
             history = torch.load(filename)
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
-            state = self.state[self._params[0]]
-            device = self.direction_device # Get the device of the model parameters
-            state["old_dirs"] = [tensor.to(device) for tensor in history.get("old_dirs", [])] # Load history and move to direction_device
-            state["old_stps"] = [tensor.to(device, non_blocking=True, pin_memory=True) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
-            state["ro"] = [tensor.to(device, non_blocking=True, pin_memory=True) for tensor in history.get("ro", [])] # Load history and move to direction_device
+            # Convert string device to torch.device object for JIT compatibility
+            device_obj = torch.device(self.direction_device)
+            state["old_dirs"] = [tensor.to(device_obj) for tensor in history.get("old_dirs", [])] # Load history and move to direction_device
+            state["old_stps"] = [tensor.to(device_obj, non_blocking=True, pin_memory=True) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
+            state["ro"] = [tensor.to(device_obj, non_blocking=True, pin_memory=True) for tensor in history.get("ro", [])] # Load history and move to direction_device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
             state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
             state["H_diag"] = history.get("H_diag", None) # Load H_diag #TODO: this should be direction_device
@@ -1698,13 +1699,13 @@ class FBFGS(Optimizer):
 
             # Move other state tensors to the direction_device with non_blocking and pin_memory
             if state["prev_flat_grad"] is not None:
-                state["prev_flat_grad"] = state["prev_flat_grad"].to(device, non_blocking=True, pin_memory=True) # Move prev_flat_grad to direction_device if it exists
+                state["prev_flat_grad"] = state["prev_flat_grad"].to(device_obj, non_blocking=True, pin_memory=True) # Move prev_flat_grad to direction_device if it exists
             if state["d"] is not None:
-                state["d"] = state["d"].to(device, non_blocking=True, pin_memory=True) # Move d to direction_device if it exists
+                state["d"] = state["d"].to(device_obj, non_blocking=True, pin_memory=True) # Move d to direction_device if it exists
             if state["flat_grad"] is not None:
-                state["flat_grad"] = state["flat_grad"].to(device, non_blocking=True, pin_memory=True) # Move flat_grad to direction_device if it exists
+                state["flat_grad"] = state["flat_grad"].to(device_obj, non_blocking=True, pin_memory=True) # Move flat_grad to direction_device if it exists
             if state["H_diag"] is not None:
-                state["H_diag"] = state["H_diag"].to(device, non_blocking=True, pin_memory=True) # Move H_diag to direction_device if it exists
+                state["H_diag"] = state["H_diag"].to(device_obj, non_blocking=True, pin_memory=True) # Move H_diag to direction_device if it exists
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
