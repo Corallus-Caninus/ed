@@ -872,15 +872,15 @@ class FBFGS(Optimizer):
 
         for i in range(num_old - 1, -1, -1):
             torch.cuda.synchronize() # Ensure current_sparse_dir is ready
-            current_sparse_dir = next_sparse_dir_prefetch # Get the prefetched tensor
+            current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
 
             if i > 0:
                 next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device("cuda"), non_blocking=True) # Initiate prefetch for next iteration
 
             # Create a new SparseFlatTensor with internal values cast to float32
             sparse_dir_i = SparseFlatTensor(
-                current_sparse_dir.starts, current_sparse_dir.ends, current_sparse_dir.values.to(dtype=torch.float32),
-                current_sparse_dir.total_size, current_sparse_dir.unit_indices, current_sparse_dir.unit_values.to(dtype=torch.float32)
+                current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
+                current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
             )
             direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
             aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
@@ -890,8 +890,8 @@ class FBFGS(Optimizer):
 #              similarity = 2*similarity 
               al[i] = direction_similarity * ro[i].item()
               sparse_old_dir_scaled = SparseFlatTensor(
-                  current_sparse_dir.starts, current_sparse_dir.ends, current_sparse_dir.values.to(dtype=torch.float32),
-                  current_sparse_dir.total_size, current_sparse_dir.unit_indices, current_sparse_dir.unit_values.to(dtype=torch.float32)
+                  current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
+                  current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
               ) * ((-al[i]))
               q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
 #              total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
@@ -920,22 +920,22 @@ class FBFGS(Optimizer):
 
         for i in range(num_old):
             torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
-            current_old_dir = next_old_dir_prefetch_fwd
-            current_old_stp = next_old_stp_prefetch_fwd
+            current_old_dir_val = torch.jit.annotate(SparseFlatTensor, next_old_dir_prefetch_fwd)
+            current_old_stp_val = torch.jit.annotate(SparseFlatTensor, next_old_stp_prefetch_fwd)
             if i < num_old - 1:
                 next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
                 next_old_stp_prefetch_fwd = old_stps[i + 1].to(torch.device("cuda"), non_blocking=True)
 
             if direction_alignment_mask[i]:
-              old_dir_for_dense = SparseFlatTensor( # Use current_old_dir, which is prefetched
-                  current_old_dir.starts, current_old_dir.ends, current_old_dir.values.to(dtype=torch.float32), # type: ignore[arg-type]
-                  current_old_dir.total_size, current_old_dir.unit_indices, current_old_dir.unit_values.to(dtype=torch.float32)
+              old_dir_for_dense = SparseFlatTensor( # Use current_old_dir_val, which is prefetched
+                  current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32), # type: ignore[arg-type]
+                  current_old_dir_val.total_size, current_old_dir_val.unit_indices, current_old_dir_val.unit_values.to(dtype=torch.float32)
               )
               dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
               alpha_val = al[i] - dot_product_val * ro[i].item()
-              sparse_old_stp_scaled = SparseFlatTensor( # Use current_old_stp, which is prefetched
-                  current_old_stp.starts, current_old_stp.ends, current_old_stp.values.to(dtype=torch.float32),
-                  current_old_stp.total_size, current_old_stp.unit_indices, current_old_stp.unit_values.to(dtype=torch.float32)
+              sparse_old_stp_scaled = SparseFlatTensor( # Use current_old_stp_val, which is prefetched
+                  current_old_stp_val.starts, current_old_stp_val.ends, current_old_stp_val.values.to(dtype=torch.float32),
+                  current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
               ) * (alpha_val)
               d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
 #TODO: try removing normalization from only second loop
@@ -987,15 +987,16 @@ class FBFGS(Optimizer):
 
         for i in range(num_old - 1, -1, -1):
             torch.cuda.synchronize() # Ensure current_old_dir is ready
-            current_old_dir = next_old_dir_prefetch_bwd
+            current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_bwd)
             if i > 0:
                 next_old_dir_prefetch_bwd = old_dirs[i - 1].to("cuda", non_blocking=True)
             direction_similarity = (current_old_dir * q).sum().item()
+            direction_similarity = (current_old_dir_val * q).sum().item() # Use current_old_dir_val
             aligned = direction_similarity >= similarity or direction_similarity <= -similarity
             direction_alignment_mask[i] = aligned # Store alignment for current index
             if direction_alignment_mask[i]:
               al[i] = direction_similarity * ro[i].item()
-              q = q + (current_old_dir * ((-al[i])))
+              q = q + (current_old_dir_val * ((-al[i])))
               hit_miss = hit_miss + str("| ")
 # TODO: prevent over-alignment to keep the direction multipathed?
 # Prevent over-alignment by considering the expansion of near-orthogonal entries
