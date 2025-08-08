@@ -839,7 +839,7 @@ class FBFGS(Optimizer):
 
         # Restore original parameters from CPU
         for p, original_p_cpu in zip(self._params, original_params_cpu): # type: ignore[possibly-undefined]
-            p.copy_(original_p_cpu.to(p.device, non_blocking=True))
+            p.copy_(original_p_cpu.to(p.device))
 
         return loss, flat_grad
     @torch.jit.script
