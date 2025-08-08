@@ -865,40 +865,40 @@ class FBFGS(Optimizer):
         al = torch.empty(num_old, dtype=q.dtype, device="cuda")
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
-        # Prefetch the first element for the backward loop
         if num_old > 0:
+            # Prefetch the first element for the backward loop
             next_sparse_dir_prefetch: SparseFlatTensor = old_dirs[num_old - 1].to(torch.device("cuda"), non_blocking=True)
 
-        for i in range(num_old - 1, -1, -1):
-            torch.cuda.synchronize() # Ensure current_sparse_dir is ready
-            current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
+            for i in range(num_old - 1, -1, -1):
+                torch.cuda.synchronize() # Ensure current_sparse_dir is ready
+                current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
 
-            if i > 0:
-                next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device("cuda"), non_blocking=True) # Initiate prefetch for next iteration
+                if i > 0:
+                    next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device("cuda"), non_blocking=True) # Initiate prefetch for next iteration
 
-            # Create a new SparseFlatTensor with internal values cast to float32
-            sparse_dir_i = SparseFlatTensor(
-                current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
-                current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
-            )
-            direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-            aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
-            direction_alignment_mask[i] = aligned
-            if direction_alignment_mask[i]:
-#              similarity = similarity + similarity/direction_similarity #TODO: fix this, it should scale based on the difference
-#              similarity = 2*similarity 
-              al[i] = direction_similarity * ro[i].item()
-              sparse_old_dir_scaled = SparseFlatTensor(
-                  current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
-                  current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
-              ) * ((-al[i]))
-              q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
-#              total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
-#              q.div_(total_norm)
-#TODO: try l2 here again? The original reasoning was this breaks the math since division of a term isnt distributive
-              hit_miss = hit_miss + str("| ")
-            else:
-              hit_miss = hit_miss + str("_ ")
+                # Create a new SparseFlatTensor with internal values cast to float32
+                sparse_dir_i = SparseFlatTensor(
+                    current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
+                    current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
+                )
+                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
+                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
+                direction_alignment_mask[i] = aligned
+                if direction_alignment_mask[i]:
+    #              similarity = similarity + similarity/direction_similarity #TODO: fix this, it should scale based on the difference
+    #              similarity = 2*similarity 
+                  al[i] = direction_similarity * ro[i].item()
+                  sparse_old_dir_scaled = SparseFlatTensor(
+                      current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
+                      current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
+                  ) * ((-al[i]))
+                  q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
+    #              total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
+    #              q.div_(total_norm)
+    #TODO: try l2 here again? The original reasoning was this breaks the math since division of a term isnt distributive
+                  hit_miss = hit_miss + str("| ")
+                else:
+                  hit_miss = hit_miss + str("_ ")
 
         print("q max value: " + str(q.max()))
 #TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
@@ -907,34 +907,33 @@ class FBFGS(Optimizer):
         d = q.mul(H_diag.to(torch.float32))
 #        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
 #        q.div_(total_norm)
-#        d = q
         del q
 
-        # Prefetch the first elements for the forward loop
         if num_old > 0:
+            # Prefetch the first elements for the forward loop
             next_old_dir_prefetch_fwd: SparseFlatTensor = old_dirs[0].to(torch.device("cuda"), non_blocking=True)
             next_old_stp_prefetch_fwd: SparseFlatTensor = old_stps[0].to(torch.device("cuda"), non_blocking=True)
 
-        for i in range(num_old):
-            torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
-            current_old_dir_val = torch.jit.annotate(SparseFlatTensor, next_old_dir_prefetch_fwd)
-            current_old_stp_val = torch.jit.annotate(SparseFlatTensor, next_old_stp_prefetch_fwd)
-            if i < num_old - 1:
-                next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
-                next_old_stp_prefetch_fwd = old_stps[i + 1].to(torch.device("cuda"), non_blocking=True)
+            for i in range(num_old):
+                torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
+                current_old_dir_val = torch.jit.annotate(SparseFlatTensor, next_old_dir_prefetch_fwd)
+                current_old_stp_val = torch.jit.annotate(SparseFlatTensor, next_old_stp_prefetch_fwd)
+                if i < num_old - 1:
+                    next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
+                    next_old_stp_prefetch_fwd = old_stps[i + 1].to(torch.device("cuda"), non_blocking=True)
 
-            if direction_alignment_mask[i]:
-              old_dir_for_dense = SparseFlatTensor( # Use current_old_dir_val, which is prefetched
-                  current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32), # type: ignore[arg-type]
-                  current_old_dir_val.total_size, current_old_dir_val.unit_indices, current_old_dir_val.unit_values.to(dtype=torch.float32)
-              )
-              dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
-              alpha_val = al[i] - dot_product_val * ro[i].item()
-              sparse_old_stp_scaled = SparseFlatTensor( # Use current_old_stp_val, which is prefetched
-                  current_old_stp_val.starts, current_old_stp_val.ends, current_old_stp_val.values.to(dtype=torch.float32),
-                  current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
-              ) * (alpha_val)
-              d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
+                if direction_alignment_mask[i]:
+                  old_dir_for_dense = SparseFlatTensor( # Use current_old_dir_val, which is prefetched
+                      current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32), # type: ignore[arg-type]
+                      current_old_dir_val.total_size, current_old_dir_val.unit_indices, current_old_dir_val.unit_values.to(dtype=torch.float32)
+                  )
+                  dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
+                  alpha_val = al[i] - dot_product_val * ro[i].item()
+                  sparse_old_stp_scaled = SparseFlatTensor( # Use current_old_stp_val, which is prefetched
+                      current_old_stp_val.starts, current_old_stp_val.ends, current_old_stp_val.values.to(dtype=torch.float32),
+                      current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
+                  ) * (alpha_val)
+                  d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
 #TODO: try removing normalization from only second loop
 #              total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to("cuda")
 #              d.div_(total_norm)
@@ -977,56 +976,55 @@ class FBFGS(Optimizer):
         al = torch.empty(num_old, dtype=q.dtype, device="cuda") # Initialize al as tensor
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device="cuda")
 
-        # Prefetch the first element for the backward loop
         if num_old > 0:
+            # Prefetch the first element for the backward loop
             next_old_dir_prefetch_bwd: Tensor = old_dirs[num_old - 1].to("cuda", non_blocking=True)
 
-        for i in range(num_old - 1, -1, -1):
-            torch.cuda.synchronize() # Ensure current_old_dir is ready
-            current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_bwd)
-            current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_bwd)
-            if i > 0:
-                next_old_dir_prefetch_bwd = old_dirs[i - 1].to("cuda", non_blocking=True)
-            direction_similarity = (current_old_dir_val * q).sum().item() # Use current_old_dir_val
-            aligned = direction_similarity >= similarity or direction_similarity <= -similarity
-            direction_alignment_mask[i] = aligned # Store alignment for current index
-            if direction_alignment_mask[i]:
-              al[i] = direction_similarity * ro[i].item()
-              q = q + (current_old_dir_val * ((-al[i])))
-              hit_miss = hit_miss + str("| ")
-# TODO: prevent over-alignment to keep the direction multipathed?
-# Prevent over-alignment by considering the expansion of near-orthogonal entries
-#              if direction_similarity < 1 and direction_similarity > -1:
-##TODO: over-alignment hyperparameter (last one I swear this one is really necessary)
-#                similarity += 0.1*similarity*(1 - abs(direction_similarity)) #TODO: we assume worst case which is variance has doubled ?  We can calculate this based on the alignment. the less aligned the more variance in the solution.
-#              else:
-#                similarity += 5e-8 #TODO: a better way to prevent PowerPoints
-#              similarity += 0.1*similarity
-            else:
-              hit_miss = hit_miss + str("_ ")
+            for i in range(num_old - 1, -1, -1):
+                torch.cuda.synchronize() # Ensure current_old_dir is ready
+                current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_bwd)
+                if i > 0:
+                    next_old_dir_prefetch_bwd = old_dirs[i - 1].to("cuda", non_blocking=True)
+                direction_similarity = (current_old_dir_val * q).sum().item() # Use current_old_dir_val
+                aligned = direction_similarity >= similarity or direction_similarity <= -similarity
+                direction_alignment_mask[i] = aligned # Store alignment for current index
+                if direction_alignment_mask[i]:
+                  al[i] = direction_similarity * ro[i].item()
+                  q = q + (current_old_dir_val * ((-al[i])))
+                  hit_miss = hit_miss + str("| ")
+    # TODO: prevent over-alignment to keep the direction multipathed?
+    # Prevent over-alignment by considering the expansion of near-orthogonal entries
+    #              if direction_similarity < 1 and direction_similarity > -1:
+    ##TODO: over-alignment hyperparameter (last one I swear this one is really necessary)
+    #                similarity += 0.1*similarity*(1 - abs(direction_similarity)) #TODO: we assume worst case which is variance has doubled ?  We can calculate this based on the alignment. the less aligned the more variance in the solution.
+    #              else:
+    #                similarity += 5e-8 #TODO: a better way to prevent PowerPoints
+    #              similarity += 0.1*similarity
+                else:
+                  hit_miss = hit_miss + str("_ ")
 
         d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
         be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
         del q
 
-        # Prefetch the first elements for the forward loop
         if num_old > 0:
+            # Prefetch the first elements for the forward loop
             next_old_dir_prefetch_fwd: Tensor = old_dirs[0].to("cuda", non_blocking=True)
             next_old_stp_prefetch_fwd: Tensor = old_stps[0].to("cuda", non_blocking=True)
 
-#TODO: vectorize alignment mask here since its immutable
-        for i in range(num_old):
-            torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
-            current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_fwd)
-            current_old_stp_val = torch.jit.annotate(Tensor, next_old_stp_prefetch_fwd)
-            if i < num_old - 1:
-                next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
-                next_old_stp_prefetch_fwd = old_stps[i + 1].to("cuda", non_blocking=True)
+            #TODO: vectorize alignment mask here since its immutable
+            for i in range(num_old):
+                torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
+                current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_fwd)
+                current_old_stp_val = torch.jit.annotate(Tensor, next_old_stp_prefetch_fwd)
+                if i < num_old - 1:
+                    next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
+                    next_old_stp_prefetch_fwd = old_stps[i + 1].to("cuda", non_blocking=True)
 
-            if direction_alignment_mask[i]: # Check alignment for current index
-              be_i.copy_((current_old_dir_val * d)) # Use current_old_dir_val
-              alpha_val = al[i] - be_i.sum() * ro[i].item() # Use al[i] and ro[i]
-              d = d + (current_old_stp_val * (alpha_val)) # Use current_old_stp_val
+                if direction_alignment_mask[i]: # Check alignment for current index
+                  be_i.copy_((current_old_dir_val * d)) # Use current_old_dir_val
+                  alpha_val = al[i] - be_i.sum() * ro[i].item() # Use al[i] and ro[i]
+                  d = d + (current_old_stp_val * (alpha_val)) # Use current_old_stp_val
 
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
