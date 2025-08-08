@@ -39,6 +39,17 @@ class SparseFlatTensor:
         self.unit_values = unit_values if unit_values is not None else torch.empty(0, dtype=values.dtype, device=starts.device)
 
 
+    def pin_memory(self):
+        """
+        Pins the memory of all internal tensors if they are on CPU.
+        Returns a new SparseFlatTensor with pinned tensors.
+        """
+        return SparseFlatTensor(
+            self.starts.pin_memory(), self.ends.pin_memory(), self.values.pin_memory(),
+            self.total_size.pin_memory(), self.unit_indices.pin_memory(), self.unit_values.pin_memory()
+        )
+
+
     def __repr__(self):
         return f"SparseFlatTensor(starts={self.starts}, ends={self.ends}, values={self.values}, total_size={self.total_size}, unit_indices={self.unit_indices.numel()})"
 
@@ -72,12 +83,12 @@ class SparseFlatTensor:
         Moves all internal tensors to the specified device and returns a new SparseFlatTensor, including unit indices.
         """
         return SparseFlatTensor(
-            self.starts.to(device=device, dtype=self.starts.dtype, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.ends.to(device=device, dtype=self.ends.dtype, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.values.to(device=device, dtype=self.values.dtype, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.total_size.to(device=device, dtype=self.total_size.dtype, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.unit_indices.to(device=device, dtype=self.unit_indices.dtype, non_blocking=non_blocking, pin_memory=pin_memory),
-            self.unit_values.to(device=device, dtype=self.unit_values.dtype, non_blocking=non_blocking, pin_memory=pin_memory)
+            self.starts.to(device=device, dtype=self.starts.dtype, non_blocking=non_blocking),
+            self.ends.to(device=device, dtype=self.ends.dtype, non_blocking=non_blocking),
+            self.values.to(device=device, dtype=self.values.dtype, non_blocking=non_blocking),
+            self.total_size.to(device=device, dtype=self.total_size.dtype, non_blocking=non_blocking),
+            self.unit_indices.to(device=device, dtype=self.unit_indices.dtype, non_blocking=non_blocking),
+            self.unit_values.to(device=device, dtype=self.unit_values.dtype, non_blocking=non_blocking)
         )
 
     def dot(self, other):
@@ -1665,23 +1676,21 @@ class FBFGS(Optimizer):
             device_obj = torch.device(device)
 
             # Helper function to move/pin tensors correctly based on target device
-            def _move_and_pin(t_in: Union[Tensor, SparseFlatTensor], target_device: torch.device, non_blocking: bool) -> Union[Tensor, SparseFlatTensor]:
+            def _move_and_pin(t_in: Union[Tensor, SparseFlatTensor], target_device: torch.device, non_blocking: bool) -> Union[Tensor, SparseFlatTensor]: # type: ignore[return]
+                moved_tensor: Union[Tensor, SparseFlatTensor]
                 if isinstance(t_in, SparseFlatTensor):
-                    # SparseFlatTensor.to() handles its internal tensors and takes pin_memory directly
-                    # Pass pin_memory=True only if target is CUDA, as it's for host->device transfer optimization
-                    return t_in.to(device=target_device, non_blocking=non_blocking, pin_memory=(target_device.type == 'cuda'))
-                else: # t_in is a torch.Tensor
+                    moved_tensor = t_in.to(device=target_device, non_blocking=non_blocking)
                     if target_device.type == 'cpu':
-                        # If target is CPU, pin the memory directly if it's a CPU tensor
-                        # .pin_memory() is a no-op if already pinned or on CUDA
-                        return t_in.pin_memory().to(device=target_device, dtype=t_in.dtype, non_blocking=non_blocking)
-                    else: # target_device.type == 'cuda'
-                        # If target is CUDA, use pin_memory argument for optimized transfer
-                        return t_in.to(device=target_device, dtype=t_in.dtype, non_blocking=non_blocking, pin_memory=True)
+                        moved_tensor = moved_tensor.pin_memory()
+                else: # t_in is a torch.Tensor
+                    moved_tensor = t_in.to(device=target_device, dtype=t_in.dtype, non_blocking=non_blocking)
+                    if target_device.type == 'cpu':
+                        moved_tensor = moved_tensor.pin_memory()
+                return moved_tensor
 
-            state["old_dirs"] = [_move_and_pin(t, device_obj, True) for t in history.get("old_dirs", [])]
-            state["old_stps"] = [_move_and_pin(t, device_obj, True) for t in history.get("old_stps", [])]
-            state["ro"] = [_move_and_pin(t, device_obj, True) for t in history.get("ro", [])]
+            state["old_dirs"] = [_move_and_pin(t, device_obj, True) for t in history.get("old_dirs", [])] # Pin if CPU
+            state["old_stps"] = [_move_and_pin(t, device_obj, True) for t in history.get("old_stps", [])] # Pin if CPU
+            state["ro"] = [_move_and_pin(t, device_obj, True) for t in history.get("ro", [])] # Pin if CPU
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
             state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
             state["H_diag"] = history.get("H_diag", None) # Load H_diag #TODO: this should be direction_device
@@ -1695,13 +1704,13 @@ class FBFGS(Optimizer):
 
             # Move other state tensors to the direction_device with non_blocking and pin_memory
             if state["prev_flat_grad"] is not None:
-                state["prev_flat_grad"] = _move_and_pin(state["prev_flat_grad"], device_obj, True) # Move prev_flat_grad to direction_device if it exists
+                state["prev_flat_grad"] = _move_and_pin(state["prev_flat_grad"], device_obj, True) # Pin if CPU
             if state["d"] is not None:
-                state["d"] = _move_and_pin(state["d"], device_obj, True) # Move d to direction_device if it exists
+                state["d"] = _move_and_pin(state["d"], device_obj, True) # Pin if CPU
             if state["flat_grad"] is not None:
-                state["flat_grad"] = _move_and_pin(state["flat_grad"], device_obj, True) # Move flat_grad to direction_device if it exists
+                state["flat_grad"] = _move_and_pin(state["flat_grad"], device_obj, True) # Pin if CPU
             if state["H_diag"] is not None:
-                state["H_diag"] = _move_and_pin(state["H_diag"], device_obj, True) # Move H_diag to direction_device if it exists
+                state["H_diag"] = _move_and_pin(state["H_diag"], device_obj, True) # Pin if CPU
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
