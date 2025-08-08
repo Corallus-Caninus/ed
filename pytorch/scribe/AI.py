@@ -202,8 +202,8 @@ def closure(): # Define closure here, outside the if block
         end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
         cur_input_ids = input_ids[:, i:end_idx]
         cur_attention_mask = attention_mask[:, i:end_idx]
-        cur_input_ids = cur_input_ids.to("cuda") # Ensure input_ids are on CUDA
-        cur_attention_mask = cur_attention_mask.to("cuda") # Ensure attention_mask are on CUDA
+        # cur_input_ids = cur_input_ids.to("cuda:1") # Already on cuda:1
+        # cur_attention_mask = cur_attention_mask.to("cuda:1") # Already on cuda:1
   #        cache_position = torch.tensor([i])
         print(f"Cache position: {i}")
   
@@ -282,7 +282,7 @@ while True:
         print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
         batch_train = dataset[dataset_idx]['code']
         print(str(batch_train))
-        tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
+        tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda:1")
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
 
