@@ -321,7 +321,7 @@ while True:
     print(f"--- Before generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
     print(f"--- Before generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
     prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
-    out = tokenizer(prompt, return_tensors="pt") .to("cuda")
+    out = tokenizer(prompt, return_tensors="pt").to("cuda:1") # Ensure input is on the same device as the model
     with torch.no_grad():
       print("generating..")
       model.eval()
