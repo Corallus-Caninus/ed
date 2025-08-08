@@ -1319,7 +1319,7 @@ class FBFGS(Optimizer):
                 # store new direction/step
                 old_dirs.append(y.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store y as SparseFlatTensor
                 old_stps.append(s.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store s as SparseFlatTensor
-                ro.append(torch.tensor([(1. / ys)]))
+                ro.append(torch.tensor([(1. / ys)])) #TODO: pinme
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
@@ -1375,7 +1375,7 @@ class FBFGS(Optimizer):
 #TODO: this or the above should be redundant trace and remove redundancy
 #          if n_iter >= max_iter or loss == 0:
 #            break
-          prev_flat_grad = flat_grad.cpu()
+          prev_flat_grad = flat_grad.cpu().pin_memory()
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
