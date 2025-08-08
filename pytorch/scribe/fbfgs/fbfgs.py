@@ -1669,7 +1669,9 @@ class FBFGS(Optimizer):
     def load_history(self, filename):
         """Load FBFGS history from a file."""
         try:
-            history = torch.load(filename)
+            # Determine map_location for torch.load to prevent initial GPU OOM if history is large
+            load_map_location = 'cpu' if self.direction_device == 'cpu' else None
+            history = torch.load(filename, map_location=load_map_location)
             state = self.state[self._params[0]]
             device = self.direction_device # Get the device of the model parameters
             # Convert string device to torch.device object for JIT compatibility
