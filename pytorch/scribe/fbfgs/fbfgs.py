@@ -1688,9 +1688,22 @@ class FBFGS(Optimizer):
                         moved_tensor = moved_tensor.pin_memory()
                 return moved_tensor
 
-            state["old_dirs"] = [_move_and_pin(t, device_obj, False) for t in history.get("old_dirs", [])] # Pin if CPU
-            state["old_stps"] = [_move_and_pin(t, device_obj, False) for t in history.get("old_stps", [])] # Pin if CPU
-            state["ro"] = [_move_and_pin(t, device_obj, False) for t in history.get("ro", [])] # Pin if CPU
+            # Process history lists in-place to reduce peak memory usage
+            old_dirs_list = history.get("old_dirs", [])
+            for i in range(len(old_dirs_list)):
+                old_dirs_list[i] = _move_and_pin(old_dirs_list[i], device_obj, False)
+            state["old_dirs"] = old_dirs_list
+
+            old_stps_list = history.get("old_stps", [])
+            for i in range(len(old_stps_list)):
+                old_stps_list[i] = _move_and_pin(old_stps_list[i], device_obj, False)
+            state["old_stps"] = old_stps_list
+
+            ro_list = history.get("ro", [])
+            for i in range(len(ro_list)):
+                ro_list[i] = _move_and_pin(ro_list[i], device_obj, False)
+            state["ro"] = ro_list
+
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
             state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
             state["H_diag"] = history.get("H_diag", None) # Load H_diag #TODO: this should be direction_device
@@ -1704,13 +1717,13 @@ class FBFGS(Optimizer):
 
             # Move other state tensors to the direction_device with non_blocking and pin_memory
             if state["prev_flat_grad"] is not None:
-                state["prev_flat_grad"] = _move_and_pin(state["prev_flat_grad"], device_obj, False) # Pin if CPU
+                state["prev_flat_grad"] = _move_and_pin(state["prev_flat_grad"], device_obj, False)
             if state["d"] is not None:
-                state["d"] = _move_and_pin(state["d"], device_obj, False) # Pin if CPU
+                state["d"] = _move_and_pin(state["d"], device_obj, False)
             if state["flat_grad"] is not None:
-                state["flat_grad"] = _move_and_pin(state["flat_grad"], device_obj, False) # Pin if CPU
+                state["flat_grad"] = _move_and_pin(state["flat_grad"], device_obj, False)
             if state["H_diag"] is not None:
-                state["H_diag"] = _move_and_pin(state["H_diag"], device_obj, False) # Pin if CPU
+                state["H_diag"] = _move_and_pin(state["H_diag"], device_obj, False)
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
