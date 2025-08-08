@@ -308,7 +308,7 @@ def _strong_wolfe(
 #      f_new, g_new = obj_func(x, torch.tensor(1), d)
     ls_func_evals = 1
 #TODO: why don't we scale d by t here, especially since we are normalizing?
-    gtd_new = (g_new.to("cuda") * d.to("cuda")).sum() # Keep as scalar tensor
+    gtd_new = (g_new * d).sum() # Keep as scalar tensor
 #    g_new = g_new#
 #    gtd_new = gtd_new#
     success = False
@@ -393,7 +393,7 @@ def _strong_wolfe(
         gtd_prev = gtd_new # type: ignore[assignment] # type: ignore[assignment]
         f_new, g_new = obj_func(t, d)
         ls_func_evals += 1 # Increment func evals after new evaluation
-        gtd_new = (g_new.to("cuda") * d.to("cuda")).sum() # Keep as scalar tensor
+        gtd_new = (g_new * d).sum() # Keep as scalar tensor
 #        g_new = g_new#
         ls_iter += 1
         #RELAXED WOLFE CONDITION
@@ -502,7 +502,7 @@ def _strong_wolfe(
         f_new, g_new = obj_func(t, d) # Single evaluation
         ls_func_evals += 1 # Increment func evals
         gtd_prev = gtd_new
-        gtd_new = (g_new.to("cuda") * d.to("cuda")).sum() # Keep as scalar tensor
+        gtd_new = (g_new * d).sum() # Keep as scalar tensor
 
 #TODO: something like this. we need to move t by the amount that linearly should bring it into c3 notch if we are over converged.
 #TODO: also this should happen before evaluation and probably be an if condition against push/shove routine
