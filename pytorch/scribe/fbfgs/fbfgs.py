@@ -1665,9 +1665,17 @@ class FBFGS(Optimizer):
             device_obj = torch.device(device)
             pin_mem_flag = (device_obj.type == 'cpu')
 
-            state["old_dirs"] = [tensor.to(device=device_obj, dtype=tensor.dtype, pin_memory=pin_mem_flag) for tensor in history.get("old_dirs", [])] # Load history and move to direction_device
-            state["old_stps"] = [tensor.to(device=device_obj, dtype=tensor.dtype, non_blocking=True, pin_memory=pin_mem_flag) for tensor in history.get("old_stps", [])] # Load history and move to direction_device
-            state["ro"] = [tensor.to(device=device_obj, dtype=tensor.dtype, non_blocking=True, pin_memory=pin_mem_flag) for tensor in history.get("ro", [])] # Load history and move to direction_device
+            state["old_dirs"] = [
+                t.to(device=device_obj, non_blocking=True, pin_memory=pin_mem_flag) if isinstance(t, SparseFlatTensor)
+                else t.to(device=device_obj, dtype=t.dtype, non_blocking=True, pin_memory=pin_mem_flag)
+                for t in history.get("old_dirs", [])
+            ]
+            state["old_stps"] = [
+                t.to(device=device_obj, non_blocking=True, pin_memory=pin_mem_flag) if isinstance(t, SparseFlatTensor)
+                else t.to(device=device_obj, dtype=t.dtype, non_blocking=True, pin_memory=pin_mem_flag)
+                for t in history.get("old_stps", [])
+            ]
+            state["ro"] = [t.to(device=device_obj, dtype=t.dtype, non_blocking=True, pin_memory=pin_mem_flag) for t in history.get("ro", [])] # Load history and move to direction_device
             state["prev_flat_grad"] = history.get("prev_flat_grad", None) # Load history
             state["flat_grad"] = history.get("flat_grad", None) # Load flat_grad
             state["H_diag"] = history.get("H_diag", None) # Load H_diag #TODO: this should be direction_device
