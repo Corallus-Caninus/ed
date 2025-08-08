@@ -1686,8 +1686,6 @@ class FBFGS(Optimizer):
                         moved_item = current_item.to(device=device_obj, non_blocking=False)
                     else: # torch.Tensor
                         moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                    if device_obj.type == 'cpu':
-                        moved_item = moved_item.pin_memory()
                     old_dirs_list[i] = moved_item
                 state["old_dirs"] = old_dirs_list
             else:
@@ -1702,8 +1700,6 @@ class FBFGS(Optimizer):
                         moved_item = current_item.to(device=device_obj, non_blocking=False)
                     else: # torch.Tensor
                         moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                    if device_obj.type == 'cpu':
-                        moved_item = moved_item.pin_memory()
                     old_stps_list[i] = moved_item
                 state["old_stps"] = old_stps_list
             else:
@@ -1718,8 +1714,6 @@ class FBFGS(Optimizer):
                         moved_item = current_item.to(device=device_obj, non_blocking=False)
                     else: # torch.Tensor
                         moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                    if device_obj.type == 'cpu':
-                        moved_item = moved_item.pin_memory()
                     ro_list[i] = moved_item
                 state["ro"] = ro_list
             else:
@@ -1743,8 +1737,6 @@ class FBFGS(Optimizer):
                     moved_item = current_item.to(device=device_obj, non_blocking=False)
                 else: # torch.Tensor
                     moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                if device_obj.type == 'cpu':
-                    moved_item = moved_item.pin_memory()
                 state["prev_flat_grad"] = moved_item
             if state["d"] is not None:
                 current_item = history["d"]
@@ -1752,8 +1744,6 @@ class FBFGS(Optimizer):
                     moved_item = current_item.to(device=device_obj, non_blocking=False)
                 else: # torch.Tensor
                     moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                if device_obj.type == 'cpu':
-                    moved_item = moved_item.pin_memory()
                 state["d"] = moved_item
             if state["flat_grad"] is not None:
                 current_item = history["flat_grad"]
@@ -1761,8 +1751,6 @@ class FBFGS(Optimizer):
                     moved_item = current_item.to(device=device_obj, non_blocking=False)
                 else: # torch.Tensor
                     moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                if device_obj.type == 'cpu':
-                    moved_item = moved_item.pin_memory()
                 state["flat_grad"] = moved_item
             if state["H_diag"] is not None:
                 current_item = history["H_diag"]
@@ -1770,8 +1758,6 @@ class FBFGS(Optimizer):
                     moved_item = current_item.to(device=device_obj, non_blocking=False)
                 else: # torch.Tensor
                     moved_item = current_item.to(device=device_obj, dtype=current_item.dtype, non_blocking=False)
-                if device_obj.type == 'cpu':
-                    moved_item = moved_item.pin_memory()
                 state["H_diag"] = moved_item
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
