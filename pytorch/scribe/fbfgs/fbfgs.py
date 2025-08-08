@@ -688,7 +688,7 @@ class FBFGS(Optimizer):
     def _gather_flat_grad(self):
 #        if dist.is_initialized():
 #            views = []
-#            local_grads = []  # List for local flattened gradients
+#            local_grads = [] # List for local flattened gradients
 #            for p in self._params:
 #                grad_device = p.device
 #                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
@@ -710,8 +710,8 @@ class FBFGS(Optimizer):
 #            grad = torch.cat(gathered_grads, 0)  # Concatenate gathered gradients
 #        else:
         views = []
-        for p in self._params:
-            grad_device = "cuda" #p.device # Get the device of the gradient
+        for p in self._params: # Iterate over parameters
+            grad_device = p.device # Get the device of the gradient (e.g., cuda:1)
             if p.grad is None:
                 view = p.new(p.numel()).zero_()
             elif p.grad.is_sparse:
@@ -858,7 +858,7 @@ class FBFGS(Optimizer):
 #TODO: what causes direction norm to blow up?
 #TODO: if we increase the type precision we may fix the exploding direction which could result in very large and efficient step sizes.
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
-        torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to CPU history
+        torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers
         num_old = len(old_dirs)
         hit_miss = str("")
 #        similarity = 5e-5
@@ -866,10 +866,10 @@ class FBFGS(Optimizer):
 
         q = flat_grad.to(torch.float32).to("cuda").neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
-#        total_norm = max(1e-9, total_norm)
+#        total_norm = max(1e-9, total_norm) # Ensure total_norm is not too small
         print("q max value: " + str(q.max()))
         if total_norm == float('inf'):
-#          total_norm = torch.tensor(1e-9, dtype=torch.float32, device="cuda")
+#          total_norm = torch.tensor(1e-9, dtype=torch.float32, device="cuda") # Fallback for inf norm
           print("pre-direction l2 norm returned inf")
         q = q.div_(total_norm)
 
@@ -914,7 +914,7 @@ class FBFGS(Optimizer):
         print("q max value: " + str(q.max()))
 #TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
 #TODO: it may be better to crash out on NaN
-#        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32)
+#        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32) # Handle NaN/Inf
         d = q.mul(H_diag.to(torch.float32))
 #        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
 #        q.div_(total_norm)
@@ -954,7 +954,7 @@ class FBFGS(Optimizer):
         print(hit_miss)
         total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to("cuda")
 #        total_norm = max(1e-9, total_norm)
-#        if total_norm == float('inf'):
+#        if total_norm == float('inf'): # Handle inf norm
 #            total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to(torch.float32).to("cuda")
 #            d = d.div_(total_norm)
 #            total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to("cuda")
@@ -972,14 +972,14 @@ class FBFGS(Optimizer):
 
     @torch.jit.script
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float) -> Tensor:
-        torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to CPU history
+        torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 0.
 #TODO: underflow also this should be better formulated and we should try to avoid another hyperparam but arbitrary literals are worse than hyperparams
         if t < 1:
           similarity = similarity/t
-        q = flat_grad.neg().to("cuda")
+        q = flat_grad.neg().to(flat_grad.device) # Ensure q is on the same device as flat_grad
         total_norm = torch.linalg.vector_norm(q, ord=2.).to("cuda") # Move total_norm to direction_device
         q = q.div_(total_norm)
 #        mask = torch.logical_and(q > -clop, q < clop) #TODO: extract to sub_variance hyperparameter
@@ -992,7 +992,7 @@ class FBFGS(Optimizer):
             next_old_dir_prefetch_bwd: Tensor = old_dirs[num_old - 1].to("cuda", non_blocking=True)
 
             for i in range(num_old - 1, -1, -1):
-                torch.cuda.synchronize() # Ensure current_old_dir is ready
+                torch.cuda.synchronize() # Ensure current_old_dir is ready for consumption
                 current_old_dir_val = torch.jit.annotate(Tensor, next_old_dir_prefetch_bwd)
                 if i > 0:
                     next_old_dir_prefetch_bwd = old_dirs[i - 1].to("cuda", non_blocking=True)
@@ -1014,14 +1014,14 @@ class FBFGS(Optimizer):
                 else:
                   hit_miss = hit_miss + str("_ ")
 
-        d = torch.nan_to_num(q.mul(H_diag), nan=0.0, posinf=0.0, neginf=0.0)
-        be_i = torch.empty_like(d, dtype=q.dtype, device="cuda") # Preallocate be_i for second loop
+        d = torch.nan_to_num(q.mul(H_diag.to(q.device)), nan=0.0, posinf=0.0, neginf=0.0) # Ensure H_diag is on q's device
+        be_i = torch.empty_like(d, dtype=q.dtype, device=d.device) # Preallocate be_i for second loop on d's device
         del q
 
         if num_old > 0:
             # Prefetch the first elements for the forward loop
-            next_old_dir_prefetch_fwd: Tensor = old_dirs[0].to("cuda", non_blocking=True)
-            next_old_stp_prefetch_fwd: Tensor = old_stps[0].to("cuda", non_blocking=True)
+            next_old_dir_prefetch_fwd: Tensor = old_dirs[0].to(d.device, non_blocking=True) # Prefetch to d's device
+            next_old_stp_prefetch_fwd: Tensor = old_stps[0].to(d.device, non_blocking=True) # Prefetch to d's device
 
             #TODO: vectorize alignment mask here since its immutable
             for i in range(num_old):
@@ -1030,7 +1030,7 @@ class FBFGS(Optimizer):
                 current_old_stp_val = torch.jit.annotate(Tensor, next_old_stp_prefetch_fwd)
                 if i < num_old - 1:
                     next_old_dir_prefetch_fwd = old_dirs[i + 1].to("cuda", non_blocking=True)
-                    next_old_stp_prefetch_fwd = old_stps[i + 1].to("cuda", non_blocking=True)
+                    next_old_stp_prefetch_fwd = old_stps[i + 1].to(d.device, non_blocking=True) # Prefetch to d's device
 
                 if direction_alignment_mask[i]: # Check alignment for current index
                   be_i.copy_((current_old_dir_val * d)) # Use current_old_dir_val
@@ -1133,7 +1133,7 @@ class FBFGS(Optimizer):
 #TODO: add a special condition such that if num iters is 1 we start with the direction otherwise we do the gradient.
           if  n_iter == 1 or prev_flat_grad is None:
 #          if prev_flat_grad is None:
-              restart = False
+              restart = False # Flag for restart
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we dont calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
               flat_grad = self._gather_flat_grad()
@@ -1146,7 +1146,7 @@ class FBFGS(Optimizer):
 #TODO: t shouldnt be 1 here for insta-wolfes
 #              t = 1
 #              self.t = 1.
-#              if len(old_dirs) > 0 and prev_flat_grad is not None:
+#              if len(old_dirs) > 0 and prev_flat_grad is not None: # Check if history exists
 #                if self.clop == 0:
 #                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
 #                else:
@@ -1154,7 +1154,7 @@ class FBFGS(Optimizer):
 #              else:
               d = self._gather_flat_grad().neg()
               #TODO: should we also do norm float("inf") here to match direction S?
-              total_norm = torch.linalg.vector_norm(d, ord=norm) # Move total_norm to direction_device
+              total_norm = torch.linalg.vector_norm(d, ord=norm) # Calculate norm on d's device
 #              total_norm = max(1e-9, total_norm)
               #Handle type precision overflow for L1-likes
               if total_norm == float('inf'):
@@ -1177,7 +1177,7 @@ class FBFGS(Optimizer):
 #              norm_flat_grad = flat_grad/total_norm_grad
 #
 #              total_norm_prev_grad = torch.linalg.vector_norm(prev_flat_grad, ord=2.) # Move total_norm to direction_device
-#              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor
+#              prev_norm_flat_grad = prev_flat_grad/total_norm_prev_grad # Creates new tensor (if not in-place)
 
               # Calculate y_dense using clone and in-place operations to reduce allocations
 #TODO: clip flat_grad and prev_flat_grad here respectively.
@@ -1188,8 +1188,8 @@ class FBFGS(Optimizer):
 #TODO: clip flat_grad and prev_flat_grad here respectively.
               # prev_flat_grad is moved to CUDA for calculation, then immediately deleted
               # to free up memory.
-              y_dense = flat_grad.clone() # Allocate y_dense once by cloning norm_norm_flat_grad
-              y_dense.sub_(prev_flat_grad.to("cuda")) # Perform subtraction in-place (avoids new tensor for subtraction result)
+              y_dense = flat_grad.clone() # y_dense is on flat_grad's device (cuda:1)
+              y_dense.sub_(prev_flat_grad.to(flat_grad.device)) # Ensure prev_flat_grad is on the same device
               s_dense = (d.mul(t)) # Define s_dense here
               ys = y_dense.dot(s_dense)
 
@@ -1361,8 +1361,8 @@ class FBFGS(Optimizer):
 #TODO: it might make sense to divide by the history size so we keep curvature normalized to prevent explosions in direction approx.
 #              H_diag = 1
 #              H_diag = torch.tensor(H_diag)
-#              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
-#              if self.clop == 0:
+#              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9) # Clip gradient norm
+#              if self.clop == 0: # Check if clopping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
 #              else:
               d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm=y_norm)
@@ -1390,7 +1390,7 @@ class FBFGS(Optimizer):
           # directional derivative
    #TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
 #          flat_grad = self._gather_norm_flat_grad(1, True) TODO: is this right?
-          gtd_sparse_product = flat_grad.to("cuda") * d.to("cuda")
+          gtd_sparse_product = flat_grad * d.to(flat_grad.device) # Ensure d is on flat_grad's device
           gtd = gtd_sparse_product.sum()  # g * d
           del gtd_sparse_product
           #          prev_flat_grad = prev_flat_grad.to(self.direction_device) # This move is handled before y calculation
