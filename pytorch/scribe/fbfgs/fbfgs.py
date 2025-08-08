@@ -833,7 +833,7 @@ class FBFGS(Optimizer):
 
     def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
         # Save current parameters to CPU
-        original_params_cpu = [p.detach().clone().cpu().pin_memory() for p in self._params]
+        original_params_cpu = [p.detach().clone().cpu() for p in self._params]
 #        original_params_cpu = [p.pin_memory() for p in original_params_cpu]
         # Apply step: x_new = x_old + t * d
         offset = 0
@@ -1315,8 +1315,8 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # Store new direction/step
-                old_dirs.append(y.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store y as SparseFlatTensor
-                old_stps.append(s.to(self.direction_device, non_blocking=True, pin_memory=True)) # Store s as SparseFlatTensor #TODO: pinme
+                old_dirs.append(y.to(self.direction_device, non_blocking=True, pin_memory=False)) # Store y as SparseFlatTensor
+                old_stps.append(s.to(self.direction_device, non_blocking=True, pin_memory=False)) # Store s as SparseFlatTensor #TODO: pinme
                 ro.append(torch.tensor([(1. / ys)])) #TODO: pinme
                 state["old_stps"] = old_stps
                 state["ro"] = ro
@@ -1373,7 +1373,7 @@ class FBFGS(Optimizer):
 #TODO: this or the above should be redundant trace and remove redundancy
 #          if n_iter >= max_iter or loss == 0:
 #            break
-          prev_flat_grad = flat_grad.cpu().pin_memory()
+          prev_flat_grad = flat_grad.cpu()
           prev_loss = loss
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
