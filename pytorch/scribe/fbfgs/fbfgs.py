@@ -822,7 +822,7 @@ class FBFGS(Optimizer):
     def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
         # Save current parameters to CPU
         original_params_cpu = [p.detach().clone().cpu() for p in self._params]
-
+        original_params_cpu = [p.pin_memory() for p in original_params_cpu]
         # Apply step: x_new = x_old + t * d
         offset = 0
         for p in self._params:
@@ -838,8 +838,8 @@ class FBFGS(Optimizer):
         flat_grad = self._gather_flat_grad()
 
         # Restore original parameters from CPU
-        for p, original_p_cpu in zip(self._params, original_params_cpu):
-            p.copy_(original_p_cpu.to(p.device))
+        for p, original_p_cpu in zip(self._params, original_params_cpu): # type: ignore[possibly-undefined]
+            p.copy_(original_p_cpu.to(p.device, non_blocking=True))
 
         return loss, flat_grad
     @torch.jit.script
