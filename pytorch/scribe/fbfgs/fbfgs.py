@@ -1210,13 +1210,25 @@ class FBFGS(Optimizer):
                   try:
                     cpu_ram_available = psutil.virtual_memory().available / (1024**3) # Available RAM in GB
                     print(f"CPU RAM available: {cpu_ram_available} GB, history_size: {history_size} GB") # Debug print
-                    while cpu_ram_available <= history_size: # If available RAM is less than history_size
-                        cpu_ram_available = psutil.virtual_memory().available / (1024**3)
+                    while cpu_ram_available <= history_size: # If available RAM is less than history_size and history is not empty
+                        if not old_dirs: # Prevent popping from an empty list
+                            print("  History is empty, stopping CPU memory-based popping.")
+                            break
+
+                        old_available_ram_before_pop = cpu_ram_available # Capture RAM before pop
+
                         # shift history by one (limited-memory)
                         old_dirs.pop(0)
                         old_stps.pop(0)
                         ro.pop(0)
                         gc.collect()
+
+                        # Poll until memory changes or history becomes empty
+                        while True:
+                            cpu_ram_available = psutil.virtual_memory().available / (1024**3)
+                            if cpu_ram_available != old_available_ram_before_pop or not old_dirs:
+                                break # Memory changed or history is empty, exit polling
+                            time.sleep(0.01) # Small sleep to prevent busy-waiting
                   except Exception as e:
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
