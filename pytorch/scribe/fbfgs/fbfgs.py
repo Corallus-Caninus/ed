@@ -785,12 +785,14 @@ class FBFGS(Optimizer):
 #TODO: only prefetch for CPU
         if num_old > 0:
             # Prefetch the first element for the backward loop
+#TODO: is this an OBO error?
             next_sparse_dir_prefetch: SparseFlatTensor = old_dirs[num_old - 1].to(torch.device(direction_device), non_blocking=True)
 
             for i in range(num_old - 1, -1, -1):
                 torch.cuda.synchronize() # Ensure current_sparse_dir is ready
                 current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
 
+#TODO: stand up a buffer of the next 4 entries and pin them (they will be copied so we can del gc the copies to minimize fragmentation, essentially a custom pin scratchpad like pytorch uses
                 if i > 0:
                     next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device(direction_device), non_blocking=True) # Initiate prefetch for next iteration
 
@@ -859,11 +861,6 @@ class FBFGS(Optimizer):
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         print(hit_miss)
         total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(direction_device)
-#        total_norm = max(1e-9, total_norm)
-#        if total_norm == float('inf'): # Handle inf norm
-#            total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to(torch.float32).to("cuda")
-#            d = d.div_(total_norm)
-#            total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to("cuda")
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
 
@@ -1047,8 +1044,6 @@ class FBFGS(Optimizer):
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag, device="cuda") # Ensure H_diag is on cuda
-#TODO: t shouldnt be 1 here for insta-wolfes
-#              t = 1
 #              self.t = 1.
 #              if len(old_dirs) > 0 and prev_flat_grad is not None: # Check if history exists
 #                if self.clop == 0: # Check if clopping is disabled
@@ -1129,8 +1124,6 @@ class FBFGS(Optimizer):
                   del y_dense_mask
               y_dense.mul_(norm_y)
 
-#TODO: this isnt working, can verify by setting norm higher than y norm, y norm wont be at least d numel
-#TODO: fix this.
 #              s_mask = (s_dense != 0)
 #              ys_dense = y_dense.clone()
 #              ys_dense[~s_mask] = 0
@@ -1143,12 +1136,6 @@ class FBFGS(Optimizer):
               print("s mask: " + str((s_mask!=0).sum()))
               y_dense.add_(ys_dense)
               print("y dense + s_mask  " + str((y_dense != 0).sum()))
-#              TODO: should we instead take the l2 of s(t) to keep everything in the same norm order in the approximation?
-#              s_dense = d #TODO: again? with letting I first loop scale
-#
-
-#              ys = y_dense.mul(norm_y_dense).dot(s_dense.div(norm_s))
-#              ys = y_dense.mul(norm_y_dense).dot(s_dense)
 
               norm_yf = torch.linalg.vector_norm(y_dense, ord=2.)
               y_dense.div_(norm_yf) 
@@ -1234,19 +1221,21 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # Store new direction/step
-                old_dirs.append(y.to(self.direction_device, non_blocking=True, pin_memory=False)) # Store y as SparseFlatTensor
-                old_stps.append(s.to(self.direction_device, non_blocking=True, pin_memory=False)) # Store s as SparseFlatTensor #TODO: pinme
+                old_dirs.append(y.to(self.direction_device, non_blocking=False, pin_memory=False)) # Store y as SparseFlatTensor
+                old_stps.append(s.to(self.direction_device, non_blocking=False, pin_memory=False)) # Store s as SparseFlatTensor #TODO: pinme
+# TODO: if we fixed the memory error, reintroduce pinned memory here
                 ro.append(torch.tensor([(1. / ys)])) #TODO: pinme
+              if n_iter > max_iter or loss == 0:
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
-#TODO: break here on n_iters
-              if n_iter > max_iter or loss == 0:
                 break
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
+                state["old_stps"] = old_stps
+                state["ro"] = ro
+                state["old_dirs"] = old_dirs
                 return orig_loss
               # Update scale of initial Hessian approximation
-# TODO: was this also shifted? check the original implementation
               if ys > 0:
                 y_squared = y_dense.dot(y_dense)
                 H_diag = ys / y_squared # (y*y)
@@ -1568,11 +1557,11 @@ class FBFGS(Optimizer):
             device_obj = torch.device(device)
 
             # Use list comprehensions for history lists
-            state["old_dirs"] = [self._move_item_to_device(item, device_obj, non_blocking=True)
+            state["old_dirs"] = [self._move_item_to_device(item, device_obj, non_blocking=False)
                                  for item in history.get("old_dirs", [])]
-            state["old_stps"] = [self._move_item_to_device(item, device_obj, non_blocking=True)
+            state["old_stps"] = [self._move_item_to_device(item, device_obj, non_blocking=False)
                                  for item in history.get("old_stps", [])]
-            state["ro"] = [self._move_item_to_device(item, device_obj, non_blocking=True)
+            state["ro"] = [self._move_item_to_device(item, device_obj, non_blocking=False)
                            for item in history.get("ro", [])]
 
             # Directly assign and move single tensors
