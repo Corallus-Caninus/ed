@@ -683,32 +683,8 @@ class FBFGS(Optimizer):
 
         return self._numel_cache
 
-    # gather flat grads with L1 Normalization and without clopping
-#TODO: dont gather, just let ops be distributed
+#TODO: allow this to be distributive, such that we can have multiple nodes generate grads and keep them on their respective devices for all of fbfgs.
     def _gather_flat_grad(self):
-#        if dist.is_initialized():
-#            views = []
-#            local_grads = [] # List for local flattened gradients
-#            for p in self._params:
-#                grad_device = p.device
-#                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
-#                if p.grad is None:
-#                    view = p.new(p.numel()).zero_()
-#                elif p.grad.is_sparse:
-#                    view = p.grad.view(-1)
-#                else:
-#                    view = p.grad.view(-1)
-#                if torch.is_complex(view):
-#                    view = torch.view_as_real(view).view(-1)
-#                views.append(view)
-#                local_grads.append(view)  # Append to local_grads list
-#
-#            world_size = dist.get_world_size()
-#            gathered_grads = [torch.empty_like(local_grads[0]) for _ in range(world_size)]  # List for gathered gradients
-#            dist.all_gather(gathered_grads, local_grads[0])  # Perform all_gather
-#
-#            grad = torch.cat(gathered_grads, 0)  # Concatenate gathered gradients
-#        else:
         views = []
         for p in self._params: # Iterate over parameters
             grad_device = p.device # Get the device of the gradient (e.g., cuda:1)
@@ -722,78 +698,9 @@ class FBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view.to("cuda"))
         grad = torch.cat(views, 0)
-#        for p in self._params: # Clip after gathering to ensure all grads are included
-#            if p.grad is not None: # Check if p.grad is not None
-#                torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
-#        finfo = torch.finfo(grad.dtype)
+#TODO: this is a good idea but I would prefer a more functional and elegant way to handle rollover since it can in theory occur throughout the algorithm and pytorch doesnt solve this elegantly (which it should).
 #        grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
-#        total_norm = torch.linalg.vector_norm(grad, ord=2.).to("cuda") # Move total_norm to direction_device
-#####TODO: safenorm for all these. This is most important because of the initial gradient may be vanishing.
-#####        total_norm = total_norm + 1e-8
-#        grad = grad.div_(total_norm)
         return grad
-
-    # gather flat grads with L1 Normalization and without clopping
-#TODO: rename and remove
-    def _gather_flat_grad_DEPRECATED(self):
-        views = []
-        for p in self._params:
-            grad_device = p.device # Get the device of the gradient
-            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
-            if p.grad is None:
-                view = p.new(p.numel()).zero_()
-            elif p.grad.is_sparse:
-                view = p.grad.to(self.direction_device).view(-1) # Move sparse grad to direction_device
-            else:
-                view = p.grad.to(self.direction_device).view(-1) # Move dense grad to direction_device
-            if torch.is_complex(view):
-                view = torch.view_as_real(view).view(-1)
-            views.append(view)
-        grad = torch.cat(views, 0).to("cuda")
-#        norm_val = torch.linalg.vector_norm(grad, ord=1.)
-#        grad = grad/norm_val
-#        return torch.cat(views, 0).to(self.direction_device)
-        return grad
-#TODO: clip out NaN based on dtype max value
-#        return grad_raw #.to(self.direction_device)
-
-    # gather flat grads with L2 Normalization
-#TODO: rename
-    def _gather_norm_flat_grad(self, isClop = True):
-        views = []
-        total = 0
-        for p in self._params:
-            torch.nn.utils.clip_grad_value_(p, torch.finfo(p.dtype).max)
-            if p.grad is None:
-                view = p.new(p.numel()).zero_()
-            elif p.grad.is_sparse:
-                view = p.grad.view(-1)
-            else:
-                view = p.grad.view(-1)
-            if torch.is_complex(view):
-                view = torch.view_as_real(view).view(-1)
-            views.append(view)
-        views = torch.cat(views, 0)
-        norm = torch.linalg.vector_norm(views, self.norm)
-        views.div_(norm)
-#TODO: does l1 need a norm scaling parameter or does it naturally scale since it has to sum to one anyways (values that are essentially 0 dont add anything to the norm so it should automatically balance). We may also want a scaling value since large networks might end up clopping too much or even dropping too much with l1. Can we tune this normal scaling value with the same hyperparameter used for clopping s.t. its a hyperparameter that is proportional to a "sub net size"? Probably cant just be one hyperparameter, but can we pass in values 0>x<1? essetially the l0.5 norm for scaling up a bit to account for precision losses? Test this but likely we need a hyperparameter to scale the norm we got from l1.
-#TODO: what if we normaling by the max value and let clopping handle what the l1 would do anyways? we would only need to tune the clopping hyperparameter and would get essentially what we want with l1
-        #Clop
-#TODO: may be worth taking the top K here to have deterministic memory, do this after clopping to create a floor for allocation since we want to allow very sparse outlier gradients
-        if isClop:
-          print("gradient elements: " + str((views != 0).sum()) + " total: " + str(views.numel()), end=' ')
-          views[torch.logical_and(views > -self.clop,views < self.clop)] = 0
-#          views = views.to_sparse()
-        return views #.to("cpu")
-    #TODO: clip out NaN based on dtype max value
-    #        return grad_raw #.to("cpu")
-
-#TODO: we can just clone the bitmask of the sparse gradients since those are the only params we are going to modify
-    # def _clone_param(self):
-    # #        return [p.clone(memory_format=torch.contiguous_format).to(self.direction_device) for p in self._params]
-    #     return [p.clone(memory_format=torch.contiguous_format) for p in self._params] #        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
-
-    # def _set_param(self, params_data): #     for p, pdata in zip(self._params, params_data): #         p.copy_(pdata)
 
     def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
         offset = 0
@@ -831,7 +738,7 @@ class FBFGS(Optimizer):
             offset += numel
         return self._numel() # Return total numel if no NaN
 
-    def _directional_evaluate(self, closure, t, d): #TODO: this function is redundant with _directional_evaluate after memory optimization # and is not called anywhere. Removing it.
+    def _directional_evaluate(self, closure, t, d): 
         # Save current parameters to CPU
         original_params_cpu = [p.detach().clone().cpu() for p in self._params]
 #        original_params_cpu = [p.pin_memory() for p in original_params_cpu]
@@ -854,9 +761,8 @@ class FBFGS(Optimizer):
             p.copy_(original_p_cpu.to(p.device))
 
         return loss, flat_grad
+
     @torch.jit.script
-#TODO: what causes direction norm to blow up?
-#TODO: if we increase the type precision we may fix the exploding direction which could result in very large and efficient step sizes.
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
@@ -876,6 +782,7 @@ class FBFGS(Optimizer):
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device)
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
+#TODO: only prefetch for CPU
         if num_old > 0:
             # Prefetch the first element for the backward loop
             next_sparse_dir_prefetch: SparseFlatTensor = old_dirs[num_old - 1].to(torch.device(direction_device), non_blocking=True)
@@ -1336,7 +1243,6 @@ class FBFGS(Optimizer):
                 H_diag = 1.
                 H_diag = torch.tensor(H_diag, device="cuda") # Ensure H_diag is on cuda
 #              H_diag = ys #TODO: just 1?
-#              H_diag = ys #TODO: just 1?
               gc.collect()
 
               y = y #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
@@ -1387,7 +1293,6 @@ class FBFGS(Optimizer):
           # reset initial guess for step size
           # directional derivative
    #TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
-#          flat_grad = self._gather_norm_flat_grad(1, True) #TODO: is this right?
           gtd_sparse_product = flat_grad * d.to("cuda") # Ensure d is on cuda
           gtd = gtd_sparse_product.sum()  # g * d
           del gtd_sparse_product
@@ -1561,18 +1466,6 @@ class FBFGS(Optimizer):
               else: # Line search succeeded
                   ls_failed = False
 
-          # TODO: I don't like having to do this but we want l2 for the direction selection.
-          # TODO: dont reset the Hessian if we are using prev step size since one iteration may be insufficient to bracket down
-          #                if "old_dirs" in state:
-          #                  state["old_dirs"].clear()
-          #                  state["old_stps"].clear()
-          #                  state["ro"].clear()
-          # TODO: dont clear these? may leak here
-          #                old_dirs = []
-          #                old_stps = []
-          #                ro = []
-          #                state["n_iter"] = 0
-          #              flat_grad = flat_grad.to("cuda")
               if ls_failed and Needle == False: # If line search failed and needle was not triggered
                   flat_grad = prev_flat_grad
                   prev_flat_grad = None
@@ -1586,25 +1479,7 @@ class FBFGS(Optimizer):
               loss_device = d.device
               # TODO: fix this print (its wrong)
               print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")  # Use best_needle_loss
-              opt_cond = loss <= 0  # TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision # Use best_needle_loss
-
-          #              opt_cond = flat_grad.abs().max() <= tolerance_grad #TODO: check if this is even possible given normalization. Once verified, rename to point break
-          #              opt_cond = opt_cond or loss <= 0 #TODO: this should be one order of magnitude above the minimum since we start getting convergence problems when we are very close to the min of precision
-          #         else:
-          #              # no line search, simply move with fixed-step
-          #              first_param = next(self.param_groups[0]['params'].__iter__())
-          ##              t = t.to(first_param.device)
-          #              d = d.to(first_param.device)
-          #              self._add_grad(t, d)
-          #              if n_iter != max_iter:
-          #                  # re-evaluate function only if not in last iteration
-          #                  # the reason we do this: in a stochastic setting,
-          #                  # no use to re-evaluate that function here
-          #                  with torch.enable_grad():
-          #                      loss = float(closure())
-          #                  flat_grad = self._gather_flat_grad()
-          #                  opt_cond = flat_grad.abs().max() <= tolerance_grad
-          #                  ls_func_evals = 1
+              opt_cond = loss <= 0  
 
           # update func eval
           current_evals += ls_func_evals
@@ -1620,8 +1495,6 @@ class FBFGS(Optimizer):
 #              break
 
           # optimal condition
-#TODO: we may not need this, just let it hit epsilon grad or zero grad for number of iteration times?
-#TODO: also, dont exit on loss < 1e-5 as above, let that point break (loss <= 0) condition
 #          if opt_cond:
 #              print("GRAD CONVERGE")
 #              break
@@ -1630,7 +1503,6 @@ class FBFGS(Optimizer):
 #          if d.mul(t).abs().max() <= tolerance_change:
 #              break
 #
-##TODO: this contition may be not appropriate given relaxed wolfe condition.
 #          if abs(loss - prev_loss) < tolerance_change:
 #              break
 
