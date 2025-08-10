@@ -1325,20 +1325,28 @@ class FBFGS(Optimizer):
               if not success:  # TODO: we chase misprinted lines
                   # Line search failed. Remove the largest rho entry from history.
                   if len(ro) > 0:
+                      # Get (value, original_index) pairs
+                      ro_with_indices = [(r.item(), i) for i, r in enumerate(ro)]
+                      # Sort by value in descending order
+                      ro_with_indices.sort(key=lambda x: x[0], reverse=True)
+
+                      # Determine how many to remove (up to 10)
+                      num_to_remove = min(10, len(ro_with_indices))
+
+                      # Get the original indices of the top N largest values, sorted descending
+                      indices_to_remove = sorted([idx for val, idx in ro_with_indices[:num_to_remove]], reverse=True)
+
                       removed_count = 0
-                      # Iterate backward to safely remove elements without affecting indices of unprocessed elements
-#TODO: instead of this, take the norm (0-1) and remove any non-zero entries, that way we continuously reduce the total rho on every linesearch failure to garuntee shifting direction away from convergence.
-                      for i in range(len(ro) - 1, -1, -1):
-#                          if ro[i].item() > 10.0: # 1 / 1e-1 = 10.0
+                      for i in indices_to_remove:
                           old_dirs.pop(i)
                           old_stps.pop(i)
                           ro.pop(i)
                           removed_count += 1
+
                       if removed_count > 0:
-                          print(f"Removed {removed_count} rho entries > 10.0 from history. New history size: {len(ro)}")
+                          print(f"Removed {removed_count} largest rho entries from history. New history size: {len(ro)}")
                       else:
-                          print("No rho entries > 10.0 found to remove.")
-#TODO: remove the largest rho entry from the history (s, y and rho)
+                          print("No rho entries found to remove.")
                   if ls_failed: # TODO: we chase misprinted lines
                       return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
                       t = 1  # Reset t to 1 for after needling
