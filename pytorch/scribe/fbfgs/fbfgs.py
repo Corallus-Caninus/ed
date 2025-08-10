@@ -295,9 +295,6 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 #TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down #TODO: cleanup all the AI device mess
 def _strong_wolfe(
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100):
-#TODO: this irks the mathematician in me.
-    if c2 == 0:
-      c2 = 0.25
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
 #    g = g.clone(memory_format=torch.contiguous_format)
     # evaluate objective and gradient using initial step
@@ -824,9 +821,10 @@ class FBFGS(Optimizer):
 #TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
 #TODO: it may be better to crash out on NaN
 #        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32) # Handle NaN/Inf
-        d = q.mul(H_diag.to(torch.float32))
-#        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
-#        q.div_(total_norm)
+        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32)#.to("cuda")
+        q.div_(total_norm)
+#        d = q.mul(H_diag.to(torch.float32))
+        d = q
         del q
 
         if num_old > 0:
@@ -989,6 +987,7 @@ class FBFGS(Optimizer):
 
       # evaluate initial f(x) and df/dx
       orig_loss = closure()
+        #TODO: this should probably be direction_evaluate so we include the clopping factor
       loss = float(orig_loss)
       current_evals = 1
 #      state["func_evals"] += 1
@@ -1037,7 +1036,7 @@ class FBFGS(Optimizer):
               restart = False # Flag for restart
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we don't calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
-              flat_grad = self._gather_flat_grad()
+              flat_grad = self._gather_flat_grad().to("cuda")
 #TODO: clip_grad_norm by the l1 norm for a max norm of 1e9 (if needed)
 #              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
@@ -1045,24 +1044,24 @@ class FBFGS(Optimizer):
               H_diag = 1
               H_diag = torch.tensor(H_diag, device="cuda") # Ensure H_diag is on cuda
 #              self.t = 1.
-#              if len(old_dirs) > 0 and prev_flat_grad is not None: # Check if history exists
+              if len(old_dirs) > 0 and prev_flat_grad is not None: # Check if history exists
 #                if self.clop == 0: # Check if clopping is disabled
 #                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
 #                else:
-#                  d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm)
-#              else:
-              d = self._gather_flat_grad().neg().to("cuda") # Ensure d is on cuda
-              #TODO: should we also do norm float("inf") here to match direction S?
-              total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda") # Calculate norm on cuda
-#              total_norm = max(1e-9, total_norm)
-              # Handle type precision overflow for L1-likes
-              if total_norm == float('inf'):
-                total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda") # Move total_norm to cuda
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cuda", t=t, clop=self.clop, norm=norm, y_norm = y_norm)
+              else:
+                d = self._gather_flat_grad().neg().to("cuda") # Ensure d is on cuda
+                #TODO: should we also do norm float("inf") here to match direction S?
+                total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda") # Calculate norm on cuda
+  #              total_norm = max(1e-9, total_norm)
+                # Handle type precision overflow for L1-likes
+                if total_norm == float('inf'):
+                  total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda") # Move total_norm to cuda
+                  d = d/total_norm
+                  total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda") # Move total_norm to cuda
+                print("d norm: " + str((total_norm)) )
                 d = d/total_norm
-                total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda") # Move total_norm to cuda
-              print("d norm: " + str((total_norm)) )
-              d = d/total_norm
-              d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+                d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
 		#NOTE: end of else
 #
 #              d = d.to_sparse()
@@ -1328,12 +1327,13 @@ class FBFGS(Optimizer):
                   if len(ro) > 0:
                       removed_count = 0
                       # Iterate backward to safely remove elements without affecting indices of unprocessed elements
+#TODO: instead of this, take the norm (0-1) and remove any non-zero entries, that way we continuously reduce the total rho on every linesearch failure to garuntee shifting direction away from convergence.
                       for i in range(len(ro) - 1, -1, -1):
-                          if ro[i].item() > 10.0: # 1 / 1e-1 = 10.0
-                              old_dirs.pop(i)
-                              old_stps.pop(i)
-                              ro.pop(i)
-                              removed_count += 1
+#                          if ro[i].item() > 10.0: # 1 / 1e-1 = 10.0
+                          old_dirs.pop(i)
+                          old_stps.pop(i)
+                          ro.pop(i)
+                          removed_count += 1
                       if removed_count > 0:
                           print(f"Removed {removed_count} rho entries > 10.0 from history. New history size: {len(ro)}")
                       else:
