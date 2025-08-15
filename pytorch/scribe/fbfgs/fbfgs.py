@@ -764,8 +764,8 @@ class FBFGS(Optimizer):
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
         hit_miss = str("")
-#        similarity = 5e-5 # Similarity threshold
-        similarity = 0.
+        similarity = 1e-1 # Similarity threshold
+#        similarity = 0.
 
         q = flat_grad.to(torch.float32).to(direction_device).neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to(direction_device)
@@ -798,12 +798,16 @@ class FBFGS(Optimizer):
                     current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
                     current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
                 )
-                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
+                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item() 
+#TODO: what if we did the opposite to prevent qmax from blowing up?
+#                aligned = direction_similarity/ro[i].item() >= similarity  or direction_similarity/ro[i].item() <= -similarity
+#                aligned = direction_similarity/ro[i].item() >= similarity  or direction_similarity/ro[i].item() <= -similarity
+#                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
+                aligned = direction_similarity*ro[i].item() <= similarity  and direction_similarity*ro[i].item() >= -similarity
                 direction_alignment_mask[i] = aligned
                 if direction_alignment_mask[i]:
-    #              similarity = similarity + similarity/direction_similarity #TODO: fix this, it should scale based on the difference
-    #              similarity = 2*similarity 
+#                  similarity = similarity + similarity/max(1, direction_similarity) #TODO: fix this, it should scale based on the difference
+#                  similarity = 1.2*similarity
                   al[i] = direction_similarity * ro[i].item()
                   sparse_old_dir_scaled = SparseFlatTensor(
                       current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
@@ -1324,29 +1328,29 @@ class FBFGS(Optimizer):
               Needle = False
               if not success:  # TODO: we chase misprinted lines
                   # Line search failed. Remove the largest rho entry from history.
-                  if len(ro) > 0:
-                      # Get (value, original_index) pairs
-                      ro_with_indices = [(r.item(), i) for i, r in enumerate(ro)]
-                      # Sort by value in descending order
-                      ro_with_indices.sort(key=lambda x: x[0], reverse=True)
-
-                      # Determine how many to remove (up to 10)
-                      num_to_remove = min(10, len(ro_with_indices))
-
-                      # Get the original indices of the top N largest values, sorted descending
-                      indices_to_remove = sorted([idx for val, idx in ro_with_indices[:num_to_remove]], reverse=True)
-
-                      removed_count = 0
-                      for i in indices_to_remove:
-                          old_dirs.pop(i)
-                          old_stps.pop(i)
-                          ro.pop(i)
-                          removed_count += 1
-
-                      if removed_count > 0:
-                          print(f"Removed {removed_count} largest rho entries from history. New history size: {len(ro)}")
-                      else:
-                          print("No rho entries found to remove.")
+#                  if len(ro) > 0:
+#                      # Get (value, original_index) pairs
+#                      ro_with_indices = [(r.item(), i) for i, r in enumerate(ro)]
+#                      # Sort by value in descending order
+#                      ro_with_indices.sort(key=lambda x: x[0], reverse=True)
+#
+#                      # Determine how many to remove (up to 10)
+#                      num_to_remove = min(10, len(ro_with_indices))
+#
+#                      # Get the original indices of the top N largest values, sorted descending
+#                      indices_to_remove = sorted([idx for val, idx in ro_with_indices[:num_to_remove]], reverse=True)
+#
+#                      removed_count = 0
+#                      for i in indices_to_remove:
+#                          old_dirs.pop(i)
+#                          old_stps.pop(i)
+#                          ro.pop(i)
+#                          removed_count += 1
+#
+#                      if removed_count > 0:
+#                          print(f"Removed {removed_count} largest rho entries from history. New history size: {len(ro)}")
+#                      else:
+#                          print("No rho entries found to remove.")
                   if ls_failed: # TODO: we chase misprinted lines
                       return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
                       t = 1  # Reset t to 1 for after needling
