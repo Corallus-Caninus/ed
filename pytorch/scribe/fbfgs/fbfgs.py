@@ -790,7 +790,7 @@ class FBFGS(Optimizer):
                 current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
 
 #TODO: stand up a buffer of the next 4 entries and pin them (they will be copied so we can del gc the copies to minimize fragmentation, essentially a custom pin scratchpad like pytorch uses
-                if i > 0:
+                if i > 0: #(Supercharger)
                     next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device(direction_device), non_blocking=True) # Initiate prefetch for next iteration
 
                 # Create a new SparseFlatTensor with internal values cast to float32
@@ -804,6 +804,7 @@ class FBFGS(Optimizer):
 #                aligned = direction_similarity/ro[i].item() >= similarity  or direction_similarity/ro[i].item() <= -similarity
 #                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
                 aligned = direction_similarity*ro[i].item() <= similarity  and direction_similarity*ro[i].item() >= -similarity
+#                aligned = direction_similarity <= similarity  and direction_similarity >= -similarity
                 direction_alignment_mask[i] = aligned
                 if direction_alignment_mask[i]:
 #                  similarity = similarity + similarity/max(1, direction_similarity) #TODO: fix this, it should scale based on the difference
@@ -1328,29 +1329,29 @@ class FBFGS(Optimizer):
               Needle = False
               if not success:  # TODO: we chase misprinted lines
                   # Line search failed. Remove the largest rho entry from history.
-#                  if len(ro) > 0:
-#                      # Get (value, original_index) pairs
-#                      ro_with_indices = [(r.item(), i) for i, r in enumerate(ro)]
-#                      # Sort by value in descending order
-#                      ro_with_indices.sort(key=lambda x: x[0], reverse=True)
-#
-#                      # Determine how many to remove (up to 10)
-#                      num_to_remove = min(10, len(ro_with_indices))
-#
-#                      # Get the original indices of the top N largest values, sorted descending
-#                      indices_to_remove = sorted([idx for val, idx in ro_with_indices[:num_to_remove]], reverse=True)
-#
-#                      removed_count = 0
-#                      for i in indices_to_remove:
-#                          old_dirs.pop(i)
-#                          old_stps.pop(i)
-#                          ro.pop(i)
-#                          removed_count += 1
-#
-#                      if removed_count > 0:
-#                          print(f"Removed {removed_count} largest rho entries from history. New history size: {len(ro)}")
-#                      else:
-#                          print("No rho entries found to remove.")
+                  if len(ro) > 0:
+                      # Get (value, original_index) pairs
+                      ro_with_indices = [(r.item(), i) for i, r in enumerate(ro)]
+                      # Sort by value in descending order
+                      ro_with_indices.sort(key=lambda x: x[0], reverse=True)
+
+                      # Determine how many to remove (up to 10)
+                      num_to_remove = min(10, len(ro_with_indices))
+
+                      # Get the original indices of the top N largest values, sorted descending
+                      indices_to_remove = sorted([idx for val, idx in ro_with_indices[:num_to_remove]], reverse=True)
+
+                      removed_count = 0
+                      for i in indices_to_remove:
+                          old_dirs.pop(i)
+                          old_stps.pop(i)
+                          ro.pop(i)
+                          removed_count += 1
+
+                      if removed_count > 0:
+                          print(f"Removed {removed_count} largest rho entries from history. New history size: {len(ro)}")
+                      else:
+                          print("No rho entries found to remove.")
                   if ls_failed: # TODO: we chase misprinted lines
                       return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
                       t = 1  # Reset t to 1 for after needling
