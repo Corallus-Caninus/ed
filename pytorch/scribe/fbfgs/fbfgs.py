@@ -403,6 +403,7 @@ def _strong_wolfe(
           stall_wolfe = 0
           t_best = t
           f_best = torch.tensor(f_new, device=device)
+#TODO this should be a non-blocking offload
           g_best = g_new.to(direction_device)
 
     # reached max number of iterations?
@@ -764,7 +765,7 @@ class FBFGS(Optimizer):
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
         hit_miss = str("")
-        similarity = 1e-1 # Similarity threshold
+        similarity = 1e-2 # Similarity threshold
 #        similarity = 0.
 
         q = flat_grad.to(torch.float32).to(direction_device).neg()
@@ -782,7 +783,7 @@ class FBFGS(Optimizer):
 #TODO: only prefetch for CPU
         if num_old > 0:
             # Prefetch the first element for the backward loop
-#TODO: is this an OBO error?
+#TODO: we may want to allow a buffer for latency/throughput tuning for various PCIE/accelerator configurations.
             next_sparse_dir_prefetch: SparseFlatTensor = old_dirs[num_old - 1].to(torch.device(direction_device), non_blocking=True)
 
             for i in range(num_old - 1, -1, -1):
@@ -801,13 +802,15 @@ class FBFGS(Optimizer):
                 direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item() 
 #TODO: what if we did the opposite to prevent qmax from blowing up?
 #                aligned = direction_similarity/ro[i].item() >= similarity  or direction_similarity/ro[i].item() <= -similarity
-#                aligned = direction_similarity/ro[i].item() >= similarity  or direction_similarity/ro[i].item() <= -similarity
 #                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
-                aligned = direction_similarity*ro[i].item() <= similarity  and direction_similarity*ro[i].item() >= -similarity
+#                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
+#TODO: this is correct, but can we do better? possibly make it so this isnt tunable? currently it allows for tuning such that we get fast or slow convergence which is a plus but we can possibly solve this so we get the most delayed convergence which may be ideal.
+                aligned = direction_similarity <= similarity  and direction_similarity >= -similarity
 #                aligned = direction_similarity <= similarity  and direction_similarity >= -similarity
                 direction_alignment_mask[i] = aligned
                 if direction_alignment_mask[i]:
 #                  similarity = similarity + similarity/max(1, direction_similarity) #TODO: fix this, it should scale based on the difference
+#                  similarity = 2*similarity 
 #                  similarity = 1.2*similarity
                   al[i] = direction_similarity * ro[i].item()
                   sparse_old_dir_scaled = SparseFlatTensor(
@@ -826,10 +829,11 @@ class FBFGS(Optimizer):
 #TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
 #TODO: it may be better to crash out on NaN
 #        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32) # Handle NaN/Inf
-        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32)#.to("cuda")
-        q.div_(total_norm)
-#        d = q.mul(H_diag.to(torch.float32))
-        d = q
+#TODO: pretty sure Michael wants Hessian scaling back but I have a lot of reasons for l2 norming here instead (early convergence, 0 shot training etc.) However, with orthoganalized delayed convergence this may be sufficient to easily tune perpetual training without rho rewind resetting..
+#        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32)#.to("cuda")
+#        q.div_(total_norm)
+        d = q.mul(H_diag.to(torch.float32))
+#        d = q
         del q
 
         if num_old > 0:
@@ -1352,8 +1356,9 @@ class FBFGS(Optimizer):
                           print(f"Removed {removed_count} largest rho entries from history. New history size: {len(ro)}")
                       else:
                           print("No rho entries found to remove.")
+#TODO: Needle is supposed to find the largest step size for the smallest norm (numel). This needs a bit of a rework.
                   if ls_failed: # TODO: we chase misprinted lines
-                      return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
+#                      return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
                       t = 1  # Reset t to 1 for after needling
                       # TODO: instead of topk, iteratively reduce the norm order and check if loss is reducing or equivalent then increase step size until loss doesnt reduce and repeat
                       # TODO: if we cant decrease at all, we skip the data point, currently loss can increase here.
@@ -1389,12 +1394,12 @@ class FBFGS(Optimizer):
                           # current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop
                           loss_at_step_1, grad_at_step_1 = self._directional_evaluate(closure, current_step_t, d_needle)
                           gtd_at_step_1 = (grad_at_step_1.to("cuda") * d_needle.to("cuda")).sum()
-                          loss_baseline_for_step_increase = loss_at_step_1  # Baseline for Armijo and loss reduction check
+                          loss_baseline_for_step_increase = loss_at_step_1
 
                           print(f"  Step size 1.0 with norm order {needle_norm_order:.2f}, Loss: {loss_at_step_1}, GTD: {gtd_at_step_1}")
 
                           # Check if step 1.0 is a descent direction and improved the overall best loss found so far
-                          if gtd_at_step_1 < 0 and loss_at_step_1 <= best_overall_needle_loss:
+                          if gtd_at_step_1 <= 0 and loss_at_step_1 <= best_overall_needle_loss:
                               print(f"  Loss reduced at step 1.0 for norm order {needle_norm_order:.2f}. Exploring larger steps.")
                               # Update overall best with step 1.0 result
                               best_overall_needle_loss = loss_at_step_1
@@ -1431,7 +1436,7 @@ class FBFGS(Optimizer):
                                       # No need to update needle_loss_reduced here, it's already True
 
                                   # Check the continuation condition: Armijo holds
-                                  armijo_holds = current_loss_at_step <= loss_baseline_for_step_increase + c1 * current_step_t * gtd_at_step_1
+                                  armijo_holds = current_loss_at_step <= loss_baseline_for_step_increase + c1 * current_step_t.to("cuda") * gtd_at_step_1.to("cuda")
 
                                   if armijo_holds:
                                       # Armijo holds, try larger step
@@ -1475,14 +1480,19 @@ class FBFGS(Optimizer):
                       gc.collect()
 
                   print("\033[91mLinesearch failure, resetting..\033[0m")
+                  torch.cuda.empty_cache()
+                  gc.collect()
                   # If needle search also failed to reduce loss, reset history
                   ls_failed = True
               else: # Line search succeeded
                   ls_failed = False
 
-              if ls_failed and Needle == False: # If line search failed and needle was not triggered
+#              if ls_failed and Needle == False: # If line search failed and needle was not triggered
+              if ls_failed : # If line search failed and needle was not triggered
                   flat_grad = prev_flat_grad
                   prev_flat_grad = None
+                  torch.cuda.empty_cache()
+                  gc.collect()
               else:
                   self.t = t
           if not ls_failed: # If line search was successful
