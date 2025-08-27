@@ -760,6 +760,164 @@ class FBFGS(Optimizer):
 
         return loss, flat_grad
 
+    def _needle_search(self, closure, initial_loss, initial_flat_grad, first_param_device):
+        """
+        Performs a needle search to find the maximum step size that reduces loss,
+        prioritizing lower-order norms. It stops when a norm order fails to find
+        a step size as large as the previous successful order.
+
+        Args:
+            closure (Callable): A closure that reevaluates the model and returns the loss.
+            initial_loss (float): The loss value before starting the needle search.
+            initial_flat_grad (torch.Tensor): The flattened gradient before starting the needle search.
+            first_param_device (torch.device): The device of the first parameter.
+
+        Returns:
+            Tuple[float, Optional[torch.Tensor], Optional[torch.Tensor]]:
+                A tuple containing:
+                - The best loss found.
+                - The best direction (as a dense tensor) that achieved that loss.
+                - The best step size that achieved that loss.
+                Returns (initial_loss, None, None) if no reducing step is found.
+        """
+        best_loss_found = initial_loss
+        best_direction = None
+        best_step_size = torch.tensor(0.0, dtype=initial_flat_grad.dtype, device=first_param_device)
+        best_norm_order_achieved = float('inf') # Track the smallest norm order that achieved a reduction
+
+        c1 = self.param_groups[0]["c1"] # Armijo constant
+
+        # Track the maximum step size achieved by the last norm order that found a non-zero step.
+        # This is used for the early exit condition.
+        max_step_size_from_last_successful_order = torch.tensor(0.0, dtype=initial_flat_grad.dtype, device=first_param_device)
+        found_any_successful_step_in_any_order = False # Flag to prevent early exit on the very first failure
+        step_size_reduction_threshold = 0.75 # Hyperparameter: how much smaller is "too small" for early exit
+
+        # Iterate through norm orders (e.g., L1, L0.7, L0.4, L0.1, L0)
+        # Start from L1 (ord=1.0) and decrease. Go slightly below 0 to include L0-like behavior.
+        for current_norm_order_float in torch.arange(1.0, -0.1, -0.3):
+            current_norm_order = max(0.0, current_norm_order_float.item()) # Ensure norm order is non-negative
+
+            print(f"  Needle norm order: {current_norm_order:.2f}", end=' ')
+
+            d_candidate = initial_flat_grad.neg().clone()
+            current_norm = torch.linalg.vector_norm(d_candidate, ord=current_norm_order)
+
+            # Initialize max_step_size_for_this_order for the current norm order iteration
+            max_step_size_for_this_order = torch.tensor(0.0, dtype=initial_flat_grad.dtype, device=first_param_device)
+
+            if current_norm < 1e-9: # Avoid division by zero or tiny norms
+                print(f" (Norm too small for order {current_norm_order:.2f}, skipping)")
+                # If this order found no step, and we've had a successful step before, check early exit
+                if found_any_successful_step_in_any_order and \
+                   max_step_size_for_this_order < max_step_size_from_last_successful_order * step_size_reduction_threshold:
+                    print(f"  Early exit: Current norm order {current_norm_order:.2f} found no step, which is smaller than {max_step_size_from_last_successful_order:.4f} * {step_size_reduction_threshold:.2f}.")
+                    break # Break outer loop (norm order iteration)
+                continue # Skip to next norm order
+
+            d_candidate.div_(current_norm)
+
+            # Try an initial step size of 1.0
+            current_t = torch.tensor(1.0, dtype=initial_flat_grad.dtype, device=first_param_device)
+            loss_at_t1, grad_at_t1 = self._directional_evaluate(closure, current_t, d_candidate)
+            gtd_at_t1 = (grad_at_t1 * d_candidate).sum()
+
+            print(f"  Step size 1.0, Loss: {loss_at_t1:.4f}, GTD: {gtd_at_t1:.4f}")
+
+            # Condition for a valid initial step: descent direction and loss reduction compared to initial_loss
+            is_valid_initial_step = (gtd_at_t1 <= 0 and loss_at_t1 < initial_loss)
+
+            if is_valid_initial_step:
+                # Update best candidate if this is better (prioritizing min norm, then max step, then min loss)
+                if current_norm_order < best_norm_order_achieved or \
+                   (current_norm_order == best_norm_order_achieved and current_t > best_step_size) or \
+                   (current_norm_order == best_norm_order_achieved and current_t == best_step_size and loss_at_t1 < best_loss_found):
+                    best_loss_found = loss_at_t1
+                    best_direction = d_candidate.clone()
+                    best_step_size = current_t.clone()
+                    best_norm_order_achieved = current_norm_order
+                max_step_size_for_this_order = current_t.clone() # Update max step for this order
+                found_any_successful_step_in_any_order = True
+
+                # Now, try increasing step size (e.g., doubling) as long as Armijo holds and loss reduces
+                temp_t = current_t * 2.0
+                while True:
+                    if temp_t > 1e10: # Safeguard against unbounded step size
+                        print(f"    Step size {temp_t:.4f} exceeded max limit, stopping step increase.")
+                        break
+
+                    temp_loss, _ = self._directional_evaluate(closure, temp_t, d_candidate)
+                    # Ensure c1, temp_t, and gtd_at_t1 are on the same device for Armijo condition
+                    armijo_holds = temp_loss <= loss_at_t1 + c1 * temp_t.to(initial_flat_grad.device) * gtd_at_t1.to(initial_flat_grad.device)
+
+                    print(f"    Trying step size {temp_t:.4f}, Loss: {temp_loss:.4f}, Armijo: {armijo_holds}")
+
+                    if armijo_holds and temp_loss < initial_loss: # Check against initial_loss for overall reduction
+                        # Update best candidate if this step is better
+                        if current_norm_order < best_norm_order_achieved or \
+                           (current_norm_order == best_norm_order_achieved and temp_t > best_step_size) or \
+                           (current_norm_order == best_norm_order_achieved and temp_t == best_step_size and temp_loss < best_loss_found):
+                            best_loss_found = temp_loss
+                            best_direction = d_candidate.clone()
+                            best_step_size = temp_t.clone()
+                            best_norm_order_achieved = current_norm_order
+                        max_step_size_for_this_order = temp_t.clone() # Update max step for this order
+                        temp_t *= 2.0
+                    else:
+                        break # Armijo failed or loss increased (or no overall reduction)
+            else:
+                # If initial step (t=1.0) is not valid, max_step_size_for_this_order remains 0.0
+                if gtd_at_t1 > 0:
+                    print(f"  Step size 1.0 is not a descent direction (GTD >= 0) for norm order {current_norm_order:.2f}. Skipping step increase.")
+                else:
+                    print(f"  Step size 1.0 is a descent direction (GTD < 0) but did not reduce overall loss for norm order {current_norm_order:.2f}. Skipping step increase.")
+
+            # --- Early Exit Condition Check ---
+            # Only check if we've found at least one successful step in a previous order
+            if found_any_successful_step_in_any_order and \
+               max_step_size_for_this_order < max_step_size_from_last_successful_order * step_size_reduction_threshold:
+                print(f"  Early exit: Current norm order {current_norm_order:.2f} achieved max step {max_step_size_for_this_order:.4f}, which is smaller than {max_step_size_from_last_successful_order:.4f} * {step_size_reduction_threshold:.2f}.")
+                break # Break the outer loop (norm order iteration)
+
+            # Update max_step_size_from_last_successful_order for the next iteration
+            # Only update if this order actually found a non-zero step
+            if max_step_size_for_this_order > 0:
+                max_step_size_from_last_successful_order = max_step_size_for_this_order.clone()
+
+        # Clean up temporary tensors
+        del initial_flat_grad
+        if d_candidate is not None: del d_candidate
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        return best_loss_found, best_direction, best_step_size
+
+
+    @torch.no_grad()
+    def step(self, closure):
+        # Save current parameters to CPU
+        original_params_cpu = [p.detach().clone().cpu() for p in self._params]
+#        original_params_cpu = [p.pin_memory() for p in original_params_cpu]
+        # Apply step: x_new = x_old + t * d
+        offset = 0
+        for p in self._params:
+            numel = p.numel()
+            if torch.is_complex(p):
+                p_view = torch.view_as_real(p).view(-1)
+            else:
+                p_view = p.view(-1)
+            p_view.add_(d[offset : offset + numel].to(p.device), alpha=t)
+            offset += numel
+
+        loss = float(closure())
+        flat_grad = self._gather_flat_grad()
+
+        # Restore original parameters from CPU
+        for p, original_p_cpu in zip(self._params, original_params_cpu): # type: ignore[possibly-undefined]
+            p.copy_(original_p_cpu.to(p.device))
+
+        return loss, flat_grad
+
     @torch.jit.script
     def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str,t: float, clop: float, norm: float, y_norm: float) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
@@ -1330,7 +1488,6 @@ class FBFGS(Optimizer):
                   )
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
-              Needle = False
               if not success:  # TODO: we chase misprinted lines
                   # Line search failed. Remove the largest rho entry from history.
                   if len(ro) > 0:
@@ -1338,144 +1495,249 @@ class FBFGS(Optimizer):
                       ro_with_indices = [(r.item(), i) for i, r in enumerate(ro)]
                       # Sort by value in descending order
                       ro_with_indices.sort(key=lambda x: x[0], reverse=True)
-
                       # Determine how many to remove (up to 10)
                       num_to_remove = min(10, len(ro_with_indices))
-
                       # Get the original indices of the top N largest values, sorted descending
                       indices_to_remove = sorted([idx for val, idx in ro_with_indices[:num_to_remove]], reverse=True)
-
                       removed_count = 0
                       for i in indices_to_remove:
                           old_dirs.pop(i)
                           old_stps.pop(i)
                           ro.pop(i)
                           removed_count += 1
-
                       if removed_count > 0:
                           print(f"Removed {removed_count} largest rho entries from history. New history size: {len(ro)}")
                       else:
                           print("No rho entries found to remove.")
-#TODO: Needle is supposed to find the largest step size for the smallest norm (numel). This needs a bit of a rework.
-                  if ls_failed: # TODO: we chase misprinted lines
-#                      return orig_loss # Skip data point if line search failed and needle subroutine would be triggered
-                      t = 1  # Reset t to 1 for after needling
-                      # TODO: instead of topk, iteratively reduce the norm order and check if loss is reducing or equivalent then increase step size until loss doesnt reduce and repeat
-                      # TODO: if we cant decrease at all, we skip the data point, currently loss can increase here.
-                      best_overall_needle_loss = prev_loss  # Initialize best_overall_needle_loss (loss before needle)
-                      print("saddle-search subroutine..")
-                      Needle = True
-                      # Capture the negative gradient once before the outer loop # Use the flat_grad from before line search (captured before the main line search attempt)
-                      initial_neg_grad = flat_grad.neg().clone()
 
-                      best_overall_d_needle = None  # Store the direction that achieved the best overall loss
-                      best_overall_t = torch.tensor(0.0, dtype=first_param.dtype, device=first_param.device) # Store the step size that achieved the best overall loss
+                  print("\033[91mLinesearch failure, attempting needle search..\033[0m")
+                  torch.cuda.empty_cache()
+                  gc.collect()
 
-                      needle_norm_order = 1.  # Start with L1 norm - 0.3
+                  # Parameters are already restored to x_old by _directional_evaluate
+                  # So, loss_before_ls and flat_grad_before_ls are the correct starting points for needle.
+                  best_loss_from_needle, best_d_from_needle, best_t_from_needle = self._needle_search(
+                      closure, loss_before_ls, flat_grad_before_ls, first_param.device
+                  )
 
-                      needle_loss_reduced = False  # Flag to track if needle reduced loss
-                      # Outer loop: Decrease norm order until overall loss is reduced or underflow
-                      while not needle_loss_reduced and needle_norm_order >= 0:  # Continue until overall reduction or norm order invalid
-                          # Start with the initial negative gradient and normalize it
-                          d_needle = initial_neg_grad.clone()
-                          print(f"  Needle norm order: {needle_norm_order:.2f}", end=' ')
-                          print(f"  Needle norm order: {needle_norm_order:.2f}", end=' ')
-                          current_norm = torch.linalg.vector_norm(d_needle, ord=needle_norm_order)
+                  if best_d_from_needle is not None:
+                      # Apply the best step found by needle search
+                      self._add_grad(best_t_from_needle, best_d_from_needle)
+                      loss = best_loss_from_needle # Update main loss with needle's best
+                      print(f" \n -----------Applied needle step with size: {best_t_from_needle:.4f} and final loss: \033[92m{loss}\033[0m-----------")
+                      ls_failed = False # Needle succeeded
+                  else:
+                      print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
+                      ls_failed = True # Needle also failed
+                      return orig_loss # Return original loss if needle also failed
+              else: # Strong Wolfe line search succeeded
+                  ls_failed = False
 
-                          if current_norm < 1e-9 or needle_norm_order < 0:  # Break outer loop if norm too small or order negative
-                              print("Needle norm too small or order negative, breaking outer loop.")
-                              break
-                          d_needle.div_(current_norm)
+              if not ls_failed: # If line search (or needle) was successful
+                  # Ensure t and d are on the correct device (cuda:0) for _add_grad
+                  t = t.to("cuda")
+                  d = d.to("cuda")
+                  self._add_grad(t, d)
+                  loss_device = d.device
+                  print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
+                  # opt_cond = loss <= 0 # This condition is not used later, can be removed if not needed elsewhere
 
-                          # --- Inner Loop Starts Here ---
-                          # Evaluate loss and gradient at step 1.0 for this norm order (initial step)
-                          current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for this norm order iteration
-                          # current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop
-                          # current_step_t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)  # Start step size for inner loop
-                          loss_at_step_1, grad_at_step_1 = self._directional_evaluate(closure, current_step_t, d_needle)
-                          gtd_at_step_1 = (grad_at_step_1.to("cuda") * d_needle.to("cuda")).sum()
-                          loss_baseline_for_step_increase = loss_at_step_1
+          # update func eval
+          current_evals += ls_func_evals
+#          state["func_evals"] += ls_func_evals
 
-                          print(f"  Step size 1.0 with norm order {needle_norm_order:.2f}, Loss: {loss_at_step_1}, GTD: {gtd_at_step_1}")
+          ############################################################
+          # check conditions
+          ############################################################
+#          if n_iter == max_iter or loss == 0:
+#              break
 
-                          # Check if step 1.0 is a descent direction and improved the overall best loss found so far
-                          if gtd_at_step_1 <= 0 and loss_at_step_1 <= best_overall_needle_loss:
-                              print(f"  Loss reduced at step 1.0 for norm order {needle_norm_order:.2f}. Exploring larger steps.")
-                              # Update overall best with step 1.0 result
-                              best_overall_needle_loss = loss_at_step_1
-                              best_overall_d_needle = d_needle.clone()  # Store the normalized direction
-                              best_overall_t = current_step_t.clone()  # Store the step size (1.0)
-                              needle_loss_reduced = True  # Mark that we've found at least one reduction
+#          if current_evals >= max_eval:
+#              break
 
-                              # Now, try increasing step size starting from 2.0 (if initial step was successful)
-                              current_step_t = torch.tensor(2.0, dtype=first_param.dtype, device=first_param.device)
+          # optimal condition
+#          if opt_cond:
+#              print("GRAD CONVERGE")
+#              break
 
-                              while True:  # Inner loop: Iteratively increase step size
-                                  # Add a safeguard against unbounded step size before applying
-                                  if current_step_t > 1e10:  # Arbitrary large number, could be a hyperparameter
-                                      print(f"    Step size {current_step_t:.4f} exceeded max limit, stopping step increase.")
-                                      break  # Break inner loop
+          # lack of progress
+#          if d.mul(t).abs().max() <= tolerance_change:
+#              break
+#
+#          if abs(loss - prev_loss) < tolerance_change:
+#              break
 
-                                  # Apply step
-                                  # We need to evaluate at x_init_needle + current_step_t * d_needle
-                                  # _directional_evaluate handles adding/removing the step and evaluating closure
-                                  # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature.
-                                  # It also returns the gradient at the new point, which we don't currently use here, but it's part of the function signature. (redundant comment)
-                                  current_loss_at_step, _ = self._directional_evaluate(closure, current_step_t, d_needle)
-                                  # Evaluate loss at the new point # Evaluate loss # Evaluate loss # Evaluate loss # Evaluate loss
-                                  # Evaluate loss
-                                  # Undo step
-                                  print(f"    Trying step size {current_step_t:.4f} with norm order {needle_norm_order:.2f}, Loss: {current_loss_at_step}")
+#      state["d"] = d
+#      state["t"] = t
+      state["old_dirs"] = old_dirs
+      state["d"] = d
+      state["old_stps"] = old_stps
+      state["ro"] = ro
+#      state["H_diag"] = H_diag
+      state["prev_flat_grad"] = prev_flat_grad
+#      state["prev_loss"] = prev_loss
+#      state["n_iter"] = 0 #TODO: MoE equivalent centinuous sparse model using l1 with novel direction per iteration, if we reuse the hessian and there is sparsity the curvature will bias to a lopsided model but is appropriate for l2
 
-                                  # Check if this step improved the overall best loss
-                                  if current_loss_at_step < best_overall_needle_loss:
-                                      best_overall_needle_loss = current_loss_at_step
-                                      best_overall_d_needle = d_needle.clone()  # Store the normalized direction
-                                      best_overall_t = current_step_t.clone()  # Store the step size
-                                      needle_loss_reduced = True  # Set overall success flag
-                                      # No need to update needle_loss_reduced here, it's already True
+      return orig_loss
 
-                                  # Check the continuation condition: Armijo holds
-                                  armijo_holds = current_loss_at_step <= loss_baseline_for_step_increase + c1 * current_step_t.to("cuda") * gtd_at_step_1.to("cuda")
+    def save_history(self, filename):
+        """Save FBFGS history to a file."""
+        state = self.state[self._params[0]]
+        state_dict = self.state[self._params[0]]
+        history = {
+            "old_dirs": state_dict.get("old_dirs", []),
+            "old_stps": state_dict.get("old_stps", []),
+            "ro": state_dict.get("ro", []),
+            "d": state_dict.get("d", None), # Save direction d
+            "prev_flat_grad": state_dict.get("prev_flat_grad", None),
+            "flat_grad": state_dict.get("flat_grad", None), # Save flat_grad
+            "H_diag": state_dict.get("H_diag", None), # Save H_diag
+            "t": self.t, # Save step size t
+            "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
+        }
+        torch.save(history, filename)
 
-                                  if armijo_holds:
-                                      # Armijo holds, try larger step
-                                      current_step_t *= 2  # Increase step size (e.g., double)
-                                  else:
-                                      # Armijo failed, stop increasing step size for this norm order
-                                      print(f"    Armijo failed for norm order {needle_norm_order:.2f}, stopping step increase.")
-                                      break  # Break inner loop
-                                  # --- Inner Loop Ends Here ---
-                          elif gtd_at_step_1 > 0:
-                              # Step 1.0 is not a descent direction for this norm order.
-                              print(f"  Step size 1.0 is not a descent direction (GTD >= 0) for norm order {needle_norm_order:.2f}. Skipping step increase.")
-                              # No inner loop for step increase if not a descent direction.
-                          else:
-                              # Step 1.0 is a descent direction (GTD < 0) but did not reduce overall loss.
-                              print(f"  Step size 1.0 is a descent direction (GTD < 0) but increased overall loss for norm order {needle_norm_order:.2f}. Skipping step increase.")
-                              # No inner loop for step increase if step 1.0 didn't reduce overall loss.
+    def _move_item_to_device(self, item, device_obj, non_blocking=False):
+        if item is None:
+            return None
+        if isinstance(item, SparseFlatTensor):
+            return item.to(device=device_obj, non_blocking=non_blocking)
+        else: # torch.Tensor
+            return item.to(device=device_obj, dtype=item.dtype, non_blocking=non_blocking)
 
-                          # After inner loop (or if skipped), reduce norm order for the next outer iteration
-                          needle_norm_order -= 0.3  # type: ignore[operator]
+    def load_history(self, filename):
+        """Load FBFGS history from a file."""
+        try:
+            # Determine map_location for torch.load to prevent initial GPU OOM if history is large
+            load_map_location = 'cpu' if self.direction_device == 'cpu' else None
+            history = torch.load(filename, map_location=load_map_location)
+            state = self.state[self._params[0]]
+            device = self.direction_device # Get the device of the model parameters
+            # Convert string device to torch.device object for JIT compatibility
+            device_obj = torch.device(device)
 
-                      if needle_loss_reduced:
-                          # Apply the best step found only if loss was reduced (needle succeeded)
-                          self._add_grad(best_overall_t, best_overall_d_needle)  # Use the best step size and best direction
-                          loss = best_overall_needle_loss  # Update the main loss
-                          print(f" \n -----------Applied needle step with size: {best_overall_t:.4f} and final loss: \033[92m{loss}\033[0m-----------")
-                          ls_failed = False  # Needle succeeded in reducing loss
-                      else:
-                          # Needle failed to reduce loss, skip the step
-                          print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
-                          # Parameters remain at x_init_needle (which is the state before needle)
-                          ls_failed = True  # Indicate that no successful step was found # This line is redundant as we return
-                          return orig_loss
-#                      del prev_flat_grad
-                      del initial_neg_grad
-                      if best_overall_d_needle is not None: del best_overall_d_needle
-                      if best_overall_t is not None: del best_overall_t
-                      del d_needle  # d_needle is cloned inside the loop, but the last one might persist
-                      # del x_init_needle # x_init_needle is no longer used (commented out)
+            # Use list comprehensions for history lists
+            state["old_dirs"] = [self._move_item_to_device(item, device_obj, non_blocking=False)
+                                 for item in history.get("old_dirs", [])]
+            state["old_stps"] = [self._move_item_to_device(item, device_obj, non_blocking=False)
+                                 for item in history.get("old_stps", [])]
+            state["ro"] = [self._move_item_to_device(item, device_obj, non_blocking=False)
+                           for item in history.get("ro", [])]
+
+            # Directly assign and move single tensors
+            state["prev_flat_grad"] = self._move_item_to_device(history.get("prev_flat_grad", None), device_obj, non_blocking=False)
+            state["flat_grad"] = self._move_item_to_device(history.get("flat_grad", None), device_obj, non_blocking=False)
+            state["H_diag"] = self._move_item_to_device(history.get("H_diag", None), device_obj, non_blocking=False)
+            state["d"] = self._move_item_to_device(history.get("d", None), device_obj, non_blocking=False)
+
+            t_val = history.get("t", 1) # Load step size t, default to 1 if not found
+            if isinstance(t_val, torch.Tensor):
+                self.t = t_val.item()
+            else:
+                self.t = t_val
+            state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
+
+            print(f"FBFGS history loaded from {filename}")
+        except FileNotFoundError:
+            print(f"History file {filename} not found. Starting from scratch.")
+        except Exception as e:
+            print(f"Error loading FBFGS history from {filename}: {e}. Starting from scratch.")
+
+    def _compute_direction(self, n_iter, flat_grad, prev_flat_grad, d, t, old_dirs, old_stps, ro, loss, state):
+        """Compute the L-BFGS search direction."""
+        if n_iter == 1:
+            print("RESET")
+            d = flat_grad.neg().to("cuda") # Move to calculation device
+            H_diag = torch.tensor(1.0).to("cuda") # Move to calculation device
+            t = 1
+            gc.collect()
+        else:
+            torch.cuda.empty_cache()
+            flat_grad = flat_grad.to("cuda") # Move flat_grad to calculation device
+            if prev_flat_grad is not None:
+                prev_flat_grad = prev_flat_grad.to("cuda") # Move prev_flat_grad to calculation device
+            y = flat_grad.sub(prev_flat_grad)
+            s = (d.mul(t)).to("cuda") # Move s to calculation device
+            ys = (y * s).sum()
+
+            if ys > 1e-32:
+                if torch.device("cuda").type == 'cuda' and torch.cuda.is_available(): # Use torch.device("cuda").type
+                    try:
+                        cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
+                        print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {self.history_size} GB")
+                        while cuda_memory_allocated >= self.history_size:
+                            cuda_memory_allocated = torch.cuda.memory_allocated(device=torch.device('cuda')) / 1000000000
+                            old_dirs.pop(0)
+                            old_stps.pop(0)
+                            ro.pop(0)
+                    except Exception as e:
+                        print(f"CUDA memory check failed: {e}. Falling back to psutil.")
+                elif torch.device("cuda").type == 'cpu': # Use torch.device("cuda").type
+                    try:
+                        cpu_ram_available = psutil.virtual_memory().available / (1024**3)
+                        print(f"CPU RAM available: {cpu_ram_available} GB, history_size: {self.history_size} GB")
+                        while cpu_ram_available <= self.history_size:
+                            cpu_ram_available = psutil.virtual_memory().available / (1024**3)
+                            old_dirs.pop(0)
+                            old_stps.pop(0)
+                            ro.pop(0)
+                    except Exception as e:
+                        print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
+                print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
+                torch.cuda.empty_cache()
+
+                if self.clop != 0:
+                  y_sparse = y.to_sparse()
+                y_sparse = y.to(self.direction_device) # Store on direction_device (CPU if direction_device='cpu')
+                if self.clop != 0:
+                  old_dirs.append(y_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
+                else:
+                  old_dirs.append(y_sparse) # Store on direction_device (CPU if direction_device='cpu')
+                if self.clop != 0:
+                  old_stps.append(s_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
+                else:
+                  old_stps.append(s_sparse) # Store on direction_device (CPU if direction_device='cpu')
+#                s_sparse = s.to_sparse().to(self.direction_device) # Store on direction_device (CPU if direction_device='cpu')
+#                old_stps.append(s_sparse.coalesce()) # Store on direction_device (CPU if direction_device='cpu')
+                ro.append(torch.tensor([(1.0 / ys)], device=self.direction_device)) # Store on direction_device (CPU if direction_device='cpu')
+
+                y_squared = (y * y).sum()
+                H_diag = ys / y_squared
+                del y_squared
+            else:
+                H_diag = torch.tensor(1.0).to("cuda") # Default H_diag if ys is too small
+
+
+            # Prepare history tensors for direction_approximate calculation on calculation device
+            old_dirs_calc_device = [h.to("cuda") for h in old_dirs]
+            old_stps_calc_device = [s.to("cuda") for s in old_stps]
+            ro_calc_device = [r.to("cuda") for r in ro]
+            flat_grad_calc_device = flat_grad.to("cuda")
+            H_diag_calc_device = H_diag.to("cuda")
+
+
+            d = self.direction_approximate(old_stps_calc_device, old_dirs_calc_device, ro_calc_device, flat_grad_calc_device, H_diag_calc_device,  clop=self.clop, norm=norm)
+            torch.cuda.empty_cache()
+            del H_diag
+
+        if prev_flat_grad is None:
+            prev_flat_grad = flat_grad
+        else:
+            prev_flat_grad = flat_grad
+
+        total_norm = torch.linalg.vector_norm(d.coalesce().values(), ord=norm).to("cuda") # Norm on calculation device
+        d.div_(total_norm)
+
+        direction_values = d.coalesce().values()
+        mask = torch.logical_and(direction_values > -self.clop, direction_values < self.clop)
+        direction_values[mask] = 0
+        print("direction elements: " + str((direction_values != 0).sum()) + " total: " + str(d.numel()), end=' ')
+        indices = d.coalesce().indices()
+        valid_indices_mask = direction_values != 0
+        valid_indices = indices[:, valid_indices_mask]
+        d = torch.sparse_coo_tensor(valid_indices, direction_values[valid_indices_mask], d.size()).coalesce().to(first_param.device) # Move d back to parameter device
+
+        return d, t, H_diag, old_dirs, old_stps, ro, prev_flat_grad, prev_loss
                       torch.cuda.empty_cache()
                       gc.collect()
 
