@@ -959,8 +959,6 @@ class FBFGS(Optimizer):
                 )
                 direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item() 
 #TODO: what if we did the opposite to prevent qmax from blowing up?
-#                aligned = direction_similarity/ro[i].item() >= similarity  or direction_similarity/ro[i].item() <= -similarity
-#                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
 #                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
 #TODO: this is correct, but can we do better? possibly make it so this isnt tunable? currently it allows for tuning such that we get fast or slow convergence which is a plus but we can possibly solve this so we get the most delayed convergence which may be ideal.
                 aligned = direction_similarity <= similarity  and direction_similarity >= -similarity
@@ -969,7 +967,6 @@ class FBFGS(Optimizer):
                 if direction_alignment_mask[i]:
 #                  similarity = similarity + similarity/max(1, direction_similarity) #TODO: fix this, it should scale based on the difference
 #                  similarity = 2*similarity 
-#                  similarity = 1.2*similarity
                   al[i] = direction_similarity * ro[i].item()
                   sparse_old_dir_scaled = SparseFlatTensor(
                       current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
@@ -987,7 +984,6 @@ class FBFGS(Optimizer):
 #TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
 #TODO: it may be better to crash out on NaN
 #        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32) # Handle NaN/Inf
-#TODO: pretty sure Michael wants Hessian scaling back but I have a lot of reasons for l2 norming here instead (early convergence, 0 shot training etc.) However, with orthoganalized delayed convergence this may be sufficient to easily tune perpetual training without rho rewind resetting..
 #        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32)#.to("cuda")
 #        q.div_(total_norm)
         d = q.mul(H_diag.to(torch.float32))
