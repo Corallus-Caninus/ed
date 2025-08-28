@@ -876,6 +876,7 @@ class FBFGS(Optimizer):
                     print(f"  Step size 1.0 is not a descent direction (GTD >= 0) for norm order {current_norm_order:.2f}. Skipping step increase.")
                 else:
                     print(f"  Step size 1.0 is a descent direction (GTD < 0) but did not reduce overall loss for norm order {current_norm_order:.2f}. Skipping step increase.")
+                continue # If loss doesn't reduce, go to the next norm order
 
             # --- Early Exit Condition Check ---
             # Only check if we've found at least one successful step in a previous order
