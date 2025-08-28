@@ -817,6 +817,11 @@ class FBFGS(Optimizer):
 
             d_candidate.div_(current_norm)
 
+            # Explicit check for zero vector after normalization
+            if d_candidate.abs().max() < 1e-9:
+                print(f" (Normalized direction became zero for order {current_norm_order:.2f}, skipping)")
+                continue
+
             # Try an initial step size of 1.0
             current_t = torch.tensor(1.0, dtype=initial_flat_grad.dtype, device=first_param_device)
             loss_at_t1, grad_at_t1 = self._directional_evaluate(closure, current_t, d_candidate)
