@@ -1488,6 +1488,7 @@ class FBFGS(Optimizer):
                       # Apply the best step found by needle search
                       self._add_grad(best_t_from_needle, best_d_from_needle)
                       loss = best_loss_from_needle # Update main loss with needle's best
+                      t = best_t_from_needle # Update t with the best step size from needle search
                       print(f" \n -----------Applied needle step with size: {best_t_from_needle:.4f} and final loss: \033[92m{loss}\033[0m-----------")
                       ls_failed = False # Needle succeeded
                   else:
