@@ -934,17 +934,14 @@ class FBFGS(Optimizer):
 
         q = flat_grad.to(torch.float32).to(direction_device).neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to(direction_device)
-#        total_norm = max(1e-9, total_norm) # Ensure total_norm is not too small
         print("q max value: " + str(q.max()))
         if total_norm == float('inf') or total_norm == 0: # Handle inf or zero norm
-#          total_norm = torch.tensor(1e-9, dtype=torch.float32, device="cuda") # Fallback for inf norm
           print("pre-direction l2 norm returned inf")
         q = q.div_(total_norm)
 
         al = torch.empty(num_old, dtype=q.dtype, device=direction_device)
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
 
-#TODO: only prefetch for CPU
         if num_old > 0:
             # Prefetch the first element for the backward loop
 #TODO: we may want to allow a buffer for latency/throughput tuning for various PCIE/accelerator configurations.
@@ -954,7 +951,6 @@ class FBFGS(Optimizer):
                 torch.cuda.synchronize() # Ensure current_sparse_dir is ready
                 current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
 
-#TODO: stand up a buffer of the next 4 entries and pin them (they will be copied so we can del gc the copies to minimize fragmentation, essentially a custom pin scratchpad like pytorch uses
                 if i > 0: #(Supercharger)
                     next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device(direction_device), non_blocking=True) # Initiate prefetch for next iteration
 
@@ -964,9 +960,7 @@ class FBFGS(Optimizer):
                     current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
                 )
                 direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item() 
-#TODO: what if we did the opposite to prevent qmax from blowing up?
 #                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
-#TODO: this is correct, but can we do better? possibly make it so this isnt tunable? currently it allows for tuning such that we get fast or slow convergence which is a plus but we can possibly solve this so we get the most delayed convergence which may be ideal.
                 aligned = direction_similarity <= similarity  and direction_similarity >= -similarity
 #                aligned = direction_similarity <= similarity  and direction_similarity >= -similarity
                 direction_alignment_mask[i] = aligned
@@ -979,21 +973,16 @@ class FBFGS(Optimizer):
                       current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
                   ) * ((-al[i]))
                   q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
-    #              total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to("cuda")
-    #              q.div_(total_norm)
-    #TODO: try l2 here again? The original reasoning was this breaks the math since division of a term isnt distributive
                   hit_miss = hit_miss + str("| ")
                 else:
                   hit_miss = hit_miss + str("_ ")
 
         print("q max value: " + str(q.max()))
-#TODO: test this. we are taking a pragmatic appoarch to the observation that direction blows up on convergence but I think we need to slow down convergence e.g.: by taking rho on the l2 instead of orienting rho to the raw gradient/curvature
-#TODO: it may be better to crash out on NaN
-#        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32) # Handle NaN/Inf
 #        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32)#.to("cuda")
 #        q.div_(total_norm)
+
+#        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32) # Handle NaN/Inf
         d = q.mul(H_diag.to(torch.float32))
-#        d = q
         del q
 
         if num_old > 0:
@@ -1021,9 +1010,6 @@ class FBFGS(Optimizer):
                       current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
                   ) * (alpha_val)
                   d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
-#TODO: try removing normalization from only second loop
-#              total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to("cuda")
-#              d.div_(total_norm)
 
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         print(hit_miss)
@@ -1034,7 +1020,6 @@ class FBFGS(Optimizer):
         d = d.to(torch.float16)
         mask = torch.logical_and(d > -clop, d < clop)
         d[mask] = 0
-#        d = d.mul_(total_norm)
 #        print("direction elements: " + str((d != 0).sum()) )
         print("total_norm: " + str(total_norm))
         del mask
