@@ -1442,6 +1442,8 @@ class FBFGS(Optimizer):
                   def obj_func(t_step, d_direction):
                       return self._directional_evaluate(closure, t_step, d_direction)
 
+                  loss_before_ls = loss
+                  flat_grad_before_ls = flat_grad
                   gc.collect()
                   prev_loss = loss
 
