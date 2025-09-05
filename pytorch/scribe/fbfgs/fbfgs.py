@@ -953,9 +953,6 @@ class FBFGS(Optimizer):
                   hit_miss = hit_miss + str("_ ")
 
         print("q max value: " + str(q.max()))
-#        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32)#.to("cuda")
-#        q.div_(total_norm)
-
 #        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32) # Handle NaN/Inf
         d = q.mul(H_diag.to(torch.float32))
         del q
