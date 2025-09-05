@@ -1,0 +1,1 @@
+OMP_NUM_THREADS=12 && TORCH_NUM_THREADS=12 && PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True" CUDA_VISIBLE_DEVICES=0,1 python AI.py #| tee LOG.txt
