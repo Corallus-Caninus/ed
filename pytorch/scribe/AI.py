@@ -282,9 +282,8 @@ while True:
 
         current_num_tokens = input_ids.size(1)
 
-#TODO: gradually increase the context length over time.
-        # Truncate to 2000 tokens if longer
-        max_len_global = 2000
+        # Truncate to a random size between 200 and 2000 tokens if longer
+        max_len_global = random.randint(200, 2000)
         if current_num_tokens > max_len_global:
             start_idx = random.randint(0, current_num_tokens - max_len_global)
             input_ids = input_ids[:, start_idx : start_idx + max_len_global]
