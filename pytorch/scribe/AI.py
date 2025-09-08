@@ -145,14 +145,7 @@ else:
 batch_train = None
 
 # Initialize optimizer *after* ensuring lora_params is correctly populated
-# NOTE: mathematically optimized wolfe condition for exponential decay
-#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.15, norm=1., clop=1e-9, c1=1e-1, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-#optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1., clop=1e-9, c1=1e-8, c2=0.9, bracket_shove = 1/3)
-#optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1.05, clop=0., c1=1e-3, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1.05, clop=0., c1=1e-7, c2=0.1,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-8, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.2, norm=1., clop=1e-9, c1=1e-9, c2=0.9,direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-#optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=0.5, c2=(0.9),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
 
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
@@ -239,6 +232,7 @@ def closure(): # Define closure here, outside the if block
     return outputs.loss
 
 
+#TODO: save model, indices and fbfgs to the same directory. Consolidate the datasets indices with the model data.
 while True:
     cache = None  # Reset cache at the start of each iteration
     dataset_shuffled_indices = list(range(dataset_size)) # Reshuffle indices at the start of each epoch
@@ -289,7 +283,7 @@ while True:
         current_num_tokens = input_ids.size(1)
 
 #TODO: gradually increase the context length over time.
-        # Truncate to 4000 tokens if longer
+        # Truncate to 2000 tokens if longer
         max_len_global = 2000
         if current_num_tokens > max_len_global:
             start_idx = random.randint(0, current_num_tokens - max_len_global)
@@ -300,7 +294,7 @@ while True:
 
         # Warmup period truncation
         max_warmup_length = 200
-        if len(seen_indices) < 999999999999 and current_num_tokens > max_warmup_length:
+        if len(seen_indices) < 25 and current_num_tokens > max_warmup_length:
             start_idx = random.randint(0, current_num_tokens - max_warmup_length)
             input_ids = input_ids[:, start_idx : start_idx + max_warmup_length]
             attention_mask = attention_mask[:, start_idx : start_idx + max_warmup_length]
