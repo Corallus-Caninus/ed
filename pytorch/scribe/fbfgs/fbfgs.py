@@ -962,6 +962,7 @@ class FBFGS(Optimizer):
             next_old_dir_prefetch_fwd: SparseFlatTensor = old_dirs[0].to(torch.device(direction_device), non_blocking=True)
             next_old_stp_prefetch_fwd: SparseFlatTensor = old_stps[0].to(torch.device(direction_device), non_blocking=True)
 
+#TODO: we should iterate the aligned loop to save some memcpysyncs
             for i in range(num_old):
                 torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
                 current_old_dir_val = torch.jit.annotate(SparseFlatTensor, next_old_dir_prefetch_fwd)
@@ -1486,7 +1487,7 @@ class FBFGS(Optimizer):
                       self._add_grad(best_t_from_needle, best_d_from_needle)
                       loss = best_loss_from_needle # Update main loss with needle's best
                       t = best_t_from_needle # Update t with the best step size from needle search
-                      prev_flat_grad = None # Force gradient descent on next iteration
+                      prev_flat_grad = None # Force gradient descent on next iteration #TODO: we should do the direction since this is essentially the gradient descent iteration. We need to make memory ops efficient so we can calculate direction
                       print(f" \n -----------Applied needle step with size: {best_t_from_needle:.4f} and final loss: \033[92m{loss}\033[0m-----------")
                       ls_failed = False # Needle succeeded
                   else:
