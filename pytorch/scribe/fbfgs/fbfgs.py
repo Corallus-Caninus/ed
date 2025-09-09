@@ -1450,50 +1450,11 @@ class FBFGS(Optimizer):
                   )
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
-              if not success:  # TODO: we chase misprinted lines
-                  # Line search failed. Remove the largest rho entry from history.
-                  if len(ro) > 0:
-                      # Get (value, original_index) pairs
-                      ro_with_indices = [(r.item(), i) for i, r in enumerate(ro)]
-                      # Sort by value in descending order
-                      ro_with_indices.sort(key=lambda x: x[0], reverse=True)
-                      # Determine how many to remove (up to 10)
-                      num_to_remove = min(10, len(ro_with_indices))
-                      # Get the original indices of the top N largest values, sorted descending
-                      indices_to_remove = sorted([idx for val, idx in ro_with_indices[:num_to_remove]], reverse=True)
-                      removed_count = 0
-                      for i in indices_to_remove:
-                          old_dirs.pop(i)
-                          old_stps.pop(i)
-                          ro.pop(i)
-                          removed_count += 1
-                      if removed_count > 0:
-                          print(f"Removed {removed_count} largest rho entries from history. New history size: {len(ro)}")
-                      else:
-                          print("No rho entries found to remove.")
-
-                  print("\033[91mLinesearch failure, attempting needle search..\033[0m")
-                  torch.cuda.empty_cache()
-                  gc.collect()
-
-                  # Parameters are already restored to x_old by _directional_evaluate
-                  # So, loss_before_ls and flat_grad_before_ls are the correct starting points for needle.
-                  best_loss_from_needle, best_d_from_needle, best_t_from_needle = self._needle_search(
-                      closure, loss_before_ls, flat_grad_before_ls, first_param.device
-                  )
-
-                  if best_d_from_needle is not None:
-                      # Apply the best step found by needle search
-                      self._add_grad(best_t_from_needle, best_d_from_needle)
-                      loss = best_loss_from_needle # Update main loss with needle's best
-                      t = best_t_from_needle # Update t with the best step size from needle search
-                      prev_flat_grad = None # Force gradient descent on next iteration #TODO: we should do the direction since this is essentially the gradient descent iteration. We need to make memory ops efficient so we can calculate direction
-                      print(f" \n -----------Applied needle step with size: {best_t_from_needle:.4f} and final loss: \033[92m{loss}\033[0m-----------")
-                      ls_failed = False # Needle succeeded
-                  else:
-                      print(f" \n -----------Needle subroutine failed to reduce loss. Skipping step.-----------")
-                      ls_failed = True # Needle also failed
-                      return orig_loss # Return original loss if needle also failed
+              if not success:
+                  print("\033[91mLinesearch failure, forcing gradient search on next iteration.\033[0m")
+                  prev_flat_grad = None # Force gradient search on next iteration
+                  ls_failed = True # Mark line search as failed
+                  return orig_loss # Skip this data point
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
 
