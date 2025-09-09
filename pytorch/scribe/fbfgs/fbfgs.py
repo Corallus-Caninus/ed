@@ -1451,8 +1451,8 @@ class FBFGS(Optimizer):
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
               if not success:
-                  print("\033[91mLinesearch failure, forcing gradient search on next iteration.\033[0m")
-                  prev_flat_grad = None # Force gradient search on next iteration
+                  print("\033[91mLinesearch failure, Rho rewind and skip.\033[0m")
+#                  prev_flat_grad = None # Force gradient search on next iteration
                   ls_failed = True # Mark line search as failed
                   return orig_loss # Skip this data point
               else: # Strong Wolfe line search succeeded
