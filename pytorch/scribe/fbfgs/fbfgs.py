@@ -1145,7 +1145,7 @@ class FBFGS(Optimizer):
       first_param = next(self.param_groups[0]['params'].__iter__())
       t = torch.tensor(1.0, dtype=first_param.dtype, device=first_param.device)
       ls_failed = False
-      # optimize for a max of max_iter iterations
+      ls_failed = state.get("ls_failed", False) # Retrieve ls_failed state
 #TODO: we arent storing the last iteration in history. Consider reworking the last iteration logic for step function
 #      while n_iter < max_iter:
       while True:
@@ -1177,6 +1177,7 @@ class FBFGS(Optimizer):
 #                if self.clop == 0: # Check if clopping is disabled
 #                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
 #                else:
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cuda", t=t, clop=self.clop, norm=norm, y_norm = y_norm, ls_failed=ls_failed)
                 d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cuda", t=t, clop=self.clop, norm=norm, y_norm = y_norm, ls_failed=ls_failed)
               else:
                 d = self._gather_flat_grad().neg().to("cuda") # Ensure d is on cuda
@@ -1399,6 +1400,7 @@ class FBFGS(Optimizer):
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
 #              else:
               d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cuda", t=t, clop=self.clop, norm=norm, y_norm=y_norm, ls_failed=ls_failed)
+              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device="cuda", t=t, clop=self.clop, norm=norm, y_norm=y_norm, ls_failed=ls_failed)
               gc.collect()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               torch.cuda.empty_cache() # Clear CUDA cache
@@ -1458,10 +1460,12 @@ class FBFGS(Optimizer):
 #TODO: or we could simply set similarity as a momentum like factor for convergence. Possibly even scaling it by the gradient gtd convergence metric with a scalar coefficient hyperparameter.
 #TODO: Actually Rho Rewind.. or not?
 #                  prev_flat_grad = None # Force gradient search on next iteration
-                  ls_failed = True # Mark line search as failed
+                  ls_failed = True
+                  state["ls_failed"] = True # Store ls_failed state
                   return orig_loss # Skip this data point
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
+                  state["ls_failed"] = False # Store ls_failed state
 
               if not ls_failed: # If line search (or needle) was successful
                   # Ensure t and d are on the correct device (cuda:0) for _add_grad
@@ -1505,6 +1509,7 @@ class FBFGS(Optimizer):
       state["ro"] = ro
 #      state["H_diag"] = H_diag
       state["prev_flat_grad"] = prev_flat_grad
+      state["ls_failed"] = ls_failed # Store ls_failed state
 #      state["prev_loss"] = prev_loss
 #      state["n_iter"] = 0 #TODO: MoE equivalent centinuous sparse model using l1 with novel direction per iteration, if we reuse the hessian and there is sparsity the curvature will bias to a lopsided model but is appropriate for l2
 
@@ -1523,6 +1528,7 @@ class FBFGS(Optimizer):
             "flat_grad": state_dict.get("flat_grad", None), # Save flat_grad
             "H_diag": state_dict.get("H_diag", None), # Save H_diag
             "t": self.t, # Save step size t
+            "ls_failed": state_dict.get("ls_failed", False), # Save ls_failed state
             "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
         }
         torch.save(history, filename)
@@ -1567,6 +1573,7 @@ class FBFGS(Optimizer):
                 self.t = t_val
             state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
 
+            state["ls_failed"] = history.get("ls_failed", False) # Load ls_failed state
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
