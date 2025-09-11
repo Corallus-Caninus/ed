@@ -1452,6 +1452,9 @@ class FBFGS(Optimizer):
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
               if not success:
                   print("\033[91mLinesearch failure, Rho rewind and skip.\033[0m")
+#TODO: consider Rho rewind as a parameter passed into direction approximate that temporarily ignores the top N rho entries, similar to similarity (Since similarity no longer considers the al rho scaled term just q curvature)
+#TODO: or we could simply set similarity as a momentum like factor for convergence. Possibly even scaling it by the gradient gtd convergence metric with a scalar coefficient hyperparameter.
+#TODO: Actually Rho Rewind.. or not?
 #                  prev_flat_grad = None # Force gradient search on next iteration
                   ls_failed = True # Mark line search as failed
                   return orig_loss # Skip this data point
