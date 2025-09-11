@@ -950,6 +950,9 @@ class FBFGS(Optimizer):
                       current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
                   ) * ((-al[i]))
                   q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
+                  q_norm = torch.linalg.vector_norm(q, ord=2.)
+                  if q_norm > 0:
+                      q = q.div_(q_norm)
                   hit_miss = hit_miss + str("| ")
                 else:
                   hit_miss = hit_miss + str("_ ")
