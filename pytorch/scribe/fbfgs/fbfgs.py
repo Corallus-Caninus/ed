@@ -1353,6 +1353,9 @@ class FBFGS(Optimizer):
                 old_stps.append(s.to(self.direction_device, non_blocking=False, pin_memory=False)) # Store s as SparseFlatTensor #TODO: pinme
 # TODO: if we fixed the memory error, reintroduce pinned memory here
                 ro.append(torch.tensor([(1. / ys)])) #TODO: pinme
+              else:
+                ls_failed = True
+                state["ls_failed"] = True
               if n_iter > max_iter or loss == 0:
                 state["old_stps"] = old_stps
                 state["ro"] = ro
