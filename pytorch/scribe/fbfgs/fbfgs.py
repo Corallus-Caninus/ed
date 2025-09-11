@@ -904,7 +904,7 @@ class FBFGS(Optimizer):
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
         hit_miss = str("")
-        similarity = 1e-2 if ls_failed else 0.0
+        similarity = 1e-2 if ls_failed else 1.
         # Similarity threshold
 
 #        similarity = 0.
