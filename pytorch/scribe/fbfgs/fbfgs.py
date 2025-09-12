@@ -1466,6 +1466,28 @@ class FBFGS(Optimizer):
               if not success:
                   print("\033[91mLinesearch failure, Rho rewind and skip.\033[0m")
 #TODO: consider Rho rewind as a parameter passed into direction approximate that temporarily ignores the top N rho entries, similar to similarity (Since similarity no longer considers the al rho scaled term just q curvature)
+# Remove 10 largest rho entries from history if line search fails
+                  if len(ro) > 0:
+                      # Convert list of 1-element tensors to a single tensor for sorting
+                      ro_values = torch.tensor([r.item() for r in ro], device=self.direction_device)
+                      num_to_remove = min(10, len(ro_values))
+                      # Get indices of the largest values
+                      _, indices_to_remove_tensor = torch.topk(ro_values, num_to_remove, largest=True)
+                      indices_to_remove = set(indices_to_remove_tensor.tolist())
+
+                      new_old_dirs = []
+                      new_old_stps = []
+                      new_ro = []
+                      for i in range(len(ro)):
+                          if i not in indices_to_remove:
+                              new_old_dirs.append(old_dirs[i])
+                              new_old_stps.append(old_stps[i])
+                              new_ro.append(ro[i])
+
+                      old_dirs[:] = new_old_dirs
+                      old_stps[:] = new_old_stps
+                      ro[:] = new_ro
+                      print(f"  Removed {num_to_remove} largest rho entries due to line search failure.")
 #TODO: or we could simply set similarity as a momentum like factor for convergence. Possibly even scaling it by the gradient gtd convergence metric with a scalar coefficient hyperparameter.
 #TODO: Actually Rho Rewind.. or not?
 #                  prev_flat_grad = None # Force gradient search on next iteration
