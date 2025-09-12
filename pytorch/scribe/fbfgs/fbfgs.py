@@ -964,31 +964,35 @@ class FBFGS(Optimizer):
         del q
 
         if num_old > 0:
-            # Prefetch the first elements for the forward loop
-            next_old_dir_prefetch_fwd: SparseFlatTensor = old_dirs[0].to(torch.device(direction_device), non_blocking=True)
-            next_old_stp_prefetch_fwd: SparseFlatTensor = old_stps[0].to(torch.device(direction_device), non_blocking=True)
+            aligned_indices = torch.nonzero(direction_alignment_mask).squeeze(1)
+            if aligned_indices.numel() > 0:
+                # Prefetch the first aligned element
+                first_aligned_idx = aligned_indices[0]
+                next_old_dir_prefetch_fwd: SparseFlatTensor = old_dirs[first_aligned_idx].to(torch.device(direction_device), non_blocking=True)
+                next_old_stp_prefetch_fwd: SparseFlatTensor = old_stps[first_aligned_idx].to(torch.device(direction_device), non_blocking=True)
 
-#TODO: we should iterate the aligned loop to save some memcpysyncs
-            for i in range(num_old):
-                torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
-                current_old_dir_val = torch.jit.annotate(SparseFlatTensor, next_old_dir_prefetch_fwd)
-                current_old_stp_val = torch.jit.annotate(SparseFlatTensor, next_old_stp_prefetch_fwd)
-                if i < num_old - 1:
-                    next_old_dir_prefetch_fwd = old_dirs[i + 1].to(torch.device(direction_device), non_blocking=True)
-                    next_old_stp_prefetch_fwd = old_stps[i + 1].to(torch.device(direction_device), non_blocking=True)
+                for k in range(aligned_indices.numel()):
+                    i = aligned_indices[k] # Get the original index
+                    torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
+                    current_old_dir_val = torch.jit.annotate(SparseFlatTensor, next_old_dir_prefetch_fwd)
+                    current_old_stp_val = torch.jit.annotate(SparseFlatTensor, next_old_stp_prefetch_fwd)
 
-                if direction_alignment_mask[i]:
-                  old_dir_for_dense = SparseFlatTensor( # Use current_old_dir_val, which is prefetched
-                      current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32), # type: ignore[arg-type]
-                      current_old_dir_val.total_size, current_old_dir_val.unit_indices, current_old_dir_val.unit_values.to(dtype=torch.float32)
-                  )
-                  dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
-                  alpha_val = al[i] - dot_product_val * ro[i].item()
-                  sparse_old_stp_scaled = SparseFlatTensor( # Use current_old_stp_val, which is prefetched
-                      current_old_stp_val.starts, current_old_stp_val.ends, current_old_stp_val.values.to(dtype=torch.float32),
-                      current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
-                  ) * (alpha_val)
-                  d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
+                    if k < aligned_indices.numel() - 1:
+                        next_aligned_idx = aligned_indices[k + 1]
+                        next_old_dir_prefetch_fwd = old_dirs[next_aligned_idx].to(torch.device(direction_device), non_blocking=True)
+                        next_old_stp_prefetch_fwd = old_stps[next_aligned_idx].to(torch.device(direction_device), non_blocking=True)
+
+                    old_dir_for_dense = SparseFlatTensor(
+                        current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32), # type: ignore[arg-type]
+                        current_old_dir_val.total_size, current_old_dir_val.unit_indices, current_old_dir_val.unit_values.to(dtype=torch.float32)
+                    )
+                    dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
+                    alpha_val = al[i] - dot_product_val * ro[i].item()
+                    sparse_old_stp_scaled = SparseFlatTensor(
+                        current_old_stp_val.starts, current_old_stp_val.ends, current_old_stp_val.values.to(dtype=torch.float32),
+                        current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
+                    ) * (alpha_val)
+                    d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
 
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         print(hit_miss)
