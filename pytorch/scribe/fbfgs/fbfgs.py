@@ -1230,8 +1230,7 @@ class FBFGS(Optimizer):
 
               original_y_dtype = y_dense.dtype # Store original dtype
 #TODO: we may not need y_dense_float32 now
-#              y_dense_float32 = y_dense.to(torch.float32)
-              y_dense_float32 = y_dense.copy()
+              y_dense_float32 = y_dense.clone()
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
 #              norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
