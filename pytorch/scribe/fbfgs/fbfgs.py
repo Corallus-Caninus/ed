@@ -1229,13 +1229,15 @@ class FBFGS(Optimizer):
               ys = y_dense.dot(s_dense)
 
               original_y_dtype = y_dense.dtype # Store original dtype
-              y_dense_float32 = y_dense.to(torch.float32)
+#TODO: we may not need y_dense_float32 now
+#              y_dense_float32 = y_dense.to(torch.float32)
+              y_dense_float32 = y_dense.copy()
               norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
 #              norm_y_dense = torch.linalg.vector_norm(y_dense_float32, ord=2.)
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
 #              norm_y_dense = max(1e-9, norm_y_dense)
               y_dense_float32.div_(norm_y_dense) 
-              norm_s = torch.linalg.vector_norm(s_dense, ord=2.)
+#              norm_s = torch.linalg.vector_norm(s_dense, ord=2.)
 #TODO: try without norming d now that we have decent alpha deflection
 #              ys = y_dense_float32.dot(s_dense.div(norm_s).to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
 #              ys = y_dense_float32.dot(s_dense.to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
@@ -1244,6 +1246,7 @@ class FBFGS(Optimizer):
 #              ys = 100*ys #I hate everything about this.. at least make it max(1, 100-len(old_dirs))..
               torch.cuda.empty_cache() # Clear cache
 
+#TODO: this kinda throws off selection but also makes it independent of s which may be useful. Note here we may want to do this after the initial selection.
               s_mask = (s_dense != 0)
               ys_dense = y_dense.clone()
               ys_dense[~s_mask] = 0
@@ -1251,12 +1254,12 @@ class FBFGS(Optimizer):
               #Shotgun noise
               norm_y = torch.linalg.vector_norm(y_dense_float32, ord=y_norm)
               y_dense_float32.div_(norm_y)
-              if self.clop != 0:
-                  y_dense_mask = torch.logical_and(y_dense_float32 > -self.clop, y_dense_float32 < self.clop)
-                  y_dense_float32[y_dense_mask] = 0
-                  del y_dense_mask
-              y_mask = y_dense_float32 != 0
-              y_dense[~y_mask] = 0
+#              if self.clop != 0:
+              y_dense_mask = torch.logical_and(y_dense_float32 >= -self.clop, y_dense_float32 <= self.clop)
+#              y_dense_float32[y_dense_mask] = 0
+#              y_mask = y_dense_float32 != 0
+              y_dense[y_dense_mask] = 0
+              del y_dense_mask
               del y_dense_float32 # Delete temporary float32 tensor
 
 #              s_mask = (s_dense != 0)
@@ -1285,6 +1288,7 @@ class FBFGS(Optimizer):
               del ys_dense
               del ys_mask
               del y_mask
+              del s_mask
               torch.cuda.empty_cache()
               gc.collect() # Collect garbage
 
