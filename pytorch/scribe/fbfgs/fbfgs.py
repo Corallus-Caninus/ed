@@ -1251,14 +1251,13 @@ class FBFGS(Optimizer):
               #Shotgun noise
               norm_y = torch.linalg.vector_norm(y_dense_float32, ord=y_norm)
               y_dense_float32.div_(norm_y)
-              y_dense.copy_(y_dense_float32.to(original_y_dtype))
-              del y_dense_float32 # Delete temporary float32 tensor
-              # Apply clopping to y_dense
               if self.clop != 0:
-                  y_dense_mask = torch.logical_and(y_dense > -self.clop, y_dense < self.clop)
-                  y_dense[y_dense_mask] = 0
+                  y_dense_mask = torch.logical_and(y_dense_float32 > -self.clop, y_dense_float32 < self.clop)
+                  y_dense_float32[y_dense_mask] = 0
                   del y_dense_mask
-              y_dense.mul_(norm_y)
+              y_mask = y_dense_float32 != 0
+              y_dense[~y_mask] = 0
+              del y_dense_float32 # Delete temporary float32 tensor
 
 #              s_mask = (s_dense != 0)
 #              ys_dense = y_dense.clone()
