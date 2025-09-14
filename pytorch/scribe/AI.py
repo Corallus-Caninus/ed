@@ -172,10 +172,8 @@ def closure(): # Define closure here, outside the if block
   total_loss_sum = 0. # Initialize a sum for all chunk losses
   start_time = time.time()
   i = 0
-  torch.cuda.empty_cache()
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
-    torch.cuda.empty_cache()
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
     chunk_size=200 #1000
     cache=None
@@ -213,8 +211,8 @@ def closure(): # Define closure here, outside the if block
   #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
   
 
-      gc.collect()
-      torch.cuda.empty_cache()
+#      gc.collect()
+#      torch.cuda.empty_cache()
 
       print(f"Cache position: {num_tokens - grad_vector_size}")
       outputs = model(input_ids[:, -grad_vector_size:], attention_mask=attention_mask[:, -grad_vector_size:],labels = input_ids[:, -grad_vector_size:], cache_params = cache, cache_position=torch.tensor([num_tokens - grad_vector_size]))
