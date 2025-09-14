@@ -164,11 +164,11 @@ dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for no
 batch_input_ids_list = [] # Initialize batch_input_ids_list as a global variable
 batch_attention_mask_list = [] # Initialize batch_attention_mask_list as a global variable
 cache = None # Initialize cache here
+outputs = None # Initialize outputs here
 def closure(): # Define closure here, outside the if block
   global batch_input_ids_list # Declare batch_input_ids_list as global
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
   global cache # Declare cache as global
-  global outputs # Declare outputs as global
   total_loss= 0
   total_loss_sum = 0. # Initialize a sum for all chunk losses
   start_time = time.time()
