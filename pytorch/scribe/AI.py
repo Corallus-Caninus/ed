@@ -161,14 +161,13 @@ dataset_shuffled_indices = list(range(dataset_size)) # Shuffle indices for each 
 current_dataset_filename = dataset_filename # Define current dataset filename
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
-cache = None # Initialize cache here
 batch_input_ids_list = [] # Initialize batch_input_ids_list as a global variable
 batch_attention_mask_list = [] # Initialize batch_attention_mask_list as a global variable
+cache = None # Initialize cache here
 def closure(): # Define closure here, outside the if block
   global batch_input_ids_list # Declare batch_input_ids_list as global
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
-#TODO: keep cache global the allocation is costly each iteration
-#  global cache
+  global cache # Declare cache as global
   total_loss= 0
   total_loss_sum = 0. # Initialize a sum for all chunk losses
   start_time = time.time()
@@ -180,7 +179,6 @@ def closure(): # Define closure here, outside the if block
 #TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
     chunk_size=200 #1000
     cache=None
-#NOTE: with peft we may be able to scale this arbitrarily as long as we arent adapting the context also embedding layers
 #TODO we may need to debug this.
     grad_vector_size = 200 #5
     grad_chunk_size = 50
@@ -188,7 +186,6 @@ def closure(): # Define closure here, outside the if block
     num_steps = 0
     avg_loss = 0.
     cache_position = None
-#    if num_tokens == chunk_size+1:
 #      chunk_size += 1
     if chunk_size > 0 :
       for i in range(0, num_tokens - grad_vector_size, chunk_size):
@@ -233,7 +230,7 @@ def closure(): # Define closure here, outside the if block
 
 
 #TODO: save model, indices and fbfgs to the same directory. Consolidate the datasets indices with the model data.
-while True:
+while True: # Main training loop
     cache = None  # Reset cache at the start of each iteration
     dataset_shuffled_indices = list(range(dataset_size)) # Reshuffle indices at the start of each epoch
     random.shuffle(dataset_shuffled_indices) # Reshuffle
