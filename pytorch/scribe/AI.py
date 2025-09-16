@@ -279,7 +279,7 @@ while True: # Main training loop
         current_num_tokens = input_ids.size(1)
 
         # Truncate to a random size between 200 and 2000 tokens if longer
-        max_len_global = random.randint(200, 2000)
+        max_len_global = random.randint(400, 5000)
         if current_num_tokens > max_len_global:
             start_idx = random.randint(0, current_num_tokens - max_len_global)
             input_ids = input_ids[:, start_idx : start_idx + max_len_global]
