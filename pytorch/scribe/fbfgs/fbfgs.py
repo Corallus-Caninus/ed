@@ -1508,6 +1508,7 @@ class FBFGS(Optimizer):
                   loss_device = d.device
                   print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
                   # opt_cond = loss <= 0 # This condition is not used later, can be removed if not needed elsewhere
+                  self.t = t.item() # Update self.t with the successful step size
 
           # update func eval
           current_evals += ls_func_evals
