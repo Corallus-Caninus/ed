@@ -146,6 +146,37 @@ class SparseFlatTensor:
             result_dense_tensor.view(-1)[sparse_tensor.unit_indices] += sparse_tensor.unit_values
 
         return result_dense_tensor
+    def _add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor) -> Tensor:
+        """
+        Adds a SparseFlatTensor to a dense tensor in-place, including unit indices.
+
+        Args:
+            sparse_tensor (SparseFlatTensor): The sparse tensor to add.
+            dense_tensor (Tensor): The dense tensor to add to.
+
+        Returns:
+            Tensor: The dense result of the addition.
+        """
+        dense_tensor = dense_tensor_arg # Explicitly use dense_tensor_arg
+        assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
+
+        # Process segments
+        if sparse_tensor.starts.numel() > 0:
+            segment_lengths = sparse_tensor.ends - sparse_tensor.starts
+            segment_indices_offsets = torch.repeat_interleave(sparse_tensor.starts, segment_lengths)
+            indices = torch.arange(segment_lengths.sum(), device=sparse_tensor.starts.device)
+            segment_lengths_cumsum = segment_lengths.cumsum(0)
+            start_indices = torch.cat([torch.tensor([0], device=sparse_tensor.starts.device), segment_lengths_cumsum[:-1]])
+            segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
+            segment_internal_indices = indices - start_indices[segment_ids]
+            segment_indices = segment_indices_offsets + segment_internal_indices
+            dense_tensor.view(-1)[segment_indices] += sparse_tensor.values
+
+        # Process unit indices
+        if sparse_tensor.unit_indices.numel() > 0:
+            dense_tensor.view(-1)[sparse_tensor.unit_indices] += sparse_tensor.unit_values
+
+        return dense_tensor
 
     @staticmethod
     def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
@@ -812,7 +843,7 @@ class FBFGS(Optimizer):
                       current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
                       current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
                   ) * ((-al[i]))
-                  q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
+                  q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)#TODO: test the in place operation to avoid a likely non-DCE'd clone
                   q_norm = torch.linalg.vector_norm(q, ord=2.)
                   if q_norm > 0:
                       q = q.div_(q_norm)
@@ -854,7 +885,7 @@ class FBFGS(Optimizer):
                         current_old_stp_val.starts, current_old_stp_val.ends, current_old_stp_val.values.to(dtype=torch.float32),
                         current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
                     ) * (alpha_val)
-                    d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
+                    d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)#TODO: test the in place operation to avoid a likely non-DCE'd clone
 
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         print(hit_miss)
