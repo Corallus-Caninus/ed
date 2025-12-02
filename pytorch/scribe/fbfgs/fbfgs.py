@@ -740,12 +740,6 @@ class FBFGS(Optimizer):
     def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
         offset = 0
         for p in self._params:
-#TODO we need to just add logging and fix this so we dont NaN brick the model on evaluation.
-#TODO: was >=
-#TODO: >= should be correct since we dont apply the NaN slice
-            if limit_offset != -1 and offset >= limit_offset:
-                break # Stop processing if we've reached or passed the limit_offset
-
             if torch.is_complex(p):
                 p = torch.view_as_real(p)
             numel = p.numel()
@@ -757,19 +751,24 @@ class FBFGS(Optimizer):
             if slice_numel <= 0:
                 offset += numel
                 continue
+            
+            # Apply update to parameter p_view
+            if isinstance(update, SparseFlatTensor):
+                # For sparse updates, use the dedicated function
+                # step_size acts as the alpha parameter here
+                # Note: _add_sparse_dense_alpha modifies the dense tensor passed to it.
+                # We pass p.view(-1) which is the flattened parameter.
+                SparseFlatTensor._add_sparse_dense_alpha(update, p.view(-1), alpha=step_size)
+            else:
+                # For dense updates, use in-place add_
+                view = update[offset : offset + slice_numel].to(p.device)
+                # Get the slice of the parameter tensor directly
+                p_slice = p.view(-1)[0:slice_numel] 
+                
+                # Use in-place add_ and remove NaN check/clone logic
+                # This directly modifies p_slice, which is a view into p.view(-1)
+                p_slice.add_(view.view_as(p_slice), alpha=step_size)
 
-            view = update[offset : offset + slice_numel].to(p.device)
-            p_flat = p.view(-1)
-            p_slice = p_flat[0:slice_numel]
-
-            p_temp = p_slice.add(view.view_as(p_slice), alpha=step_size)
-            if torch.isnan(p_temp).any():
-                del p_temp
-                torch.cuda.empty_cache()
-                return offset # Return the offset where NaN was found
-            p_slice.copy_(p_temp) # Only copy if no NaN
-            del p_temp
-            torch.cuda.empty_cache()
             offset += numel
         return self._numel() # Return total numel if no NaN
 
