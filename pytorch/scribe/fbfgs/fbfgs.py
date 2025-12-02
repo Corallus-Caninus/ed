@@ -1354,7 +1354,7 @@ class FBFGS(Optimizer):
           # normalize the Hessian's direction #TODO: try scaling the Hessian approximation instead of the resultant direction. Can also try to normalize y s and ys in theory inv Hessian computation can overflow (or even underflow) with large history sizes
 #TODO: should we be iterating each tensor for norm like in flat_grad?
 #          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
-#          d = d.to_sparse() # Convert to sparse here, before topk (if needed)
+          d = d.to_sparse() 
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
           ############################################################
