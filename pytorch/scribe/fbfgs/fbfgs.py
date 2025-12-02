@@ -185,6 +185,39 @@ class SparseFlatTensor:
         return result_dense_tensor
 
     @staticmethod
+    def _add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor) -> Tensor:
+        """
+        Adds a SparseFlatTensor to a dense tensor in-place.
+
+        Args:
+            sparse_tensor (SparseFlatTensor): The sparse tensor to add.
+            dense_tensor_arg (Tensor): The dense tensor to add to. This tensor will be modified.
+
+        Returns:
+            Tensor: The modified dense tensor (dense_tensor_arg).
+        """
+        assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
+        
+        # Process segments
+        if sparse_tensor.starts.numel() > 0:
+            segment_lengths = sparse_tensor.ends - sparse_tensor.starts
+            segment_indices_offsets = torch.repeat_interleave(sparse_tensor.starts, segment_lengths)
+            indices = torch.arange(segment_lengths.sum(), device=sparse_tensor.starts.device)
+            segment_lengths_cumsum = segment_lengths.cumsum(0)
+            start_indices = torch.cat([torch.tensor([0], device=sparse_tensor.starts.device), segment_lengths_cumsum[:-1]])
+            segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
+            segment_internal_indices = indices - start_indices[segment_ids]
+            segment_indices = segment_indices_offsets + segment_internal_indices
+            # No alpha scaling here
+            dense_tensor_arg.view(-1)[segment_indices] += sparse_tensor.values # In-place modification
+
+        # Process unit indices
+        if sparse_tensor.unit_indices.numel() > 0:
+            # No alpha scaling here
+            dense_tensor_arg.view(-1)[sparse_tensor.unit_indices] += sparse_tensor.unit_values # In-place modification
+        return dense_tensor_arg
+
+    @staticmethod
     def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
         """
         Computes the dot product of a SparseFlatTensor with a dense tensor, optimized for sparsity and unit indices.
