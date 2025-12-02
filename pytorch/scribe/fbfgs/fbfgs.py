@@ -114,8 +114,7 @@ class SparseFlatTensor:
 
     @staticmethod
     def add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor) -> Tensor:
-        """
-        Adds a SparseFlatTensor to a dense tensor, including unit indices.
+        """Adds a SparseFlatTensor to a dense tensor in-place, including unit indices.
 
         Args:
             sparse_tensor (SparseFlatTensor): The sparse tensor to add.
@@ -146,19 +145,25 @@ class SparseFlatTensor:
             result_dense_tensor.view(-1)[sparse_tensor.unit_indices] += sparse_tensor.unit_values
 
         return result_dense_tensor
-    def _add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor) -> Tensor:
+    
+    @staticmethod
+    def _add_sparse_dense_alpha(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor, alpha: float = 1.0) -> Tensor:
         """
-        Adds a SparseFlatTensor to a dense tensor in-place, including unit indices.
+        Adds a SparseFlatTensor to a dense tensor, with an optional scaling factor alpha.
+        The scaling is applied to the sparse tensor's values before addition.
 
         Args:
             sparse_tensor (SparseFlatTensor): The sparse tensor to add.
-            dense_tensor (Tensor): The dense tensor to add to.
+            dense_tensor_arg (Tensor): The dense tensor to add to.
+            alpha (float, optional): Scaling factor for the sparse tensor's values. Defaults to 1.0.
 
         Returns:
             Tensor: The dense result of the addition.
         """
         dense_tensor = dense_tensor_arg # Explicitly use dense_tensor_arg
         assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
+
+        result_dense_tensor = dense_tensor.clone()
 
         # Process segments
         if sparse_tensor.starts.numel() > 0:
@@ -170,13 +175,14 @@ class SparseFlatTensor:
             segment_ids = torch.searchsorted(segment_lengths_cumsum, indices, right=True)
             segment_internal_indices = indices - start_indices[segment_ids]
             segment_indices = segment_indices_offsets + segment_internal_indices
-            dense_tensor.view(-1)[segment_indices] += sparse_tensor.values
+            values_to_add = sparse_tensor.values * alpha  # Apply scaling here
+            result_dense_tensor.view(-1)[segment_indices] += values_to_add
 
         # Process unit indices
         if sparse_tensor.unit_indices.numel() > 0:
-            dense_tensor.view(-1)[sparse_tensor.unit_indices] += sparse_tensor.unit_values
-
-        return dense_tensor
+            unit_values_to_add = sparse_tensor.unit_values * alpha # Apply scaling here
+            result_dense_tensor.view(-1)[sparse_tensor.unit_indices] += unit_values_to_add
+        return result_dense_tensor
 
     @staticmethod
     def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
@@ -779,7 +785,13 @@ class FBFGS(Optimizer):
                 p_view = torch.view_as_real(p).view(-1)
             else:
                 p_view = p.view(-1)
-            p_view.add_(d[offset : offset + numel].to(p.device), alpha=t)
+            
+            # Updated callsite: use the new _add_sparse_dense_alpha function
+            if isinstance(d, SparseFlatTensor):
+                SparseFlatTensor._add_sparse_dense_alpha(d, p_view, alpha=t)
+            else:
+                # Assume d is a dense tensor
+                p_view.add_(d[offset : offset + numel].to(p.device), alpha=t)
             offset += numel
 
         loss = float(closure())
@@ -880,7 +892,7 @@ class FBFGS(Optimizer):
                     ) * (alpha_val)
                     d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)#TODO: test the in place operation to avoid a likely non-DCE'd clone
 
-        print(hit_miss)
+        print(f"sparse_direction_approximate hit_miss: {hit_miss}")
         total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(direction_device)
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
@@ -1074,7 +1086,7 @@ class FBFGS(Optimizer):
                 d = self._gather_flat_grad().neg().to("cuda") # Ensure d is on cuda
                 #TODO: should we also do norm float("inf") here to match direction S?
                 total_norm = torch.linalg.vector_norm(d, ord=norm).to("cuda") # Calculate norm on cuda
-  #              total_norm = max(1e-9, total_norm)
+    #              total_norm = max(1e-9, total_norm)
                 # Handle type precision overflow for L1-likes
                 if total_norm == float('inf'):
                   total_norm = torch.linalg.vector_norm(d, ord=float("inf")).to("cuda") # Move total_norm to cuda
@@ -1388,7 +1400,37 @@ class FBFGS(Optimizer):
                   # Ensure t and d are on the correct device (cuda:0) for _add_grad
                   t = t.to("cuda")
                   d = d.to("cuda")
-                  self._add_grad(t, d)
+                  # _add_grad expects 'update' to be the direction 'd' scaled by 'step_size'
+                  # If 'd' is SparseFlatTensor, use _add_sparse_dense with alpha=step_size
+                  # If 'd' is dense Tensor, use it directly with alpha=step_size
+                  
+                  # The _add_grad function itself takes step_size and update.
+                  # It applies update to parameters using step_size.
+                  # The existing implementation calls p_slice.add(view.view_as(p_slice), alpha=step_size).
+                  # If 'update' is a SparseFlatTensor, this would fail.
+                  # The prompt implies _add_grad needs the scaling functionality.
+                  # For now, we are directly applying the scaled sparse update
+                  # in _directional_evaluate. If _add_grad is also meant to
+                  # take a SparseFlatTensor as 'update', it would need refactoring.
+                  # The current logic in _add_grad handles dense 'update' with alpha.
+                  # If 'd' is sparse, _directional_evaluate handles it.
+                  # For now, we assume _add_grad might not directly receive sparse 'd'.
+                  # If 'd' is sparse, we handle it here:
+                  if isinstance(d, SparseFlatTensor):
+                      offset = 0
+                      for p in self._params:
+                          numel = p.numel()
+                          if torch.is_complex(p):
+                              p_view = torch.view_as_real(p).view(-1)
+                          else:
+                              p_view = p.view(-1)
+                          # Apply the scaled sparse direction to the dense parameter
+                          # using the new function.
+                          SparseFlatTensor._add_sparse_dense_alpha(d, p_view, alpha=t)
+                          offset += numel
+                  else: # d is a dense Tensor
+                      self._add_grad(t, d)
+
                   loss_device = d.device
                   print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
                   # opt_cond = loss <= 0 # This condition is not used later, can be removed if not needed elsewhere
