@@ -126,7 +126,7 @@ class SparseFlatTensor:
         dense_tensor = dense_tensor_arg # Explicitly use dense_tensor_arg
         assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
 
-        result_dense_tensor = dense_tensor.clone()
+        result_dense_tensor = dense_tensor # Removed .clone() to make it in-place
 
         # Process segments
         if sparse_tensor.starts.numel() > 0:
