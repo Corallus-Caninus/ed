@@ -798,10 +798,8 @@ class FBFGS(Optimizer):
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 1e-2
-#        similarity = 1e-2 if ls_failed else 1.
         # Similarity threshold
 
-#        similarity = 0.
 
         q = flat_grad.to(torch.float32).to(direction_device).neg()
         total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to(direction_device)
@@ -831,13 +829,9 @@ class FBFGS(Optimizer):
                     current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
                 )
                 direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item() 
-#                aligned = direction_similarity >= similarity  or direction_similarity <= -similarity
                 aligned = direction_similarity <= similarity  and direction_similarity >= -similarity
-#                aligned = direction_similarity <= similarity  and direction_similarity >= -similarity
                 direction_alignment_mask[i] = aligned
                 if direction_alignment_mask[i]:
-#                  similarity = similarity + similarity/max(1, direction_similarity) #TODO: fix this, it should scale based on the difference
-#                  similarity = 2*similarity 
                   al[i] = direction_similarity * ro[i].item()
                   sparse_old_dir_scaled = SparseFlatTensor(
                       current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
@@ -852,7 +846,6 @@ class FBFGS(Optimizer):
                   hit_miss = hit_miss + str("_ ")
 
         print("q max value: " + str(q.max()))
-#        d = torch.nan_to_num(q.mul(H_diag.to(torch.float32)), nan=0.0, posinf=0.0, neginf=0.0).to(torch.float32) # Handle NaN/Inf
         d = q.mul(H_diag.to(torch.float32))
         del q
 
@@ -887,7 +880,6 @@ class FBFGS(Optimizer):
                     ) * (alpha_val)
                     d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)#TODO: test the in place operation to avoid a likely non-DCE'd clone
 
-#        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         print(hit_miss)
         total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(direction_device)
         print("max value pre-norm direction: " + str(d.max()))
@@ -896,7 +888,6 @@ class FBFGS(Optimizer):
         d = d.to(torch.float16)
         mask = torch.logical_and(d > -clop, d < clop)
         d[mask] = 0
-#        print("direction elements: " + str((d != 0).sum()) )
         print("total_norm: " + str(total_norm))
         del mask
         return d
