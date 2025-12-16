@@ -827,34 +827,34 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.jit.script
-    def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str, t: float, clop: float, norm: float, y_norm: float, ls_failed: bool, optimizer_device: str) -> Tensor:
+    def sparse_direction_approximate(old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, clop: float, norm: float, y_norm: float, ls_failed: bool) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
         hit_miss = str("")
         similarity = 1e-2
         # Similarity threshold
 
-        q = flat_grad.to(torch.float32).to(direction_device).neg()
-        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to(direction_device)
+        q = flat_grad.to(torch.float32).to(optimizer_device).neg()
+        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to(optimizer_device)
         print("q max value: " + str(q.max()))
         if total_norm == float('inf') or total_norm == 0: # Handle inf or zero norm
           print("pre-direction l2 norm returned inf")
         q = q.div_(total_norm)
 
-        al = torch.empty(num_old, dtype=q.dtype, device=direction_device)
-        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=direction_device)
+        al = torch.empty(num_old, dtype=q.dtype, device=optimizer_device)
+        direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=optimizer_device)
 
         if num_old > 0:
             # Prefetch the first element for the backward loop
 #TODO: we may want to allow a buffer for latency/throughput tuning for various PCIE/accelerator configurations.
-            next_sparse_dir_prefetch: SparseFlatTensor = old_dirs[num_old - 1].to(torch.device(direction_device), non_blocking=True)
+            next_sparse_dir_prefetch: SparseFlatTensor = old_dirs[num_old - 1].to(torch.device(optimizer_device), non_blocking=True)
 
             for i in range(num_old - 1, -1, -1):
                 torch.cuda.synchronize() # Ensure current_sparse_dir is ready
                 current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
 
                 if i > 0: #(Supercharger)
-                    next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device(direction_device), non_blocking=True) # Initiate prefetch for next iteration
+                    next_sparse_dir_prefetch = old_dirs[i - 1].to(torch.device(optimizer_device), non_blocking=True) # Initiate prefetch for next iteration
 
                 # Create a new SparseFlatTensor with internal values cast to float32
                 sparse_dir_i = SparseFlatTensor(
@@ -887,8 +887,8 @@ class FBFGS(Optimizer):
             if aligned_indices.numel() > 0:
                 # Prefetch the first aligned element
                 first_aligned_idx = aligned_indices[0]
-                next_old_dir_prefetch_fwd: SparseFlatTensor = old_dirs[first_aligned_idx].to(torch.device(direction_device), non_blocking=True)
-                next_old_stp_prefetch_fwd: SparseFlatTensor = old_stps[first_aligned_idx].to(torch.device(direction_device), non_blocking=True)
+                next_old_dir_prefetch_fwd: SparseFlatTensor = old_dirs[first_aligned_idx].to(torch.device(optimizer_device), non_blocking=True)
+                next_old_stp_prefetch_fwd: SparseFlatTensor = old_stps[first_aligned_idx].to(torch.device(optimizer_device), non_blocking=True)
 
                 for k in range(aligned_indices.numel()):
                     i = aligned_indices[k] # Get the original index
@@ -898,8 +898,8 @@ class FBFGS(Optimizer):
 
                     if k < aligned_indices.numel() - 1:
                         next_aligned_idx = aligned_indices[k + 1]
-                        next_old_dir_prefetch_fwd = old_dirs[next_aligned_idx].to(torch.device(direction_device), non_blocking=True)
-                        next_old_stp_prefetch_fwd = old_stps[next_aligned_idx].to(torch.device(direction_device), non_blocking=True)
+                        next_old_dir_prefetch_fwd = old_dirs[next_aligned_idx].to(torch.device(optimizer_device), non_blocking=True)
+                        next_old_stp_prefetch_fwd = old_stps[next_aligned_idx].to(torch.device(optimizer_device), non_blocking=True)
 
                     old_dir_for_dense = SparseFlatTensor(
                         current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32), # type: ignore[arg-type]
@@ -914,7 +914,7 @@ class FBFGS(Optimizer):
                     d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)#TODO: test the in place operation to avoid a likely non-DCE'd clone
 
         print(f"sparse_direction_approximate hit_miss: {hit_miss}")
-        total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(direction_device)
+        total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(optimizer_device)
         print("max value pre-norm direction: " + str(d.max()))
         d = d.div_(total_norm)
 
@@ -926,7 +926,7 @@ class FBFGS(Optimizer):
         return d
 
     @torch.jit.script
-    def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, direction_device: str, t: float, clop: float, norm: float, optimizer_device: str) -> Tensor:
+    def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, clop: float, norm: float) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
         hit_miss = str("")
@@ -1101,7 +1101,7 @@ class FBFGS(Optimizer):
 #                if self.clop == 0: # Check if clopping is disabled
 #                  d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
 #                else:
-                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm, ls_failed=ls_failed, optimizer_device=self.optimizer_device)
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, clop=self.clop, norm=norm, y_norm = y_norm, ls_failed=ls_failed)
               else:
                 d = self._gather_flat_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
                 #TODO: should we also do norm float("inf") here to match direction S?
@@ -1327,7 +1327,7 @@ class FBFGS(Optimizer):
 #              if self.clop == 0: # Check if clopping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm)
 #              else:
-              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, clop=self.clop, norm=norm, y_norm=y_norm, ls_failed=ls_failed, optimizer_device=self.optimizer_device)
+              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, clop=self.clop, norm=norm, y_norm=y_norm, ls_failed=ls_failed)
               gc.collect()
               d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
               torch.cuda.empty_cache() # Clear CUDA cache
