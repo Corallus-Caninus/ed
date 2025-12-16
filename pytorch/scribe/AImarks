@@ -1,0 +1,4 @@
+modeli=RA /model.* =/
+coml=RA /^#/
+clos=RR RA /def clos/ RA /return output/
+main=RR RA /while True:/ RA /#EOF/
