@@ -700,6 +700,7 @@ class FBFGS(Optimizer):
         capture_max_step: float =100,
         clop: float = 0,
         direction_device: str = 'cpu',
+        optimizer_device: str = 'cuda',
         norm: float = 1.0,
         y_norm: Optional[float] = None
     ):
