@@ -20,7 +20,6 @@ import datasets
 from datasets import Dataset
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDictConfig, FullStateDictConfig
-#from mamba_ssm import Mamba2
 from peft import LoraConfig, get_peft_model, BoneConfig, BoneModel, LoraModel
 from peft import PeftModel
 torch.backends.cudnn.enabled = False
@@ -35,34 +34,22 @@ torch.set_num_interop_threads(num_cores)
 accelerator = Accelerator()
 filename = "AI_Checkpoint.ai"
 #TODO: project Basilisk: parallelize the model layer-wise with the gradients. Also parallelize the flat-grads and gtd etc in L-BFGS-N. Simplest parallelization, assuming we are using commodity last-gen accelerators for edge learning, this will allow the most performant scale-out of models (e.g.: 3 k80's or 3 MI25's)
-#TODO: take another shot at bitsandbytes quantization for nf4 and possibly QLoRa
 
 import time
 model_id = "mistralai/Mamba-Codestral-7B-v0.1"
 dataset_filename = "haskell_code_dataset.ds"
 model_id = "hanzla/Falcon3-Mamba-R1-v0"
 model_id = "state-spaces/mamba2-370m"
-model_id = "AntonV/mamba2-370m-hf" # No longer needed, using state-spaces/mamba2-130m consistently
-#model_id = "AntonV/mamba2-1.3b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
-#model_id = "AntonV/mamba2-2.7b-hf" # No longer needed, using state-spaces/mamba2-130m consistently
+model_id = "AntonV/mamba2-370m-hf" 
 history_filename = "fbfgs_history.pth"
 indices_filename = "dataset_indices.pth"
-#tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", trust_remote_code=True)
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
-#    config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True) # Load config from pretrained
     config = Mamba2Config.from_pretrained("AI_Checkpoint.ai") # Load config from pretrained
-    #model = AutoModelForCausalLM(config).to("cuda") # Initialize model with config # REMOVE - incorrect instantiation
     model = Mamba2ForCausalLM.from_pretrained(filename, config=config, torch_dtype=torch.float16, device_map="cuda:1", trust_remote_code=True)
-#    model = PeftModel.from_pretrained(model, filename) # Load Lora weights
-#    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
-#    model = LoraModel(model, lora_config, "default") # Load Lora weights
-#    model.load_state_dict(torch.load("AI_Checkpoint.ai/adapter_model.safetensors"), strict=False)
     dataset_indices = {}
-
-    # Set requires_grad=True for LoRa parameters after loading
 
     # Print requires_grad status *before* dtype conversion
     print("--- Parameter requires_grad status (after PeftModel.from_pretrained) ---")
@@ -79,18 +66,15 @@ if os.path.exists(filename): # Load model weights and optimizer history
         print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
         if dataset_indices:
             print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
-#        model.gradient_checkpointing_enable()
     else: # This else belongs to the inner if
         dataset_indices = {} # Initialize dataset_indices for new run
         seen_indices = [] # Initialize seen_indices for new run
         print(f"Model checkpoint loaded successfully from '{filename}'. Starting new run for {current_dataset_filename}.") # Print message for new run
-    #current_index = dataset_indices.get(current_dataset_filename, 0) # No longer needed
 
 else:
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
     config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
     model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map="cuda:1")
-#    model.gradient_checkpointing_enable()
     print("--- Model Named Parameters (freshly loaded base model) ---")
     for name, param in model.named_parameters(): # Non-recursive for brevity initially
         print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
@@ -98,35 +82,9 @@ else:
     dataset_indices = {}
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
-    #current_index = 0 # Initialize current_index to 0 for new runs # No longer needed
 #model.gradient_checkpointing_enable()
 model.train()
-#model = torch.jit.script(model) # REMOVE - torch.jit.script does not support PeftModel due to **kwargs in forward method
-#Get the params ready for passing as flat_grad to fbfgs
-#lora_params = (
-##        param for name, param in model.named_parameters()
-#    # Use the same logic: filter by requires_grad
-#    param for param in model.parameters() if param.requires_grad
-#)
 
-#lora_params_list = list(lora_params) # Convert generator to list to check if it's empty
-#if not lora_params_list:
-#    print("Error: No trainable parameters (param.requires_grad=True) found after initial setup.")
-#else:
-#    print(f"Number of trainable parameters found after initial setup: {len(lora_params_list)}")
-#lora_params = (param for param in lora_params_list) # Convert back to generator for optimizer
-#print("--- Trainable Parameters (after initial setup) ---")
-#lora_param_count_initial = 0
-## Iterate through the collected list to print details
-#for i, param in enumerate(lora_params_list):
-#    print(f"  Param {i}: Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-#    lora_param_count_initial += 1
-## The count is simply the length of the list
-#print(f"Total trainable parameters found after initial setup: {len(lora_params_list)}")
-#print("--- End Trainable Parameters (after initial setup) ---")
-
-
- 
 batch_size = 1 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 
@@ -150,14 +108,11 @@ optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16
 if os.path.exists(filename): # Load optimizer history if checkpoint exists
     optimizer.load_history(history_filename)
 
-
 step_count = 0
-#dataset_size = len(dataset) # Get dataset size outside the loop
 import random
 
 dataset_size = len(dataset)
 dataset_shuffled_indices = list(range(dataset_size)) # Shuffle indices for each epoch
-#random.shuffle(dataset_shuffled_indices) # Shuffle indices - moved to inside the loop
 current_dataset_filename = dataset_filename # Define current dataset filename
 dataset_index = 0 # Initialize dataset_index - not used anymore, but keep for now
 
@@ -169,49 +124,31 @@ def closure(): # Define closure here, outside the if block
   global batch_input_ids_list # Declare batch_input_ids_list as global
   global batch_attention_mask_list # Declare batch_attention_mask_list as global
   global cache # Declare cache as global
-  total_loss= 0
-  total_loss_sum = 0. # Initialize a sum for all chunk losses
   start_time = time.time()
   i = 0
   optimizer.zero_grad()  #TODO: this belongs in the optimizer..
   for input_ids, attention_mask in zip(batch_input_ids_list, batch_attention_mask_list):
-#TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cache
+#TODO: on the last iteration, reduce the cache to grad_vector size before grad vector to prevent the gradient from also loading the full chunk size of tokens from the non-differentiable cacheUPDATE: does this matter?
     chunk_size=200 #1000
     cache=None
-#TODO we may need to debug this.
     grad_vector_size = 200 #5
-    grad_chunk_size = 50
     num_tokens = input_ids.size(1)
-    num_steps = 0
-    avg_loss = 0.
     cache_position = None
-#      chunk_size += 1
     if chunk_size > 0 :
       for i in range(0, num_tokens - grad_vector_size, chunk_size):
         end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
         cur_input_ids = input_ids[:, i:end_idx]
         cur_attention_mask = attention_mask[:, i:end_idx]
-        # cur_input_ids = cur_input_ids.to("cuda:1") # Already on cuda:1
-        # cur_attention_mask = cur_attention_mask.to("cuda:1") # Already on cuda:1
-  #        cache_position = torch.tensor([i])
         print(f"Cache position: {i}")
-  
-  
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
-  #            cache_position =  torch.tensor(i, dtype=torch.long)
-  
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
         else:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, use_cache=True)
         cache = outputs.cache_params
         if not torch.isnan(outputs.loss): # Check for NaN before accumulating
-            total_loss_sum += outputs.loss # Accumulate scalar loss value
-            num_steps += 1 # Count chunks for averaging
   #        cache_position = cache_position[-1:] + end_idx - i # add one more position for the next token
-  
-
 #      gc.collect()
 #      torch.cuda.empty_cache()
 
@@ -220,17 +157,13 @@ def closure(): # Define closure here, outside the if block
 
     outputs.loss.backward() # Backpropagate gradients
 
-    # Filter parameters to only include those that have a gradient
-#    trainable_params_with_grad = [p for p in model.parameters() if p.grad is not None]
-#    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.) # Clip gradients once
-
     print(str(outputs.loss))
     return outputs.loss
 
 
 #TODO: save model, indices and fbfgs to the same directory. Consolidate the datasets indices with the model data.
 while True: # Main training loop
-    cache = None  # Reset cache at the start of each iteration
+    cache = None  # Reset cache at the start of each iteration NOTE: globally declared for closure
     dataset_shuffled_indices = list(range(dataset_size)) # Reshuffle indices at the start of each epoch
     random.shuffle(dataset_shuffled_indices) # Reshuffle
 
@@ -344,32 +277,4 @@ while True: # Main training loop
             print(
                 f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}"
             )
-#TODO: fix this. we get NaN (the history doesnt align). could be lora params not aligning in flat grad or something else. We need a merge and reset without unload operation.
-#            model = model.merge_and_unload()  # Merge and unload must be called before re-applying lora
-#            model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)  # Re-apply lora
-#            model = model.to(dtype=torch.float16)
-#        
-#
-#            # Re-extract lora_params for the *new* LoRa adapter
-#            lora_params = (
-#                param for name, param in model.named_parameters()
-#                if param.requires_grad
-#            )
-#
-#            # Re-initialize optimizer with new LoRa params
-#            optimizer = FBFGS(lora_params, lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", norm=1., clop=1e-9, c1=1e-8, c2=(1-0.63212),direction_device="cpu", bracket_shift = 1/3, bracket_shove = 1/3)
-#            optimizer.load_history(history_filename) # Load history into new optimizer
-#
-#        
-#            # Update the optimizer's parameter groups with the new lora_params
-#        #    optimizer.param_groups[0]['params'] = list(lora_params)
-#        #    optimizer._params = optimizer.param_groups[0]['params']
-#            model.gradient_checkpointing_enable()
-
-#TODO: something broke this, fix it.
-  
-
-  
-
-    #unwrapped_model = accelerator.unwrap_model(model) # No longer needed
-#    model.save_pretrained(filename) # Only save Peft adapter
+#EOF
