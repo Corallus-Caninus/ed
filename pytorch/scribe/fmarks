@@ -1,0 +1,12 @@
+c=RA /class|def /
+asd=RR RA /`c/add/sparse/dense/ RA /def /
+dts=RR RA /`c/dense/sparse/flat/ RA /def /
+f=RA /def /
+sda=RR RA /`f/sparse/dir/app/ RA /def/
+aasd=RR RA /`f/_add_sparse_dense/ RA /def sparse_dot/
+step=RR RA /`f/def/step/ RA /def save/
+sda1=FA SAR sda RR RA /if/num/old/ RA /del q/
+sda2=FA SAR sda RR RA /del q/ RA /total_norm/
+ag=RR RA /`f/_add_grad/ RA /def _dir/
+smuls=RR RA /`f/dot/ RA /def add_sparse/
+de=RR RA /`f/dir/eval/ RA /def sparse/
