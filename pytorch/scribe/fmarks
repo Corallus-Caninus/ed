@@ -10,3 +10,4 @@ sda2=FA SAR sda RR RA /del q/ RA /total_norm/
 ag=RR RA /`f/_add_grad/ RA /def _dir/
 smuls=RR RA /`f/dot/ RA /def add_sparse/
 de=RR RA /`f/dir/eval/ RA /def sparse/
+init=RR RA /`c/FBFGS/class/ RA /def .numel.self/
