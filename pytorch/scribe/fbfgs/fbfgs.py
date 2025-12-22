@@ -750,7 +750,7 @@ def _strong_wolfe(
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
 #            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity. #TODO redundant NaN check
 #TODO redundant NaN check
-            elif f_new < f_best and f_new == f_new:#and done != True and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
+            if f_new < f_best and f_new == f_new and gtd_new < 0:
 #            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
     #          print("---GOT NEW WOLFE PACK---")
               success = True
@@ -778,7 +778,8 @@ def _strong_wolfe(
     t = bracket[low_pos]  # type: ignore[possibly-undefined]
     f_new = bracket_f[low_pos]
     g_new = bracket_g[low_pos]  # type: ignore[possibly-undefined]
-    return success, f_new, g_new.to(optimizer_device), t, ls_func_evals
+#    return success, f_new, g_new.to(optimizer_device), t, ls_func_evals
+    return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
 
 class FBFGS(Optimizer):
     """Implements L-BFGS algorithm.
