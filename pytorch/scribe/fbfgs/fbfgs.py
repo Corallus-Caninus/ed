@@ -606,7 +606,7 @@ def _strong_wolfe(
         ls_iter += 1
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
-        if f_new < f_best and done != True and f_new == f_new: #and (f_new <= (f + c1 * t * gtd)) : #  or f_new >= f_prev: #NOTE: Ward condition
+        if f_new < f_best and done != True and f_new == f_new and gtd_new < 0: 
 #        if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
 #NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
           success = True
