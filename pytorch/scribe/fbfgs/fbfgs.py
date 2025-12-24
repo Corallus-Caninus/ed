@@ -9,6 +9,15 @@ import gc
 import psutil
 import time
 import torch.distributed as dist
+import sys
+
+#def trace_calls(frame, event, arg):
+#    if event == 'line':
+#        if 'gtd' in frame.f_locals or 'gtd_new' in frame.f_locals:
+#            print(f"gtd: {frame.f_locals.get('gtd', 'N/A')}, gtd_new: {frame.f_locals.get('gtd_new', 'N/A')}")
+#    return trace_calls
+#
+#sys.settrace(trace_calls)
 
 from torch.optim.optimizer import Optimizer, ParamsT
 
@@ -16,7 +25,7 @@ from torch.optim.optimizer import Optimizer, ParamsT
 #TODO: distribution: need to also distributed the norm. Write our own l1 and turn norm hyperparam into a scalar coefficient to ensure the l1 is stable for networks with high parameter count and low type precision.
 #TODO: implement SparseFlatTensor addition correctly via AI rendering
 #TODO: extract this to a module and begin FBFGS project structuring
-#TODO: implement sparse operations where we currently perform dense ops
+#TODO: if we have 1 segment (we havent induced sparsity) its probably worth it to do a dense computation both in terms of memory and compute resources.
 @torch.jit.script
 class SparseFlatTensor:
     def __init__(self, starts, ends, values, total_size, unit_indices=None, unit_values=None):
@@ -260,8 +269,6 @@ class SparseFlatTensor:
 
                     # Perform the in-place addition
                     dense_tensor_arg.view(-1)[valid_local_indices] += scaled_values_to_add
-            else:
-                print("SKIPPING SEGMENT")
 
         # Process unit indices
         if sparse_tensor.unit_indices.numel() > 0:
@@ -410,6 +417,18 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
     # Find indices of non-zero elements
     non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
 
+    # Skip sparsification if tensor is already dense (all elements are non-zero)
+    if non_zero_indices.numel() == total_size:
+        # Return a "sparse" representation that's actually dense
+        return SparseFlatTensor(
+            torch.tensor([0], dtype=torch.int64, device=device),
+            torch.tensor([total_size], dtype=torch.int64, device=device),
+            dense_tensor.view(-1),
+            total_size,
+            torch.empty(0, dtype=torch.long, device=device),
+            torch.empty(0, dtype=dtype, device=device)
+        )
+
     if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
         starts_local = torch.empty(0, dtype=torch.int64, device=device)
         ends_local = torch.empty(0, dtype=torch.int64, device=device)
@@ -463,14 +482,47 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
         min_segment_length = segment_lengths.min() if segment_lengths.numel() > 0 else torch.tensor(0)
         print(f"Average segment length: {avg_segment_length:.4f}, Max segment length: {max_segment_length}, Min segment length: {min_segment_length}, Unit indices count: {unit_indices_local.numel()}, Segments count: {starts_local.numel()}")
 
-        # 1. Generate segment indices without loops - vectorized approach
-        segment_indices_offsets = torch.repeat_interleave(starts_local, segment_lengths)
+        # Use direct indexing for better numerical stability
+        # Get all non-zero indices for segments (excluding unit segments)
+        if segment_mask.any():
+            # Get the start and end indices for segments
+            seg_starts = start_indices_in_non_zero[segment_mask]
+            seg_ends = end_indices_in_non_zero[segment_mask]
 
-        # 2. Vectorized value extraction using advanced indexing
-        values_local = dense_tensor.view(-1)[segment_indices_offsets]
+            # Create a mask for all non-zero indices that belong to segments
+            segment_mask_all = torch.zeros_like(non_zero_indices, dtype=torch.bool)
+            for i in range(seg_starts.numel()):
+                segment_mask_all[seg_starts[i]:seg_ends[i]+1] = True
+
+            # Extract the segment indices and values
+            segment_indices = non_zero_indices[segment_mask_all]
+            values_local = dense_tensor.view(-1)[segment_indices]
+        else:
+            segment_indices = torch.empty(0, dtype=torch.long, device=device)
+            values_local = torch.empty(0, dtype=dtype, device=device)
         total_size_local = torch.tensor(total_size)
 
-    return SparseFlatTensor(starts_local, ends_local, values_local, total_size_local, unit_indices_local, unit_values_local)
+    # Create the sparse tensor
+    sparse_result = SparseFlatTensor(starts_local, ends_local, values_local, total_size_local, unit_indices_local, unit_values_local)
+
+    # Verify the sparse tensor matches the dense tensor
+    dense_reconstruction = sparse_result.to_dense()
+    diff = dense_tensor.view(-1) - dense_reconstruction
+    max_diff = diff.abs().max().item()
+    mean_diff = diff.abs().mean().item()
+    non_zero_dense = (dense_tensor.view(-1) != 0).sum().item()
+    non_zero_sparse = (dense_reconstruction != 0).sum().item()
+
+#    print(f"Sparse tensor verification:")
+#    print(f"  Max absolute difference: {max_diff}")
+#    print(f"  Mean absolute difference: {mean_diff}")
+#    print(f"  Non-zero in dense: {non_zero_dense}")
+#    print(f"  Non-zero in sparse reconstruction: {non_zero_sparse}")
+
+#    if max_diff > 1e-6:
+#        print(f"WARNING: Significant difference detected in sparse tensor conversion!")
+
+    return sparse_result
 
 def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
     # ported from https://github.com/torch/optim/blob/master/polyinterp.lua
@@ -533,6 +585,17 @@ def _strong_wolfe(
     device = gtd.device
     f_best = torch.tensor(f, device=device)
     g_best = g
+#Relaxed Wolfe initialization
+    if f_new < f_best and done != True and f_new == f_new and abs(gtd_new) < abs(gtd): 
+#        if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
+#NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
+      success = True
+      stall_wolfe = 0
+      t_best = t
+      f_best = torch.tensor(f_new, device=device)
+#TODO this should be a non-blocking offload
+      g_best = g_new.to(direction_device)
+
 #    g = g.to(direction_device)
     gc.collect()
     ls_iter=0
@@ -543,7 +606,8 @@ def _strong_wolfe(
 #TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
 #TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a linear equation or a ratio
         # check conditions #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition #TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
-        if f_new > (f + c1 * t * gtd)  or (f_new != f_new and is_nan == True): # or f_new >= f_prev: #NOTE: Ward condition
+        if f_new > (f - abs(c1 * t * gtd))  or (f_new != f_new and is_nan == True): # or f_new >= f_prev: #NOTE: Ward condition
+#        if f_new > (f + abs(c1 * t * gtd))  or (f_new != f_new and is_nan == True): # or f_new >= f_prev: #NOTE: Ward condition
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
@@ -552,23 +616,27 @@ def _strong_wolfe(
             break
 
 #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if abs(gtd_new) <= -c2 * gtd and f_new < f_best :
+        if abs(gtd_new) <= abs(-c2 * gtd) and f_new < f_best :
             bracket = [t] # type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
             done = True
             success = True
+            t_best = t
+            f_best = torch.tensor(f_new, device=device)
+            g_best = g_new.to(direction_device)
+#TODO: we got NaN on a fast wolf here (not instant)on ys (loss was good but ys returned a NaN
             print("FAST WOLFE")
             break
 
-        if gtd_new >= 0 :
-            print("NOT DESCENDING")
-            bracket = [t_prev, t]
-            bracket_f = [f_prev, f_new]
+#        if gtd_new >= 0 :
+#            print("NOT DESCENDING")
+#            bracket = [t_prev, t]
+#            bracket_f = [f_prev, f_new]
 #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
-            bracket_g = [g_prev, g_new]
-            bracket_gtd = [gtd_prev, gtd_new]
-            break
+#            bracket_g = [g_prev, g_new]
+#            bracket_gtd = [gtd_prev, gtd_new]
+#            break
 
 #TODO: since we reuse the last step size, we should bracket in the direction of the first interpolation direction, and change the corresponding zoom break condition if bracketing down instead of up
 #TODO: increase 100 and consider tuning 0.1 further
@@ -606,7 +674,7 @@ def _strong_wolfe(
         ls_iter += 1
         #RELAXED WOLFE CONDITION
 #        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
-        if f_new < f_best and done != True and f_new == f_new and gtd_new < 0: 
+        if f_new < f_best and done != True and f_new == f_new and abs(gtd_new) < abs(gtd): 
 #        if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
 #NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
           success = True
@@ -651,7 +719,9 @@ def _strong_wolfe(
             # line-search bracket is so small
             #TODO: extract stall_wolfe hyperparameter
             #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
+        print("zooming..")
         if abs(bracket[1] - bracket[0])  < tolerance_change or  stall_wolfe >= 5 :
+#TODO: getting negative ys here with stall wolfe printout
            print("WOLFE PACK")
            return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
          #TODO: return the wolfe pack here
@@ -724,7 +794,8 @@ def _strong_wolfe(
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
 
 
-        if f_new > (f + c1 * t * gtd)  or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition
+        if f_new > (f - abs(c1 * t * gtd))  or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition
+#        if f_new > (f + abs(c1 * t * gtd))  or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
@@ -732,11 +803,15 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
-            if abs(gtd_new) <= -c2 * gtd and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
+            if abs(gtd_new) <= abs(-c2 * gtd) and f_new < f_best: #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
                 # Wolfe conditions satisfied
                 print("STRONG WOLFE")
                 success = True
                 done = True
+#TODO: clean up the line search a bit we have a lot of redundancies now and artifacts from deprecated features
+                t_best = t
+                f_best = torch.tensor(f_new, device=device)
+                g_best = g_new.to(direction_device)
             elif gtd_new * (bracket[high_pos] - bracket[low_pos])>= 0:
                 # old high becomes new low
                 bracket[high_pos] = bracket[low_pos]
@@ -750,7 +825,8 @@ def _strong_wolfe(
     #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
 #            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity. #TODO redundant NaN check
 #TODO redundant NaN check
-            if f_new < f_best and f_new == f_new and gtd_new < 0:
+#TODO: we have a problem with ys here +gtd - -gtd_new == ys < 0
+            if f_new < f_best and f_new == f_new and abs(gtd_new) < abs(gtd):
 #            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
     #          print("---GOT NEW WOLFE PACK---")
               success = True
@@ -914,8 +990,8 @@ class FBFGS(Optimizer):
             views.append(view.to(self.optimizer_device))
         grad = torch.cat(views, 0)
 
-        grad_norm = torch.linalg.vector_norm(grad, ord=2.)
-        grad = grad.div_(grad_norm)
+#        grad_norm = torch.linalg.vector_norm(grad, ord=2.)
+#        grad = grad.div_(grad_norm)
 #TODO: this is a good idea but I would prefer a more functional and elegant way to handle rollover since it can in theory occur throughout the algorithm and pytorch doesnt solve this elegantly (which it should).
 #        grad = torch.nan_to_num(grad, nan=0.0, posinf=finfo.max, neginf=finfo.min)
         return grad
@@ -1278,6 +1354,7 @@ class FBFGS(Optimizer):
                 print("d norm: " + str((total_norm)) )
                 d = d/total_norm
                 d[torch.logical_and(d > -self.clop,d < self.clop)] = 0
+                loss, _ = self._directional_evaluate(closure, 1., d)
 		#NOTE: end of else
 #
 #              d = d.to_sparse()
@@ -1308,7 +1385,7 @@ class FBFGS(Optimizer):
 #              s_dense = (d.mul(t)) # Define s_dense here
               s_sparse = d * t # Define s_sparse here
 #              ys = y_dense.dot(s_dense)
-#              ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
+              ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
 
               original_y_dtype = y_dense.dtype # Store original dtype
 #TODO: we may not need y_dense now
@@ -1318,7 +1395,7 @@ class FBFGS(Optimizer):
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
 #              norm_y_dense = max(1e-9, norm_y_dense)
               y_dense.div_(norm_y_dense)
-              ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
+#              ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
 #              norm_s = torch.linalg.vector_norm(s_dense, ord=2.)
 #TODO: try without norming d now that we have decent alpha deflection
 #              ys = y_dense.dot(s_dense.div(norm_s).to(torch.float32))  # Calculate ys here after s is SparseFlatTensor
@@ -1401,7 +1478,7 @@ class FBFGS(Optimizer):
 #TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be modeled as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
 #TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
 #TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
-              if  ys >= 1e-3  and t >=1:
+              if (ys >= 1e-3 or ys <= -1e-3 ) and t >=1:#TODO: is this Kosher?
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1510,6 +1587,9 @@ class FBFGS(Optimizer):
 #TODO: should we be iterating each tensor for norm like in flat_grad?
 #          total_norm = torch.abs(d.coalesce().values()).sum().to(self.direction_device) # Move total_norm to direction_device
           d = dense_to_sparse_flat_tensor(d)
+#          loss, _ = self._directional_evaluate(closure, 1., d)
+#          print("loss after to sparse: " + str(loss))
+#          prev_loss = loss
 #          print("DIRECTION: first and last tensors:" + str(d[-10:]) + " " + str(d[:10]))
 
           ############################################################
@@ -1576,6 +1656,7 @@ class FBFGS(Optimizer):
                       state["old_dirs"] = old_dirs
                       state["old_stps"] = old_stps
                       state["ro"] = ro
+                      self.t = 1
                   return orig_loss # Skip this data point
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
