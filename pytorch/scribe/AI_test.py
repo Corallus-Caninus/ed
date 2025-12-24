@@ -50,14 +50,14 @@ config.head_dim = 50
 config.num_heads = 4
 config.state_size = 54
 
-model = Mamba2ForCausalLM(config)
+#model = Mamba2ForCausalLM(config)
 
 # Load tokenizer from the initialized model instead of the pretrained model
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
 if os.path.exists(filename): # Load model weights and optimizer history
     print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
-#    model = Mamba2ForCausalLM.from_pretrained(filename, config=config, torch_dtype=torch.float16, device_map="cpu", trust_remote_code=True)
+    model = Mamba2ForCausalLM.from_pretrained(filename, config=config)
     dataset_indices = {}
 
     # Print requires_grad status *before* dtype conversion
@@ -81,6 +81,7 @@ if os.path.exists(filename): # Load model weights and optimizer history
         print(f"Model checkpoint loaded successfully from '{filename}'. Starting new run for {current_dataset_filename}.") # Print message for new run
 
 else:
+    model=Mamba2ForCausalLM(config)
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
 #    config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map="cpu")
@@ -112,10 +113,10 @@ else:
 batch_train = None
 
 # Initialize optimizer *after* ensuring lora_params is correctly populated
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1.05, clop=0., c1=1e-4, c2=0.1,direction_device="cpu", optimizer_device="cpu", bracket_shift = 1/10, bracket_shove = 1/3, rho_rewind=1)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=1.1, norm=1., clop=0., c1=0., c2=0.1,direction_device="cpu", optimizer_device="cpu", bracket_shift = 1/10, bracket_shove = 1/3, capture_min_step = 10, rho_rewind=0, orthogonality=1e-2)
 
-#if os.path.exists(filename): # Load optimizer history if checkpoint exists
-#    optimizer.load_history(history_filename)
+if os.path.exists(history_filename):  #Load optimizer history if checkpoint exists
+    optimizer.load_history(history_filename)
 #INIT END
 
 step_count = 0
@@ -167,7 +168,7 @@ def closure(): # Define closure here, outside the if block
 
     outputs.loss.backward() # Backpropagate gradients
 
-    print(str(outputs.loss))
+    print(f"{outputs.loss.item():.16f}")
     return outputs.loss
 
 #TODO: save model, indices and fbfgs to the same directory. Consolidate the datasets indices with the model data.
@@ -231,12 +232,15 @@ while True: # Main training loop
 
         # Warmup period truncation
         max_warmup_length = 200
-        if len(seen_indices) < 25 and current_num_tokens > max_warmup_length:
+        if len(seen_indices) < 1000 and current_num_tokens > max_warmup_length:
             start_idx = random.randint(0, current_num_tokens - max_warmup_length)
             input_ids = input_ids[:, start_idx : start_idx + max_warmup_length]
             attention_mask = attention_mask[:, start_idx : start_idx + max_warmup_length]
             current_num_tokens = input_ids.size(1)
             print(f"Truncated index {dataset_idx} to random {max_warmup_length} tokens during warmup. New length: {current_num_tokens}")
+        else:
+            optimizer.c1 = 1e-5
+            optimizer.rho_rewind = 1
 
         # Skip if token length is less than 5 after all truncations
         if current_num_tokens < max_warmup_length:
