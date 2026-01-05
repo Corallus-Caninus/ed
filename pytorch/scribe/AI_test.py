@@ -4,7 +4,7 @@ import sys
 
 import torch
 
-print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
+#print(f"Number of CUDA devices available: {torch.cuda.device_count()}")
 
 import gc
 from transformers import MambaConfig, Mamba2ForCausalLM, AutoTokenizer,  AutoModelForCausalLM, AutoConfig, Mamba2Config
@@ -44,10 +44,10 @@ indices_filename = "dataset_indices.pth"
 
 # Load the base config from the 370m model and modify specific parameters
 config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
-config.hidden_size = 100     
-config.num_hidden_layers = 12   
+config.hidden_size = 200     
+config.num_hidden_layers = 24   
 config.head_dim = 50
-config.num_heads = 4
+config.num_heads = 8
 config.state_size = 54
 
 #model = Mamba2ForCausalLM(config)
@@ -56,39 +56,39 @@ config.state_size = 54
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
 if os.path.exists(filename): # Load model weights and optimizer history
-    print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
+    #print(f"Checkpoint file '{filename}' found. Loading LoRa adapter from checkpoint...")
     model = Mamba2ForCausalLM.from_pretrained(filename, config=config).to("cuda")
     dataset_indices = {}
 
     # Print requires_grad status *before* dtype conversion
-    print("--- Parameter requires_grad status (after PeftModel.from_pretrained) ---")
-    for name, param in model.named_parameters():
-        if "lora_" in name or param.requires_grad: # Print Lora params or any trainable param
-             print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-    print("--- End Parameter requires_grad status ---")
+    #print("--- Parameter requires_grad status (after PeftModel.from_pretrained) ---")
+    #for name, param in model.named_parameters():
+        #if "lora_" in name or param.requires_grad: # Print Lora params or any trainable param
+             #print(f"  Param: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
+    #print("--- End Parameter requires_grad status ---")
 
     current_dataset_filename = dataset_filename # Define current dataset filename
     if os.path.exists(indices_filename):
         dataset_indices = torch.load(indices_filename)
         print("After loading - dataset_indices:", dataset_indices)
         seen_indices = dataset_indices.get(current_dataset_filename, [])
-        print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
-        if dataset_indices:
-            print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
+        #print(f"Model checkpoint loaded successfully from '{filename}'. Resuming {current_dataset_filename} with {len(seen_indices)} indices seen.")
+        #if dataset_indices:
+            #print("Warning: Checkpoint contains dataset indices, ensure you are using the correct dataset or intend to resume.")
     else: # This else belongs to the inner if
         dataset_indices = {} # Initialize dataset_indices for new run
         seen_indices = [] # Initialize seen_indices for new run
-        print(f"Model checkpoint loaded successfully from '{filename}'. Starting new run for {current_dataset_filename}.") # Print message for new run
+        #print(f"Model checkpoint loaded successfully from '{filename}'. Starting new run for {current_dataset_filename}.") # Print message for new run
 
 else:
     model=Mamba2ForCausalLM(config).to("cuda")
     print(f"Checkpoint file '{filename}' not found. Loading base model weights from '{model_id}' and initializing LoRa adapter...")
 #    config = Mamba2Config.from_pretrained(model_id, trust_remote_code=True)
 #    model = Mamba2ForCausalLM.from_pretrained(model_id, config=config, torch_dtype=torch.float16, trust_remote_code=True, device_map="cpu")
-    print("--- Model Named Parameters (freshly loaded base model) ---")
-    for name, param in model.named_parameters(): # Non-recursive for brevity initially
-        print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
-    print("--- End Model Inspection (freshly loaded base model) ---")
+    #print("--- Model Named Parameters (freshly loaded base model) ---")
+    #for name, param in model.named_parameters(): # Non-recursive for brevity initially
+        #print(f"Parameter Name: {name}, Parameter Shape: {param.shape}")
+    #print("--- End Model Inspection (freshly loaded base model) ---")
     dataset_indices = {}
     current_dataset_filename = dataset_filename # Define current dataset filename
     seen_indices = [] # Initialize seen_indices for new run
@@ -98,7 +98,7 @@ model.train()
 batch_size = 1 # Define batch size here
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 
-print("num parameters: " + str(pytorch_total_params))
+#print("num parameters: " + str(pytorch_total_params))
 
 datalist = []
 if os.path.exists(dataset_filename):
@@ -112,11 +112,12 @@ else:
 
 batch_train = None
 
-# Initialize optimizer *after* ensuring lora_params is correctly populated
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=100, line_search_fn="strong_wolfe", y_norm=2., norm=1., clop=0., c1=0.001, c2=0.7,direction_device="cpu", optimizer_device="cuda", bracket_shift = 1/3, bracket_shove = 0.1, capture_max_step = 100, capture_min_step = 1, rho_rewind=1, orthogonality=0.01, max_ls=10)
+# Initialize Adam optimizer
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=2., norm=1, radius_alpha=2, c1 = 1e-7, c2=0.7,direction_device="cpu", optimizer_device="cuda", bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 10, rho_rewind=10, orthogonality=0.01, max_ls=10)
+#optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-if os.path.exists(history_filename):  #Load optimizer history if checkpoint exists
-    optimizer.load_history(history_filename)
+# if os.path.exists(history_filename):  #Load optimizer history if checkpoint exists
+    # optimizer.load_history(history_filename)
 #INIT END
 
 step_count = 0
@@ -150,7 +151,7 @@ def closure(): # Define closure here, outside the if block
         end_idx = min(i + chunk_size, num_tokens - grad_vector_size)
         cur_input_ids = input_ids[:, i:end_idx]
         cur_attention_mask = attention_mask[:, i:end_idx]
-        print(f"Cache position: {i}")
+#        print(f"Cache position: {i}")
         if cache is not None:
           with torch.no_grad(): # Keep no_grad context for forward passes in the loop
             outputs = model(input_ids=cur_input_ids, attention_mask = cur_attention_mask, labels = cur_input_ids, cache_params = cache, use_cache = True, cache_position=torch.tensor([i]))
@@ -212,9 +213,9 @@ while True: # Main training loop
             break # Break inner loop if no more unseen indices
 
         seen_indices.append(dataset_idx) # Mark index as seen
-        print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
+        #print(f"Processing dataset index: original index: {dataset_idx}, unseen indices remaining: {len(dataset_shuffled_indices)}")
         batch_train = dataset[dataset_idx]['code']
-        print(str(batch_train))
+        #print(str(batch_train))
         tokens = tokenizer(batch_train,truncation=False, max_length=None,padding=False, return_overflowing_tokens=False, return_length=True,return_tensors='pt').to("cuda")
         input_ids, attention_mask = (tokens.input_ids, tokens.attention_mask)
         print("got num_tokens: " + str(input_ids.size(1)))
@@ -228,7 +229,7 @@ while True: # Main training loop
             input_ids = input_ids[:, start_idx : start_idx + max_len_global]
             attention_mask = attention_mask[:, start_idx : start_idx + max_len_global]
             current_num_tokens = input_ids.size(1)
-            print(f"Truncated index {dataset_idx} to random {max_len_global} tokens. New length: {current_num_tokens}")
+            #print(f"Truncated index {dataset_idx} to random {max_len_global} tokens. New length: {current_num_tokens}")
 
         # Warmup period truncation
         max_warmup_length = 200
@@ -237,12 +238,12 @@ while True: # Main training loop
             input_ids = input_ids[:, start_idx : start_idx + max_warmup_length]
             attention_mask = attention_mask[:, start_idx : start_idx + max_warmup_length]
             current_num_tokens = input_ids.size(1)
-            print(f"Truncated index {dataset_idx} to random {max_warmup_length} tokens during warmup. New length: {current_num_tokens}")
+            #print(f"Truncated index {dataset_idx} to random {max_warmup_length} tokens during warmup. New length: {current_num_tokens}")
 
         # Skip if token length is less than 5 after all truncations
         if current_num_tokens < max_warmup_length:
             print(
-                f"Skipping index {dataset_idx} due to token length ({current_num_tokens}) being less than warmup length."
+                #f"Skipping index {dataset_idx} due to token length ({current_num_tokens}) being less than warmup length."
             )
             continue  # Skip to the next iteration of the inner while loop
 
@@ -250,24 +251,51 @@ while True: # Main training loop
         batch_attention_mask_list.append(attention_mask)
         batch_count += 1 # Increment batch_count only when a valid datapoint is added
 
-    print(f"--- Before generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
-    print(f"--- Before generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+    #print(f"--- Before generate - CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    #print(f"--- Before generate - CUDA memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
     prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
     out = tokenizer(prompt, return_tensors="pt").to("cuda") # Ensure input is on the same device as the model
     with torch.no_grad():
-      print("generating..")
+      #print("generating..")
       model.eval()
       generated_ids = model.generate(out.input_ids, max_new_tokens=5, attention_mask=out.attention_mask) # Reduced max_length for debugging
       model.train()
-      print("generation complete:")
-      print(tokenizer.decode(generated_ids[0], skip_special_tokens=False))
+      #print("generation complete:")
+      #print(tokenizer.decode(generated_ids[0], skip_special_tokens=False))
       generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-      print(f"Model response: {generated_text}")
+      #print(f"Model response: {generated_text}")
 
-    print("-----------------------step---------------------")
+    #print("-----------------------step---------------------")
+    # Print loss before optimizer step
+    loss_before = closure()
+    print(f"Loss before step: {loss_before:.16f}")
+
+    # Perform optimizer step
     optimizer.step(closure)
-    torch.cuda.empty_cache()
 
+    # Create RGB color step display
+    step_text = f" STEP {step_count} "
+    color_cycle = ["\033[38;2;255;0;0m", "\033[38;2;0;255;0m", "\033[38;2;0;0;255m"]  # RGB colors
+    reset = "\033[0m"
+    
+    # Build rainbow line
+    line = ""
+    for i in range(32):
+        line += f"{color_cycle[i % 3]}-{reset}"
+    line += f"{color_cycle[step_count % 3]}{step_text}{reset}"
+    for i in range(32):
+        line += f"{color_cycle[(i+step_count) % 3]}-{reset}"
+    
+    print(f"\n{line}\n")
+    
+    # Print loss after optimizer step
+    loss_after = closure()
+    
+    # Show delta in gray text
+    loss_delta = loss_before - loss_after
+    print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
+
+    torch.cuda.empty_cache()
     step_count += 1
 
     torch.cuda.empty_cache()
@@ -279,12 +307,12 @@ while True: # Main training loop
         dataset_indices[current_dataset_filename] = seen_indices
         if accelerator.is_main_process:  # Ensure save only on main process
             model.save_pretrained(filename, safe_serialization=False)  # Only save Peft adapter
-            print("model saved..")
+            #print("model saved..")
             torch.save(dataset_indices, indices_filename)
-            print("indices saved..")
-            optimizer.save_history(history_filename)
-            print("optimizer saved..")
-            print(
-                f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}"
-            )
+            #print("indices saved..")
+            # optimizer.save_history(history_filename)
+            #print("optimizer checkpoint saving commented out..")
+            #print(
+            #    f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}"
+            #)
 #EOF
