@@ -1598,7 +1598,6 @@ class FBFGS(Optimizer):
 #              yf =  (y_dense != 0).sum() / self._numel()
 #              if ys <= 0.1 and ys > 0 and t > 1: #NOTE: was 0.1
 #                ys = 0.1
-
 #              if ys > 0:
 #                y_squared = y_dense.dot(y_dense)
 #                H_diag = ys / y_squared  
