@@ -619,7 +619,7 @@ def _strong_wolfe(
       t_best = t
       f_best = torch.tensor(f_new, device=device)
 #TODO this should be a non-blocking offload
-      g_best = g_new.to(direction_device)
+      g_best = g_new
       gtd_best = gtd_new
 
 #    g = g.to(direction_device)
@@ -659,7 +659,7 @@ def _strong_wolfe(
             success = True
             t_best = t
             f_best = torch.tensor(f_new, device=device)
-            g_best = g_new.to(direction_device)
+            g_best = g_new
 #TODO: we got NaN on a fast wolf here (not instant)on ys (loss was good but ys returned a NaN
             print("FAST WOLFE")
             break
@@ -719,7 +719,7 @@ def _strong_wolfe(
           t_best = t
           f_best = torch.tensor(f_new, device=device)
 #TODO this should be a non-blocking offload
-          g_best = g_new.to(direction_device)
+          g_best = g_new
           gtd_best = gtd_new
 
     # reached max number of iterations?
@@ -882,7 +882,7 @@ def _strong_wolfe(
               stall_wolfe = 0
               t_best = t
               f_best = torch.tensor(f_new, device=device)
-              g_best = g_new.to(direction_device)
+              g_best = g_new
 
             # new point becomes new low
             bracket[low_pos] = t
@@ -962,7 +962,9 @@ class FBFGS(Optimizer):
         bracket_shove: float =(1/3),
         capture_min_step: float =1.,
         capture_max_step: float =100,
-        radius_alpha: float = 0,
+        radius_s: float = 0,
+        radius_y: float = 0,
+        radius_ball: float = 0,
         direction_device: str = 'cpu',
         optimizer_device: str = 'cuda',
         norm: float = 1.0,
@@ -991,7 +993,9 @@ class FBFGS(Optimizer):
             bracket_shove=bracket_shove,
             capture_min_step=capture_min_step,
             capture_max_step=capture_max_step,
-            radius_alpha=radius_alpha,
+            radius_s=radius_s,
+            radius_y=radius_y,
+            radius_ball=radius_ball,
             direction_device=direction_device,
             optimizer_device=optimizer_device,
             norm=norm,
@@ -1009,7 +1013,9 @@ class FBFGS(Optimizer):
 
         self._params = self.param_groups[0]["params"]
         self._numel_cache = None
-        self.radius_alpha = radius_alpha
+        self.radius_s = radius_s
+        self.radius_y = radius_y
+        self.radius_ball = radius_ball
         self.direction_device = direction_device
         self.optimizer_device = optimizer_device
         self.max_ls= max_ls
@@ -1054,6 +1060,53 @@ class FBFGS(Optimizer):
 #TODO: this is a good idea but I would prefer a more functional and elegant way to handle rollover since it can in theory occur throughout the algorithm and pytorch doesnt solve this elegantly (which it should).
         grad = torch.nan_to_num(grad, nan=0.0) #, posinf=finfo.max, neginf=finfo.min)
         return grad
+
+    def _split_direction_to_layers(self, direction: Tensor) -> list[Tensor]:
+        """Split flat direction vector into per-parameter chunks"""
+        chunks = []
+        offset = 0
+        for p in self._params:
+            numel = p.numel()
+            param_chunk = direction[offset:offset+numel]
+            # Handle complex parameters
+            if torch.is_complex(p):
+                param_chunk = torch.view_as_real(param_chunk).view(-1)
+            chunks.append(param_chunk)
+            offset += numel
+        return chunks
+
+    def _gather_flat_norm_grad(self, order: int = 2, radius_s: float = 1.0):
+        """Gather gradients, normalize each layer by norm, then flatten"""
+        views = []
+        eps = 1e-8  # Avoid division by zero
+        
+        for p in self._params:
+            if p.grad is None:
+                # No gradient for this parameter
+                view = torch.zeros_like(p).view(-1)
+            else:
+                grad = p.grad.data.detach()
+                # Compute layer norm with radius scaling
+                if grad.numel() == 0:
+                    # Handle empty gradient tensor
+                    view = grad.view(-1)
+                else:
+                    layer_norm = torch.linalg.vector_norm(grad, ord=order)
+                    scaled_norm = (layer_norm / radius_s) + eps
+                    # Normalize gradient
+                    normalized_grad = grad / scaled_norm
+                    view = normalized_grad.view(-1)
+            
+            # Handle complex numbers
+            if torch.is_complex(view):
+                view = torch.view_as_real(view).view(-1)
+            
+            # Move to optimizer device
+            views.append(view.to(self.optimizer_device))
+        
+        # Concatenate and clean up
+        flat_grad = torch.cat(views, 0)
+        return torch.nan_to_num(flat_grad, nan=0.0)
 
     def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
         offset = 0
@@ -1116,7 +1169,7 @@ class FBFGS(Optimizer):
             offset += numel
 
         loss = float(closure())
-        flat_grad = self._gather_flat_grad()
+        flat_grad = self._gather_flat_norm_grad()
 
         # Restore original parameters from CPU
         for p, original_p_cpu in zip(self._params, original_params_cpu): # type: ignore[possibly-undefined]
@@ -1124,19 +1177,35 @@ class FBFGS(Optimizer):
 
         return loss, flat_grad
 
-    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_alpha: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int) -> Tensor:
+    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
         hit_miss = str("")
         # Similarity threshold
 
         q = flat_grad.to(torch.float32).to(optimizer_device).neg()
-        total_norm = torch.linalg.vector_norm(q, ord=2.).to(torch.float32).to(optimizer_device)
-        total_norm = total_norm / self.radius_alpha
-        print("q max value: " + str(q.max()))
-        if total_norm == float('inf') or total_norm == 0:  
-          print("pre-direction l2 norm returned inf")
-        q = q.div_(total_norm)
+        split_q = self._split_direction_to_layers(q)
+        eps = 1e-8
+        
+        # Normalize each parameter's chunk
+        normed_chunks = []
+        for param_q in split_q:
+            # Skip empty chunks
+            if param_q.numel() == 0:
+                normed_chunks.append(param_q)
+                continue
+            
+            # Compute L2 norm for this parameter's chunk
+            param_norm = torch.linalg.vector_norm(param_q, ord=2)
+            scaled_norm = (param_norm / self.radius_ball) + eps
+            
+            # Scale the parameter chunk
+            normed = param_q / scaled_norm
+            normed_chunks.append(normed)
+            
+        q = torch.cat(normed_chunks, 0)
+        q = torch.nan_to_num(q, nan=0.0)
+        print("q max value after layer norm: " + str(q.max()))
 
         al = torch.empty(num_old, dtype=q.dtype, device=optimizer_device)
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=optimizer_device)
@@ -1202,8 +1271,11 @@ class FBFGS(Optimizer):
 #                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
 #                alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
 
-                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-                aligned = (direction_similarity <= orthogonality  and direction_similarity >= -orthogonality)  or i >= num_old - n_iter 
+                curvature_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
+                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
+#                direction_similarity = direction_similarity = curvature_similarity*ro[i].item()/direction_similarity
+                direction_similarity = ro[i].item()/curvature_similarity
+                aligned = (direction_similarity <= orthogonality  and direction_similarity >= -orthogonality)  # or i >= num_old - n_iter 
 #                aligned = (direction_similarity >= orthogonality  and direction_similarity <= -orthogonality) or i > num_old - n_iter # # or i > num_old - n_iter
                 direction_alignment_mask[i] = aligned
                 if direction_alignment_mask[i]:
@@ -1215,9 +1287,22 @@ class FBFGS(Optimizer):
                   ) * ((-al[i]))
 #TODO: to perform orthogonalization with the direction corrected first loop we just have to take sparse_old_dir_scaled without Rho as the direction_similarity, then mul rho for adding to q
                   q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
-                  q_norm = torch.linalg.vector_norm(q, ord=2.) / radius_alpha
-                  if q_norm > 0:
-                      q = q.div_(q_norm)
+                  
+                  # Apply L2 normalization to each parameter's chunk
+                  split_q = self._split_direction_to_layers(q)
+                  normed_chunks = []
+                  eps = 1e-8
+                  
+                  for param_q in split_q:
+                      if param_q.numel() == 0:
+                          normed_chunks.append(param_q)
+                          continue
+                      param_l2 = torch.linalg.vector_norm(param_q, ord=2)
+                      scaled_l2 = (param_l2 / self.radius_ball) + eps
+                      normed_l2 = param_q / scaled_l2
+                      normed_chunks.append(normed_l2)
+                      
+                  q = torch.cat(normed_chunks)
                   hit_miss = hit_miss + str("| ")
                 else:
                   hit_miss = hit_miss + str("_ ")
@@ -1226,9 +1311,24 @@ class FBFGS(Optimizer):
 #        q_norm = torch.linalg.vector_norm(q, ord=2.)
 #        if q_norm > 0:
 #            q = q.div_(q_norm)
-#        d = q.mul(H_diag.to(torch.float32))
+##        d = q.mul(H_diag.to(torch.float32))
         d = q
         del q
+
+        d = torch.nan_to_num(d, nan=0.0) # , posinf=finfo.max, neginf=finfo.min)
+        print(f"sparse_direction_approximate hit_miss: {hit_miss}")
+#        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
+#        total_norm = total_norm / self.radius_ball
+#        d = d.div_(total_norm)
+#
+#        total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(optimizer_device)
+#        scaled_norm = total_norm / self.radius_s
+##        print(f"max value pre-norm direction: {d.max()}, scaled_norm: {scaled_norm}")
+#        d = d.to(torch.float32).div_(scaled_norm)
+#
+#        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
+#        total_norm = total_norm / self.radius_ball
+#        d = d.div_(total_norm)
 
         if num_old > 0:
             aligned_indices = torch.nonzero(direction_alignment_mask).squeeze(1)
@@ -1288,21 +1388,55 @@ class FBFGS(Optimizer):
                     ) * (alpha_val)
                     d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)#TODO: test the in place operation to avoid a likely non-DCE'd clone
 
-        print(f"sparse_direction_approximate hit_miss: {hit_miss}")
-        total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float16).to(optimizer_device)
-        scaled_norm = total_norm / radius_alpha
-        print(f"max value pre-norm direction: {d.max()}, scaled_norm: {scaled_norm}")
-        d = d.to(torch.float16).div_(scaled_norm)
+##                    d = torch.nan_to_num(d, nan=0.0) # , posinf=finfo.max, neginf=finfo.min)
+##                    print(f"sparse_direction_approximate hit_miss: {hit_miss}")
+#                    total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
+#                    total_norm = total_norm  / self.radius_ball
+#                    d = d.div_(total_norm)
+#            
+#                    total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(optimizer_device)
+#                    scaled_norm = total_norm  / self.radius_s
+##                    print(f"max value pre-norm direction: {d.max()}, scaled_norm: {scaled_norm}")
+#                    d = d.to(torch.float32).div_(scaled_norm)
+#            
+#                    total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
+#                    total_norm = total_norm  / self.radius_ball
+#                    d = d.div_(total_norm)
+#            
+#                    d = torch.nan_to_num(d, nan=0.0) 
 
-        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float16).to(optimizer_device)
-        total_norm = total_norm / self.radius_alpha
-        d = d.div_(total_norm)
+#        d = torch.nan_to_num(d, nan=0.0) 
+#        print(f"sparse_direction_approximate hit_miss: {hit_miss}")
+#        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
+#        total_norm = total_norm / self.radius_ball
+#        d = d.div_(total_norm)
+#
+        # Layer-wise normalization
+        split_d = self._split_direction_to_layers(d)
+        eps = 1e-8
+        
+        # Normalize each parameter's direction chunk separately
+        normed_chunks = []
+        for param_d in split_d:
+            if param_d.numel() == 0:
+                continue
+            # Apply norm scaling
+            param_norm = torch.linalg.vector_norm(param_d, ord=norm)
+            scaled_norm = (param_norm / self.radius_s) + eps
+            normed = param_d / scaled_norm
+            
+            # Apply ball projection
+            param_l2 = torch.linalg.vector_norm(normed, ord=2)
+            ball_scale = min(1.0, self.radius_ball / (param_l2 + eps))
+            normed = normed * ball_scale
 
-        d = torch.nan_to_num(d, nan=0.0) #, posinf=finfo.max, neginf=finfo.min)
-#        d = d.mul_(total_norm)
+            normed_chunks.append(normed.clone())  # Ensure we don't keep autograd graph
+            
+        d = torch.cat(normed_chunks)
+        
+        d = torch.nan_to_num(d, nan=0.0).to(torch.float16)
         return d
 
-    @torch.jit.script
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_alpha: float, norm: float) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
@@ -1373,7 +1507,7 @@ class FBFGS(Optimizer):
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         print(hit_miss)
         total_norm = torch.linalg.vector_norm(d, ord=norm).to(optimizer_device)
-        scaled_norm = total_norm / radius_alpha
+        scaled_norm = total_norm / radius_s
         d = d.div_(scaled_norm)
         return d
 
@@ -1467,7 +1601,7 @@ class FBFGS(Optimizer):
               restart = False # Flag for restart
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we don't calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
-              flat_grad = self._gather_flat_grad().to(self.optimizer_device)
+              flat_grad = self._gather_flat_norm_grad().to(self.optimizer_device)
 #TODO: clip_grad_norm by the l1 norm for a max norm of 1e9 (if needed)
 #              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
@@ -1475,10 +1609,10 @@ class FBFGS(Optimizer):
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
               if len(old_dirs) > 0  and n_iter > 1:
-                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_alpha=self.radius_alpha, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x)
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x)
               else:
-                d = self.sparse_direction_approximate([], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_alpha=self.radius_alpha, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=n_iter)
-#                  d = self._gather_flat_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
+                d = self.sparse_direction_approximate([], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=n_iter)
+#                  d = self._gather_flat_norm_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
 #                  #TODO: should we also do norm float("inf") here to match direction S?
 #    #              total_norm = torch.linalg.vector_norm(d, ord=2.).to(self.optimizer_device)  
 #    #              d = d.div_(total_norm)
@@ -1546,13 +1680,14 @@ class FBFGS(Optimizer):
               original_y_dtype = y_dense.dtype # Store original dtype
 #TODO: we may not need y_dense now
 #              y_dense = y_dense.clone()
-              norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) / self.radius_alpha
+              norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) / self.radius_y
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
 #              norm_y_dense = max(1e-9, norm_y_dense)
 
               y_dense.div_(norm_y_dense)
 
               torch.cuda.empty_cache() # Clear cache
+
 
 #TODO: this kinda throws off selection but also makes it independent of s which may be useful. Note here we may want to do this after the initial selection.
 #TODO: this should be done after the div if in place otherwise we dont rescale with the l2 correctly
@@ -1563,11 +1698,8 @@ class FBFGS(Optimizer):
               #Shotgun noise
 #TODO: find the indices of the selected parameters instead of div then multiply since this is lossy in the mantissa
 #TODO: this creates an additional tensor make sure this isnt worst case allocation optimizing the tensor ops for memory
-#              norm_y = torch.linalg.vector_norm(y_dense, ord=y_norm)
+#              norm_y = torch.linalg.vector_norm(y_dense, ord=y_norm) / radius_y
 #              y_selection = y_dense.div(norm_y)
-#              y_dense_mask = torch.logical_and(y_selection >= -self.radius_alpha, y_selection <= self.radius_alpha)
-#              y_dense[y_dense_mask] = 0
-#              del y_dense_mask
 #              del y_selection
 #              y_mask = (y_dense == 0)
 #              ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
@@ -1577,7 +1709,7 @@ class FBFGS(Optimizer):
 #              y_dense.add_(ys_dense)
 #              print("y dense + s_mask  " + str((y_dense != 0).sum()))
 #
-#              norm_yf = torch.linalg.vector_norm(y_dense, ord=2.)
+#              norm_yf = torch.linalg.vector_norm(y_dense, ord=2.) / radius_ball
 #              print("got norm_yf: " +str(norm_yf))
 #              y_dense.div_(norm_yf)
 
@@ -1598,6 +1730,7 @@ class FBFGS(Optimizer):
 #              yf =  (y_dense != 0).sum() / self._numel()
 #              if ys <= 0.1 and ys > 0 and t > 1: #NOTE: was 0.1
 #                ys = 0.1
+
 #              if ys > 0:
 #                y_squared = y_dense.dot(y_dense)
 #                H_diag = ys / y_squared  
@@ -1608,20 +1741,21 @@ class FBFGS(Optimizer):
 #TODO: ys = Y*S was here
               print(f"ys: {ys}")
 #              # Powell dampening modification
-              delta =1   #existing curvature threshold
-              if 0 < ys < delta:
-#                   Calculate ||s||^2 #efficiently from sparse components
-                  ss = (s_sparse.values**2).sum() + (s_sparse.unit_values**2).sum()
-                  if ss > 1e-10:   #avoid division by zero
-                      theta = (delta - ys) / ss
-                      SparseFlatTensor._add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
-                      ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
-                      print(f"\033[94mApplied Powell dampening. New ys: {ys}\033[0m")
-                  else:
-                      print("Skipped Powell dampening due to small ||s||^2")
+#              delta =1   #existing curvature threshold
+#              if 0 < ys < delta:
+##                   Calculate ||s||^2 #efficiently from sparse components
+#                  ss = (s_sparse.values**2).sum() + (s_sparse.unit_values**2).sum()
+#                  if ss > 1e-10:   #avoid division by zero
+#                      theta = (delta - ys) / ss
+#                      SparseFlatTensor._add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
+#                      ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
+#                      print(f"\033[94mApplied Powell dampening. New ys: {ys}\033[0m")
+#                  else:
+#                      print("Skipped Powell dampening due to small ||s||^2")
 
 #              if self.radius_alpha != 0:
               y = dense_to_sparse_flat_tensor(y_dense)
+#              s = dense_to_sparse_flat_tensor(s_dense.to(torch.float16))
 #              s = dense_to_sparse_flat_tensor(s_sparse)
 #              else:
 #                y = y_dense
@@ -1713,7 +1847,7 @@ class FBFGS(Optimizer):
               # multiplied by the gradient
               num_old = len(old_dirs)
 
-              flat_grad = self._gather_flat_grad()
+              flat_grad = self._gather_flat_norm_grad()
 #TODO: may need to try this again? the hessian doesn't pertain as much given that the next direction is likely orthogonal to the last.
 #TODO: it might make sense to divide by the history size so we keep curvature normalized to prevent explosions in direction approx.
 #              H_diag = 1
@@ -1722,7 +1856,7 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_alpha=self.radius_alpha, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x)
+              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x)
 #              d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 
               del H_diag

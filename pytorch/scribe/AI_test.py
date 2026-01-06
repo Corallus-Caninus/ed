@@ -1,6 +1,8 @@
 import os
 import math
 import sys
+import csv
+import matplotlib.pyplot as plt
 
 import torch
 
@@ -49,6 +51,7 @@ config.num_hidden_layers = 24
 config.head_dim = 50
 config.num_heads = 8
 config.state_size = 54
+config.dtype= torch.float16
 
 #model = Mamba2ForCausalLM(config)
 
@@ -113,7 +116,7 @@ else:
 batch_train = None
 
 # Initialize Adam optimizer
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=2., norm=1, radius_alpha=2, c1 = 1e-7, c2=0.7,direction_device="cpu", optimizer_device="cuda", bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 10, rho_rewind=10, orthogonality=0.01, max_ls=10)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=1.2, norm=1.2, radius_y = 50,radius_ball = 10,radius_s=10,c1 = 1e-7, c2=0.7,direction_device="cpu", optimizer_device="cuda", bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 0.01, rho_rewind=1, orthogonality=0.5, max_ls=10)
 #optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 # if os.path.exists(history_filename):  #Load optimizer history if checkpoint exists
@@ -121,6 +124,14 @@ optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16
 #INIT END
 
 step_count = 0
+step_data = []
+losses_before = []
+losses_deltas = []
+
+# Initialize single figure with subplots
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+plt.tight_layout(pad=3.0)
+
 import random
 
 dataset_size = len(dataset)
@@ -294,6 +305,40 @@ while True: # Main training loop
     # Show delta in gray text
     loss_delta = loss_before - loss_after
     print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
+    
+    # Collect data for plots
+    step_data.append(step_count)
+    losses_before.append(loss_before.item())
+    losses_deltas.append(loss_delta.item())
+    
+    # Update plots
+    # Clear and update both subplots
+    ax1.cla()
+    ax2.cla()
+    
+    # Plot loss before on top subplot
+    ax1.plot(step_data, losses_before, 'b-')
+    ax1.set_title(f"Loss Before vs Steps (Step {step_count})")
+    ax1.set_xlabel("Steps")
+    ax1.set_ylabel("Loss")
+    
+    # Plot loss delta on bottom subplot
+    ax2.plot(step_data, losses_deltas, 'r-')
+    ax2.set_title(f"Loss Delta vs Steps (Step {step_count})")
+    ax2.set_xlabel("Steps")
+    ax2.set_ylabel("Loss Delta")
+    
+    # Save combined figure
+    plt.savefig("training.png")
+
+    # Log to CSV file
+    csv_filename = "loss_data.csv"
+    file_exists = os.path.exists(csv_filename)
+    with open(csv_filename, 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        if not file_exists:
+            writer.writerow(['step', 'loss_before', 'loss_delta'])
+        writer.writerow([step_count, loss_before.item(), loss_delta.item()])
 
     torch.cuda.empty_cache()
     step_count += 1
@@ -310,9 +355,9 @@ while True: # Main training loop
             #print("model saved..")
             torch.save(dataset_indices, indices_filename)
             #print("indices saved..")
-            # optimizer.save_history(history_filename)
+            optimizer.save_history(history_filename)
             #print("optimizer checkpoint saving commented out..")
-            #print(
-            #    f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}"
-            #)
+            print(
+                f"Model, indices, and FBFGS history saved to {filename}, {indices_filename}, and {history_filename} at step {step_count}, seen indices count for {current_dataset_filename}: {len(seen_indices)}"
+            )
 #EOF
