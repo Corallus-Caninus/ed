@@ -1274,7 +1274,10 @@ class FBFGS(Optimizer):
                 curvature_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
                 direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
 #                direction_similarity = direction_similarity = curvature_similarity*ro[i].item()/direction_similarity
-                direction_similarity = ro[i].item()/curvature_similarity
+                if curvature_similarity != 0:
+                  direction_similarity = ro[i].item()/curvature_similarity
+                else:
+                  direction_similarity = orthogonality + 1
                 aligned = (direction_similarity <= orthogonality  and direction_similarity >= -orthogonality)  # or i >= num_old - n_iter 
 #                aligned = (direction_similarity >= orthogonality  and direction_similarity <= -orthogonality) or i > num_old - n_iter # # or i > num_old - n_iter
                 direction_alignment_mask[i] = aligned
@@ -1287,22 +1290,28 @@ class FBFGS(Optimizer):
                   ) * ((-al[i]))
 #TODO: to perform orthogonalization with the direction corrected first loop we just have to take sparse_old_dir_scaled without Rho as the direction_similarity, then mul rho for adding to q
                   q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
-                  
-                  # Apply L2 normalization to each parameter's chunk
+#AIDER EDIT HERE!
+#                  q_norm = torch.linalg.vector_norm(q, ord=2.) / self.radius_ball
+#                  if q_norm > 0:
+#                      q = q.div_(q_norm)
+                  # Normalize each parameter's chunk
                   split_q = self._split_direction_to_layers(q)
                   normed_chunks = []
-                  eps = 1e-8
-                  
                   for param_q in split_q:
+                      # Skip empty chunks
                       if param_q.numel() == 0:
                           normed_chunks.append(param_q)
                           continue
-                      param_l2 = torch.linalg.vector_norm(param_q, ord=2)
-                      scaled_l2 = (param_l2 / self.radius_ball) + eps
-                      normed_l2 = param_q / scaled_l2
-                      normed_chunks.append(normed_l2)
                       
+                      # Compute L2 norm for this parameter's chunk
+                      param_norm = torch.linalg.vector_norm(param_q, ord=2)
+                      scaled_norm = (param_norm / self.radius_ball) + eps
+                      
+                      # Scale the parameter chunk
+                      normed = param_q / scaled_norm
+                      normed_chunks.append(normed)
                   q = torch.cat(normed_chunks)
+
                   hit_miss = hit_miss + str("| ")
                 else:
                   hit_miss = hit_miss + str("_ ")
@@ -1311,7 +1320,7 @@ class FBFGS(Optimizer):
 #        q_norm = torch.linalg.vector_norm(q, ord=2.)
 #        if q_norm > 0:
 #            q = q.div_(q_norm)
-##        d = q.mul(H_diag.to(torch.float32))
+#        d = q.mul(H_diag.to(torch.float32))
         d = q
         del q
 
@@ -1684,7 +1693,24 @@ class FBFGS(Optimizer):
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
 #              norm_y_dense = max(1e-9, norm_y_dense)
 
-              y_dense.div_(norm_y_dense)
+              eps = 1e-8
+              split_y = self._split_direction_to_layers(y_dense)
+              normed_chunks = []
+              for param_q in split_y:
+                  # Skip empty chunks
+                  if param_q.numel() == 0:
+                      normed_chunks.append(param_q)
+                      continue
+                  
+                  # Compute L2 norm for this parameter's chunk
+                  param_norm = torch.linalg.vector_norm(param_q, ord=2)
+                  scaled_norm = (param_norm / self.radius_ball) + eps
+                  
+                  # Scale the parameter chunk
+                  normed = param_q / scaled_norm
+                  normed_chunks.append(normed)
+              y_dense = torch.cat(normed_chunks)
+#              y_dense.div_(norm_y_dense)
 
               torch.cuda.empty_cache() # Clear cache
 
@@ -1741,17 +1767,17 @@ class FBFGS(Optimizer):
 #TODO: ys = Y*S was here
               print(f"ys: {ys}")
 #              # Powell dampening modification
-#              delta =1   #existing curvature threshold
-#              if 0 < ys < delta:
-##                   Calculate ||s||^2 #efficiently from sparse components
-#                  ss = (s_sparse.values**2).sum() + (s_sparse.unit_values**2).sum()
-#                  if ss > 1e-10:   #avoid division by zero
-#                      theta = (delta - ys) / ss
-#                      SparseFlatTensor._add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
-#                      ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
-#                      print(f"\033[94mApplied Powell dampening. New ys: {ys}\033[0m")
-#                  else:
-#                      print("Skipped Powell dampening due to small ||s||^2")
+              delta =1   #existing curvature threshold
+              if 0 < ys < delta:
+#                   Calculate ||s||^2 #efficiently from sparse components
+                  ss = (s_sparse.values**2).sum() + (s_sparse.unit_values**2).sum()
+                  if ss > 1e-10:   #avoid division by zero
+                      theta = (delta - ys) / ss
+                      SparseFlatTensor._add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
+                      ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
+                      print(f"\033[94mApplied Powell dampening. New ys: {ys}\033[0m")
+                  else:
+                      print("Skipped Powell dampening due to small ||s||^2")
 
 #              if self.radius_alpha != 0:
               y = dense_to_sparse_flat_tensor(y_dense)
