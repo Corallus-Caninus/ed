@@ -51,7 +51,7 @@ config.num_hidden_layers = 24
 config.head_dim = 50
 config.num_heads = 8
 config.state_size = 54
-config.dtype= torch.float16
+config.dtype= "float16"
 
 #model = Mamba2ForCausalLM(config)
 
@@ -116,7 +116,7 @@ else:
 batch_train = None
 
 # Initialize Adam optimizer
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=1.2, norm=1.2, radius_y = 50,radius_ball = 10,radius_s=10,c1 = 1e-7, c2=0.7,direction_device="cpu", optimizer_device="cuda", bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 0.01, rho_rewind=1, orthogonality=0.5, max_ls=10)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=1.5, norm=1.5, radius_y = 50,radius_ball = 1,radius_s=1,c1 = 1e-7, c2=0.9,direction_device="cpu", optimizer_device="cuda", bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 10, rho_rewind=1, orthogonality=0.5, max_ls=10)
 #optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 # if os.path.exists(history_filename):  #Load optimizer history if checkpoint exists
