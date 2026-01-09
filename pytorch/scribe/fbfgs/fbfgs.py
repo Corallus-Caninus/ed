@@ -581,6 +581,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 #TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down #TODO: cleanup all the AI device mess
 def _strong_wolfe(
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100, optimizer_device: str = 'cuda'):
+#TODO: we really do need a c3 for assisting prevention of early convergence. We need to rework cubic interpolation to search the notch instead of the min. Anything else is a workaround
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
 #    g = g.clone(memory_format=torch.contiguous_format)
     # evaluate objective and gradient using initial step
@@ -780,7 +781,7 @@ def _strong_wolfe(
 #TODO: bracket collapses when we get NaN. Ensure we reset step size accordingly.
 #TODO: were jumping the border here
         if f_new != f_new:
-#TODO: test this since 1 can cause problems since its the same as the gradient for initialization causing inf delta
+#TODO: test this since 1 can cause problems since it is the same as the gradient for initialization causing inf delta
           t = torch.tensor(1.)
           is_nan = True
 #TODO: need to revaluate here.
@@ -1031,6 +1032,16 @@ class FBFGS(Optimizer):
 
         return self._numel_cache
 
+    def _split_direction_to_layers(self, flat_tensor):
+        """Split flat tensor into chunks corresponding to parameter sizes."""
+        param_sizes = [p.numel() for p in self._params]
+        chunks = []
+        offset = 0
+        for size in param_sizes:
+            chunks.append(flat_tensor[offset:offset+size])
+            offset += size
+        return chunks
+
 #TODO: allow this to be distributive, such that we can have multiple nodes generate grads and keep them on their respective devices for all of fbfgs.
     def _gather_flat_grad(self):
         # Perform gradient clipping before gathering
@@ -1061,52 +1072,117 @@ class FBFGS(Optimizer):
         grad = torch.nan_to_num(grad, nan=0.0) #, posinf=finfo.max, neginf=finfo.min)
         return grad
 
-    def _split_direction_to_layers(self, direction: Tensor) -> list[Tensor]:
-        """Split flat direction vector into per-parameter chunks"""
-        chunks = []
-        offset = 0
-        for p in self._params:
-            numel = p.numel()
-            param_chunk = direction[offset:offset+numel]
-            # Handle complex parameters
-            if torch.is_complex(p):
-                param_chunk = torch.view_as_real(param_chunk).view(-1)
-            chunks.append(param_chunk)
-            offset += numel
-        return chunks
+    def normalize_per_parameter_chunks(self, tensor: Tensor, 
+                                     norm: int = 2,
+                                     radius_scaling: float = 1.0,
+                                     radius_ball: float = 1.0,
+                                     eps: float = 1e-8) -> Tensor:
+        """
+        Vectorized normalization with parallel computations and optional scaling
+        
+        Args:
+            radius_scaling: Scaling radius (disable with 0/non-positive values)
+            radius_ball: Projection radius (disable with 0/non-positive values)
+        """
+        with torch.no_grad():
+            # Get parameter sizes in advance
+            param_sizes = [p.numel() for p in self._params]
+            if sum(param_sizes) != tensor.numel():
+                raise ValueError("Tensor size doesn't match parameters")
+
+            device = tensor.device
+            dtype = tensor.dtype
+            
+            # Create chunk indices in parallel
+            offsets = torch.cumsum(torch.tensor([0] + param_sizes[:-1], device=device), 0)
+            ends = offsets + torch.tensor(param_sizes, device=device)
+            chunk_indices = torch.stack([offsets, ends], dim=1)
+
+            # Split tensor into chunks
+            chunks = [tensor[start:end] for start, end in chunk_indices]
+
+            # Phase 1: Parameter-wise scaling (optional)
+            if radius_scaling > 0:
+                norms = torch.stack([
+                    torch.linalg.vector_norm(chk, ord=norm)
+                    if chk.numel() > 0 else torch.tensor(0., device=device)
+                    for chk in chunks
+                ])
+                scaling_factors = (norms / radius_scaling) + eps
+                chunks = [
+                    chk / factor
+                    for chk, factor in zip(chunks, scaling_factors)
+                    if chk.numel() > 0
+                ]
+
+            # Phase 2: Ball projection (optional)
+            if radius_ball > 0:
+                l2_norms = torch.stack([
+                    torch.linalg.vector_norm(chk, ord=2)
+                    if chk.numel() > 0 else torch.tensor(0., device=device)
+                    for chk in chunks
+                ])
+                ball_factors = torch.minimum(
+                    torch.tensor(1.0, device=device),
+                    radius_ball / (l2_norms + eps)
+                )
+                chunks = [
+                    chk * factor
+                    for chk, factor in zip(chunks, ball_factors)
+                    if chk.numel() > 0
+                ]
+
+            return torch.cat(chunks)
 
     def _gather_flat_norm_grad(self, order: int = 2, radius_s: float = 1.0):
         """Gather gradients, normalize each layer by norm, then flatten"""
-        views = []
         eps = 1e-8  # Avoid division by zero
         
+        # Collect all gradients with optional zero-fill for None grads
+        grads = []
+        split_sizes = []
         for p in self._params:
-            if p.grad is None:
-                # No gradient for this parameter
-                view = torch.zeros_like(p).view(-1)
-            else:
-                grad = p.grad.data.detach()
-                # Compute layer norm with radius scaling
-                if grad.numel() == 0:
-                    # Handle empty gradient tensor
-                    view = grad.view(-1)
-                else:
-                    layer_norm = torch.linalg.vector_norm(grad, ord=order)
-                    scaled_norm = (layer_norm / radius_s) + eps
-                    # Normalize gradient
-                    normalized_grad = grad / scaled_norm
-                    view = normalized_grad.view(-1)
-            
-            # Handle complex numbers
-            if torch.is_complex(view):
-                view = torch.view_as_real(view).view(-1)
-            
-            # Move to optimizer device
-            views.append(view.to(self.optimizer_device))
+            grad_view = p.grad.view(-1) if p.grad is not None else torch.zeros_like(p).view(-1)
+            grads.append(grad_view)
+            split_sizes.append(p.numel())
         
-        # Concatenate and clean up
-        flat_grad = torch.cat(views, 0)
-        return torch.nan_to_num(flat_grad, nan=0.0)
+        # Concatenate all gradients
+        if not grads:
+            return torch.tensor([], device=self.optimizer_device)
+        flat_grad = torch.cat(grads).to(self.optimizer_device)
+        split_sizes = torch.tensor(split_sizes, dtype=torch.long, device=flat_grad.device)
+        
+        # Create offset indices and mask for non-empty chunks
+        offsets = torch.cat([torch.tensor([0], device=flat_grad.device), split_sizes.cumsum(0)[:-1]])
+        non_empty = split_sizes > 0
+        split_points = split_sizes[non_empty]
+        chunk_offsets = offsets[non_empty]
+        chunk_ends = chunk_offsets + split_points
+        
+        # Calculate norms for all non-empty chunks in parallel
+        def vec_norm(chunk):
+            return torch.linalg.vector_norm(flat_grad[chunk[0]:chunk[1]], ord=order)
+        norms = torch.stack([vec_norm((start, end)) for start, end in zip(chunk_offsets, chunk_ends)])
+        
+        # Vectorized normalization
+        valid_mask = norms > 0
+        scaling_factors = torch.ones_like(norms)
+        scaling_factors[valid_mask] = norms[valid_mask] / radius_s + eps
+        inverse_scaling = 1.0 / scaling_factors
+        
+        # Create mask for all elements in non-empty chunks
+        mask = torch.zeros_like(flat_grad, dtype=torch.bool)
+        for start, end in zip(chunk_offsets, chunk_ends):
+            mask[start:end] = True
+        
+        # Apply scaling factors
+        normed_flat_grad = flat_grad.clone()
+        scaling_vec = torch.zeros_like(flat_grad)
+        for (start, end), scale in zip(zip(chunk_offsets, chunk_ends), inverse_scaling):
+            scaling_vec[start:end] = scale
+        normed_flat_grad[mask] = flat_grad[mask] * scaling_vec[mask]
+        
+        return normed_flat_grad
 
     def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
         offset = 0
@@ -1178,10 +1254,13 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
     def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int) -> Tensor:
-        torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
+        # Use CUDA events for better async overlap instead of global synchronize
+        compute_stream = torch.cuda.current_stream()
+        transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+        
         num_old = len(old_dirs)
         hit_miss = str("")
-        # Similarity threshold
+        prefetch_buffer_size = 3
 
         q = flat_grad.to(torch.float32).to(optimizer_device).neg()
         split_q = self._split_direction_to_layers(q)
@@ -1190,16 +1269,12 @@ class FBFGS(Optimizer):
         # Normalize each parameter's chunk
         normed_chunks = []
         for param_q in split_q:
-            # Skip empty chunks
             if param_q.numel() == 0:
                 normed_chunks.append(param_q)
                 continue
             
-            # Compute L2 norm for this parameter's chunk
             param_norm = torch.linalg.vector_norm(param_q, ord=2)
             scaled_norm = (param_norm / self.radius_ball) + eps
-            
-            # Scale the parameter chunk
             normed = param_q / scaled_norm
             normed_chunks.append(normed)
             
@@ -1211,55 +1286,59 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=optimizer_device)
 
         if num_old > 0:
-            # Prefetch the first element for the backward loop
-#TODO: we may want to allow a buffer for latency/throughput tuning for various PCIE/accelerator configurations.
-            next_sparse_dir_prefetch: SparseFlatTensor = old_dirs[num_old - 1].to(torch.device(optimizer_device), non_blocking=True)
-            next_sparse_stp_prefetch: SparseFlatTensor = old_stps[num_old - 1].to(torch.device(optimizer_device), non_blocking=True)
+            # Backward loop with event-based async prefetching using dictionary for O(1) lookups
+            backward_buffer_dict = {}  # idx -> (stp, dir, event)
+        
+            # Initial prefetch in transfer stream
+            if transfer_stream:
+                with torch.cuda.stream(transfer_stream):
+                    for idx in range(num_old - 1, max(-1, num_old - 1 - prefetch_buffer_size), -1):
+                        if idx >= 0:
+                            stp = old_stps[idx].to(torch.device(optimizer_device), non_blocking=True)
+                            dir = old_dirs[idx].to(torch.device(optimizer_device), non_blocking=True)
+                            event = torch.cuda.Event()
+                            event.record(transfer_stream)
+                            backward_buffer_dict[idx] = (stp, dir, event)
+            else:
+                # Fallback to synchronous transfer
+                for idx in range(num_old - 1, max(-1, num_old - 1 - prefetch_buffer_size), -1):
+                    if idx >= 0:
+                        stp = old_stps[idx].to(torch.device(optimizer_device))
+                        dir = old_dirs[idx].to(torch.device(optimizer_device))
+                        backward_buffer_dict[idx] = (stp, dir, None)
 
             for i in range(num_old - 1, -1, -1):
-                torch.cuda.synchronize() # Ensure current_sparse_dir is ready
-#                current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
-                current_sparse_stp_val = torch.jit.annotate(SparseFlatTensor, next_sparse_stp_prefetch) # Get the prefetched tensor
-                current_sparse_dir_val = torch.jit.annotate(SparseFlatTensor, next_sparse_dir_prefetch) # Get the prefetched tensor
+                start_time = time.time()
+                # Direct dictionary access instead of linear search
+                if i in backward_buffer_dict:
+                    stp, dir, event = backward_buffer_dict[i]
+                    if event:
+                        event.wait()
+                    current_sparse_stp_val = stp
+                    current_sparse_dir_val = dir
+                    del backward_buffer_dict[i]
+                else:
+                    # Fallback: direct transfer if not in buffer
+                    print("buffer miss first loop should never happen")
+                    current_sparse_stp_val = old_stps[i].to(torch.device(optimizer_device))
+                    current_sparse_dir_val = old_dirs[i].to(torch.device(optimizer_device))
+            
+                # Prefetch next elements (using dictionary)
+                next_i = i - prefetch_buffer_size
+                if next_i >= 0 and next_i not in backward_buffer_dict:
+                    if transfer_stream:
+                        with torch.cuda.stream(transfer_stream):
+                            stp_next = old_stps[next_i].to(torch.device(optimizer_device), non_blocking=True)
+                            dir_next = old_dirs[next_i].to(torch.device(optimizer_device), non_blocking=True)
+                            event_next = torch.cuda.Event()
+                            event_next.record(transfer_stream)
+                            backward_buffer_dict[next_i] = (stp_next, dir_next, event_next)
+                    else:
+                        stp_next = old_stps[next_i].to(torch.device(optimizer_device))
+                        dir_next = old_dirs[next_i].to(torch.device(optimizer_device))
+                        backward_buffer_dict[next_i] = (stp_next, dir_next, None)
 
-#TODO: should we be async transfering Rho? are we broadcast multing on the CPU?
-                if i > 0: #(Supercharger)
-                    # Initiate async pinning for next iteration while current operations run
-                    if i == num_old - 1:  # First iteration - submit async pinning
-                        src_dir_next = old_dirs[i - 1]
-                        src_stp_next = old_stps[i - 1]
-                        if src_dir_next.values.device.type == 'cpu':
-                            with ThreadPoolExecutor(max_workers=2) as executor:
-                                # Submit pinning ops to thread pool
-                                dir_future = executor.submit(lambda: src_dir_next.pin_memory())
-                                stp_future = executor.submit(lambda: src_stp_next.pin_memory())
-                                # Store futures for next iteration
-                                self.dir_pinned, self.stp_pinned = dir_future, stp_future
-                    else:  # Subsequent iterations - use previously pinned memory
-                        # Ensure futures exist and aren't missing
-                        assert hasattr(self, 'dir_pinned') and hasattr(self, 'stp_pinned'), "Pinned futures missing!"
-                        src_dir_pinned = self.dir_pinned.result()
-                        src_stp_pinned = self.stp_pinned.result()
-                        # Non-blocking GPU transfer 
-                        next_sparse_dir_prefetch = src_dir_pinned.to(torch.device(optimizer_device), non_blocking=True)
-                        next_sparse_stp_prefetch = src_stp_pinned.to(torch.device(optimizer_device), non_blocking=True)
-
-                    # Submit pinning for next-next iteration (except last)
-                    if i > 1:
-                        src_dir_next = old_dirs[i - 2]
-                        src_stp_next = old_stps[i - 2]
-                        if src_dir_next.values.device.type == 'cpu':
-                            with ThreadPoolExecutor(max_workers=2) as executor:
-                                # Submit pinning ops in background
-                                dir_future = executor.submit(lambda: src_dir_next.pin_memory())
-                                stp_future = executor.submit(lambda: src_stp_next.pin_memory())
-                                # Store futures for next iteration
-                                self.dir_pinned, self.stp_pinned = dir_future, stp_future
-
-                # Create a new SparseFlatTensor with internal values cast to float32
-#                sparse_dir_i = SparseFlatTensor(
-#                    current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
-#                    current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
+                # Process current element (same logic as before)
                 sparse_stp_i = SparseFlatTensor(
                     current_sparse_stp_val.starts, current_sparse_stp_val.ends, current_sparse_stp_val.values.to(dtype=torch.float32),
                     current_sparse_stp_val.total_size, current_sparse_stp_val.unit_indices, current_sparse_stp_val.unit_values.to(dtype=torch.float32)
@@ -1268,181 +1347,91 @@ class FBFGS(Optimizer):
                     current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
                     current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
                 )
-#                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-#                alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
 
                 curvature_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
                 direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
-#                direction_similarity = direction_similarity = curvature_similarity*ro[i].item()/direction_similarity
                 if curvature_similarity != 0:
-                  direction_similarity = ro[i].item()/curvature_similarity
+                    direction_similarity = ro[i].item()/curvature_similarity
                 else:
-                  direction_similarity = orthogonality + 1
-                aligned = (direction_similarity <= orthogonality  and direction_similarity >= -orthogonality)  # or i >= num_old - n_iter 
-#                aligned = (direction_similarity >= orthogonality  and direction_similarity <= -orthogonality) or i > num_old - n_iter # # or i > num_old - n_iter
+                    direction_similarity = orthogonality + 1
+                    
+                aligned = (direction_similarity <= orthogonality  and direction_similarity >= -orthogonality)
                 direction_alignment_mask[i] = aligned
+                
                 if direction_alignment_mask[i]:
-                  alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
-                  al[i] = alpha * ro[i].item()
-                  sparse_old_dir_scaled = SparseFlatTensor(
-                      current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
-                      current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
-                  ) * ((-al[i]))
-#TODO: to perform orthogonalization with the direction corrected first loop we just have to take sparse_old_dir_scaled without Rho as the direction_similarity, then mul rho for adding to q
-                  q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
-#AIDER EDIT HERE!
-#                  q_norm = torch.linalg.vector_norm(q, ord=2.) / self.radius_ball
-#                  if q_norm > 0:
-#                      q = q.div_(q_norm)
-                  # Normalize each parameter's chunk
-                  split_q = self._split_direction_to_layers(q)
-                  normed_chunks = []
-                  for param_q in split_q:
-                      # Skip empty chunks
-                      if param_q.numel() == 0:
-                          normed_chunks.append(param_q)
-                          continue
-                      
-                      # Compute L2 norm for this parameter's chunk
-                      param_norm = torch.linalg.vector_norm(param_q, ord=2)
-                      scaled_norm = (param_norm / self.radius_ball) + eps
-                      
-                      # Scale the parameter chunk
-                      normed = param_q / scaled_norm
-                      normed_chunks.append(normed)
-                  q = torch.cat(normed_chunks)
-
-                  hit_miss = hit_miss + str("| ")
+                    alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
+                    al[i] = alpha * ro[i].item()
+                    sparse_old_dir_scaled = SparseFlatTensor(
+                        current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
+                        current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
+                    ) * ((-al[i]))
+                    q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
                 else:
-                  hit_miss = hit_miss + str("_ ")
+                    pass  # No print for alignment
 
-        print("q max value: " + str(q.max()))
-#        q_norm = torch.linalg.vector_norm(q, ord=2.)
-#        if q_norm > 0:
-#            q = q.div_(q_norm)
-#        d = q.mul(H_diag.to(torch.float32))
-        d = q
+                end_time = time.time()
+                elapsed = end_time - start_time
+                print(f"{elapsed:.4f} ", end='', flush=True)
+
+        print("Q max after first loop: " + str(q.max()))
+        d = q.mul(H_diag.to(torch.float32))
         del q
-
-        d = torch.nan_to_num(d, nan=0.0) # , posinf=finfo.max, neginf=finfo.min)
+        d = torch.nan_to_num(d, nan=0.0)
         print(f"sparse_direction_approximate hit_miss: {hit_miss}")
-#        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
-#        total_norm = total_norm / self.radius_ball
-#        d = d.div_(total_norm)
-#
-#        total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(optimizer_device)
-#        scaled_norm = total_norm / self.radius_s
-##        print(f"max value pre-norm direction: {d.max()}, scaled_norm: {scaled_norm}")
-#        d = d.to(torch.float32).div_(scaled_norm)
-#
-#        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
-#        total_norm = total_norm / self.radius_ball
-#        d = d.div_(total_norm)
 
         if num_old > 0:
             aligned_indices = torch.nonzero(direction_alignment_mask).squeeze(1)
             if aligned_indices.numel() > 0:
-                # Prefetch the first aligned element 
-                first_aligned_idx = aligned_indices[0]
-                # Initiate async pinning for first aligned element if needed
-                if old_dirs[first_aligned_idx].values.device.type == 'cpu':
-                    with ThreadPoolExecutor(max_workers=2) as executor:
-                        dir_future = executor.submit(lambda: old_dirs[first_aligned_idx].pin_memory())
-                        stp_future = executor.submit(lambda: old_stps[first_aligned_idx].pin_memory())
-                        next_dir_pinned = dir_future.result()
-                        next_stp_pinned = stp_future.result()
-                    next_old_dir_prefetch_fwd = next_dir_pinned.to(torch.device(optimizer_device), non_blocking=True)
-                    next_old_stp_prefetch_fwd = next_stp_pinned.to(torch.device(optimizer_device), non_blocking=True)
+                # Use the same buffer dictionary for forward loop, but only for aligned indices
+                forward_buffer_dict = backward_buffer_dict.copy() if 'backward_buffer_dict' in locals() else {}
+
+                # Prefetch aligned indices that weren't in backward loop
+                aligned_indices_list = aligned_indices.cpu().tolist() if aligned_indices.numel() > 0 else []
+                if transfer_stream:
+                    with torch.cuda.stream(transfer_stream):
+                        for idx in aligned_indices_list:
+                            if idx not in forward_buffer_dict:  # Only prefetch if not already transferred
+                                stp = old_stps[idx].to(torch.device(optimizer_device), non_blocking=True)
+                                dir = old_dirs[idx].to(torch.device(optimizer_device), non_blocking=True)
+                                event = torch.cuda.Event()
+                                event.record(transfer_stream)
+                                forward_buffer_dict[idx] = (stp, dir, event)
                 else:
-                    next_old_dir_prefetch_fwd = old_dirs[first_aligned_idx].to(torch.device(optimizer_device), non_blocking=True)
-                    next_old_stp_prefetch_fwd = old_stps[first_aligned_idx].to(torch.device(optimizer_device), non_blocking=True)
+                    for idx in aligned_indices_list:
+                        if idx not in forward_buffer_dict:
+                            stp = old_stps[idx].to(torch.device(optimizer_device))
+                            dir = old_dirs[idx].to(torch.device(optimizer_device))
+                            forward_buffer_dict[idx] = (stp, dir, None)
 
                 for k in range(aligned_indices.numel()):
-                    i = aligned_indices[k] # Get the original index
-                    torch.cuda.synchronize() # Ensure current_old_dir and current_old_stp are ready
-                    current_old_dir_val = torch.jit.annotate(SparseFlatTensor, next_old_dir_prefetch_fwd)
-                    current_old_stp_val = torch.jit.annotate(SparseFlatTensor, next_old_stp_prefetch_fwd)
+                    current_idx = aligned_indices_list[k]  # Use list for direct indexing
                     
-                    if k < aligned_indices.numel() - 1:
-                        next_aligned_idx = aligned_indices[k + 1]
-                            
-                        # Initiate async pinning for next iteration while current operations run
-                        src_dir_next = old_dirs[next_aligned_idx]
-                        src_stp_next = old_stps[next_aligned_idx]
-                        
-                        if src_dir_next.values.device.type == 'cpu':
-                            with ThreadPoolExecutor(max_workers=2) as executor:
-                                # Submit pinning ops to thread pool
-                                dir_future = executor.submit(lambda: src_dir_next.pin_memory())
-                                stp_future = executor.submit(lambda: src_stp_next.pin_memory())
-                                # Store futures for next iteration
-                                self.fwd_dir_pinned, self.fwd_stp_pinned = dir_future, stp_future
-                                
-                        # Non-blocking transfer with pinned memory
-                        assert hasattr(self, 'fwd_dir_pinned') and hasattr(self, 'fwd_stp_pinned'), "Pinned futures missing!"
-                        next_dir_pinned = self.fwd_dir_pinned.result()
-                        next_stp_pinned = self.fwd_stp_pinned.result()
-                        next_old_dir_prefetch_fwd = next_dir_pinned.to(torch.device(optimizer_device), non_blocking=True)
-                        next_old_stp_prefetch_fwd = next_stp_pinned.to(torch.device(optimizer_device), non_blocking=True)
+                    # Wait for transfer completion if needed
+                    if current_idx in forward_buffer_dict:
+                        stp, dir, event = forward_buffer_dict[current_idx]
+                        if event:
+                            event.wait()
+                        current_old_stp_val = stp
+                        current_old_dir_val = dir
+                    else:
+                        # Fallback to synchronous transfer
+                        print("buffer miss in forward loop - should not happen")
+                        current_old_stp_val = old_stps[current_idx].to(torch.device(optimizer_device))
+                        current_old_dir_val = old_dirs[current_idx].to(torch.device(optimizer_device))
 
+                    # Process current element
                     old_dir_for_dense = SparseFlatTensor(
-                        current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32), # type: ignore[arg-type]
+                        current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32),
                         current_old_dir_val.total_size, current_old_dir_val.unit_indices, current_old_dir_val.unit_values.to(dtype=torch.float32)
                     )
                     dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
-                    alpha_val = al[i] - dot_product_val * ro[i].item()
+                    alpha_val = al[current_idx] - dot_product_val * ro[current_idx].item()
                     sparse_old_stp_scaled = SparseFlatTensor(
                         current_old_stp_val.starts, current_old_stp_val.ends, current_old_stp_val.values.to(dtype=torch.float32),
                         current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
                     ) * (alpha_val)
-                    d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)#TODO: test the in place operation to avoid a likely non-DCE'd clone
+                    d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)
 
-##                    d = torch.nan_to_num(d, nan=0.0) # , posinf=finfo.max, neginf=finfo.min)
-##                    print(f"sparse_direction_approximate hit_miss: {hit_miss}")
-#                    total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
-#                    total_norm = total_norm  / self.radius_ball
-#                    d = d.div_(total_norm)
-#            
-#                    total_norm = torch.linalg.vector_norm(d, ord=norm).to(torch.float32).to(optimizer_device)
-#                    scaled_norm = total_norm  / self.radius_s
-##                    print(f"max value pre-norm direction: {d.max()}, scaled_norm: {scaled_norm}")
-#                    d = d.to(torch.float32).div_(scaled_norm)
-#            
-#                    total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
-#                    total_norm = total_norm  / self.radius_ball
-#                    d = d.div_(total_norm)
-#            
-#                    d = torch.nan_to_num(d, nan=0.0) 
-
-#        d = torch.nan_to_num(d, nan=0.0) 
-#        print(f"sparse_direction_approximate hit_miss: {hit_miss}")
-#        total_norm = torch.linalg.vector_norm(d, ord=2.).to(torch.float32).to(optimizer_device)
-#        total_norm = total_norm / self.radius_ball
-#        d = d.div_(total_norm)
-#
-        # Layer-wise normalization
-        split_d = self._split_direction_to_layers(d)
-        eps = 1e-8
-        
-        # Normalize each parameter's direction chunk separately
-        normed_chunks = []
-        for param_d in split_d:
-            if param_d.numel() == 0:
-                continue
-            # Apply norm scaling
-            param_norm = torch.linalg.vector_norm(param_d, ord=norm)
-            scaled_norm = (param_norm / self.radius_s) + eps
-            normed = param_d / scaled_norm
-            
-            # Apply ball projection
-            param_l2 = torch.linalg.vector_norm(normed, ord=2)
-            ball_scale = min(1.0, self.radius_ball / (param_l2 + eps))
-            normed = normed * ball_scale
-
-            normed_chunks.append(normed.clone())  # Ensure we don't keep autograd graph
-            
-        d = torch.cat(normed_chunks)
-        
         d = torch.nan_to_num(d, nan=0.0).to(torch.float16)
         return d
 
@@ -1823,6 +1812,7 @@ class FBFGS(Optimizer):
                         gc.collect()
 
                         # Poll until memory changes or history becomes empty
+#TODO: this is broken we need a non sleep solution. Possibly just set history size since OS is unreliable.
                         while True:
                             cpu_ram_available = psutil.virtual_memory().available / (1024**3)
                             if cpu_ram_available != old_available_ram_before_pop or not old_dirs:
@@ -1833,8 +1823,8 @@ class FBFGS(Optimizer):
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
                 # Store new direction/step
-                old_dirs.append(y.to(self.direction_device, non_blocking=False, pin_memory=False)) # Store y as SparseFlatTensor
-                old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=False)) # Store s as SparseFlatTensor #TODO: pinme
+                old_dirs.append(y.to(self.direction_device, non_blocking=False, pin_memory=True)) # Store y as SparseFlatTensor
+                old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True)) # Store s as SparseFlatTensor #TODO: pinme
 # TODO: if we fixed the memory error, reintroduce pinned memory here
                 ro.append(torch.tensor([(1. / ys)])) #TODO: pinme
 #TODO: we have a problem with ys here +gtd - -gtd_new == ys < 0
@@ -1946,6 +1936,7 @@ class FBFGS(Optimizer):
 # Remove 10 largest rho entries from history if line search fails
                   if len(ro) > 0:
                       magnitudes = torch.stack([
+#TODO: sqrt the pow so we dont skew to direction over Rho
                           (s.values.pow(2).sum() + s.unit_values.pow(2).sum()) * r.item()
                           for s, r in zip(old_stps, ro)
                       ])
