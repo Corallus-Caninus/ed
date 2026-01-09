@@ -1254,14 +1254,11 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
     def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int) -> Tensor:
-        # Use CUDA events for better async overlap instead of global synchronize
+        PREFETCH_THRESHOLD_VALUES = 17 * 1_000_000  # 17 * 1 million values threshold
         compute_stream = torch.cuda.current_stream()
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
         
         num_old = len(old_dirs)
-        hit_miss = str("")
-        prefetch_buffer_size = 3
-
         q = flat_grad.to(torch.float32).to(optimizer_device).neg()
         split_q = self._split_direction_to_layers(q)
         eps = 1e-8
@@ -1286,66 +1283,72 @@ class FBFGS(Optimizer):
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=optimizer_device)
 
         if num_old > 0:
-            # Backward loop with event-based async prefetching using dictionary for O(1) lookups
-            backward_buffer_dict = {}  # idx -> (stp, dir, event)
-        
-            # Initial prefetch in transfer stream
-            if transfer_stream:
-                with torch.cuda.stream(transfer_stream):
-                    for idx in range(num_old - 1, max(-1, num_old - 1 - prefetch_buffer_size), -1):
-                        if idx >= 0:
-                            stp = old_stps[idx].to(torch.device(optimizer_device), non_blocking=True)
-                            dir = old_dirs[idx].to(torch.device(optimizer_device), non_blocking=True)
-                            event = torch.cuda.Event()
-                            event.record(transfer_stream)
-                            backward_buffer_dict[idx] = (stp, dir, event)
-            else:
-                # Fallback to synchronous transfer
-                for idx in range(num_old - 1, max(-1, num_old - 1 - prefetch_buffer_size), -1):
-                    if idx >= 0:
-                        stp = old_stps[idx].to(torch.device(optimizer_device))
-                        dir = old_dirs[idx].to(torch.device(optimizer_device))
-                        backward_buffer_dict[idx] = (stp, dir, None)
-
-            for i in range(num_old - 1, -1, -1):
-                start_time = time.time()
-                # Direct dictionary access instead of linear search
-                if i in backward_buffer_dict:
-                    stp, dir, event = backward_buffer_dict[i]
-                    if event:
-                        event.wait()
-                    current_sparse_stp_val = stp
-                    current_sparse_dir_val = dir
-                    del backward_buffer_dict[i]
-                else:
-                    # Fallback: direct transfer if not in buffer
-                    print("buffer miss first loop should never happen")
-                    current_sparse_stp_val = old_stps[i].to(torch.device(optimizer_device))
-                    current_sparse_dir_val = old_dirs[i].to(torch.device(optimizer_device))
+            # Backward loop with dynamic prefetching
+            backward_buffer_dict = {}
+            cumulative_values = 0
+            next_i = num_old - 1  # Start from last index
             
-                # Prefetch next elements (using dictionary)
-                next_i = i - prefetch_buffer_size
-                if next_i >= 0 and next_i not in backward_buffer_dict:
+            # Initial prefetch until threshold
+            while next_i >= 0 and cumulative_values < PREFETCH_THRESHOLD_VALUES:
+                if next_i not in backward_buffer_dict:
+                    stp = old_stps[next_i]
+                    dir = old_dirs[next_i]
+                    num_values = stp.values.numel() + dir.values.numel()
+                    
+                    if cumulative_values + num_values > PREFETCH_THRESHOLD_VALUES:
+                        break
+                    
                     if transfer_stream:
                         with torch.cuda.stream(transfer_stream):
-                            stp_next = old_stps[next_i].to(torch.device(optimizer_device), non_blocking=True)
-                            dir_next = old_dirs[next_i].to(torch.device(optimizer_device), non_blocking=True)
-                            event_next = torch.cuda.Event()
-                            event_next.record(transfer_stream)
-                            backward_buffer_dict[next_i] = (stp_next, dir_next, event_next)
+                            stp_device = stp.to(torch.device(optimizer_device), non_blocking=True)
+                            dir_device = dir.to(torch.device(optimizer_device), non_blocking=True)
+                            event = torch.cuda.Event()
+                            event.record(transfer_stream)
+                            backward_buffer_dict[next_i] = (stp_device, dir_device, event, num_values)
                     else:
-                        stp_next = old_stps[next_i].to(torch.device(optimizer_device))
-                        dir_next = old_dirs[next_i].to(torch.device(optimizer_device))
-                        backward_buffer_dict[next_i] = (stp_next, dir_next, None)
+                        stp_device = stp.to(torch.device(optimizer_device))
+                        dir_device = dir.to(torch.device(optimizer_device))
+                        backward_buffer_dict[next_i] = (stp_device, dir_device, None, num_values)
+                    
+                    cumulative_values += num_values
+                next_i -= 1
 
-                # Process current element (same logic as before)
+            # Process indices
+            for i in range(num_old - 1, -1, -1):
+                start_time = time.time()
+                
+                # Get current from buffer or prefetch
+                if i not in backward_buffer_dict:
+                    stp = old_stps[i]
+                    dir = old_dirs[i]
+                    num_values = stp.values.numel() + dir.values.numel()
+                    
+                    if transfer_stream:
+                        with torch.cuda.stream(transfer_stream):
+                            stp_device = stp.to(torch.device(optimizer_device), non_blocking=True)
+                            dir_device = dir.to(torch.device(optimizer_device), non_blocking=True)
+                            event = torch.cuda.Event()
+                            event.record(transfer_stream)
+                            backward_buffer_dict[i] = (stp_device, dir_device, event, num_values)
+                    else:
+                        stp_device = stp.to(torch.device(optimizer_device))
+                        dir_device = dir.to(torch.device(optimizer_device))
+                        backward_buffer_dict[i] = (stp_device, dir_device, None, num_values)
+                    
+                    cumulative_values += num_values
+                
+                stp_device, dir_device, event, num_values = backward_buffer_dict[i]
+                if event:
+                    event.wait()
+                
+                # Process current entry
                 sparse_stp_i = SparseFlatTensor(
-                    current_sparse_stp_val.starts, current_sparse_stp_val.ends, current_sparse_stp_val.values.to(dtype=torch.float32),
-                    current_sparse_stp_val.total_size, current_sparse_stp_val.unit_indices, current_sparse_stp_val.unit_values.to(dtype=torch.float32)
+                    stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
+                    stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
                 )
                 sparse_dir_i = SparseFlatTensor(
-                    current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
-                    current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
+                    dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
+                    dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                 )
 
                 curvature_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
@@ -1355,83 +1358,176 @@ class FBFGS(Optimizer):
                 else:
                     direction_similarity = orthogonality + 1
                     
-                aligned = (direction_similarity <= orthogonality  and direction_similarity >= -orthogonality)
+                aligned = (direction_similarity <= orthogonality and direction_similarity >= -orthogonality)
                 direction_alignment_mask[i] = aligned
                 
                 if direction_alignment_mask[i]:
                     alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
                     al[i] = alpha * ro[i].item()
                     sparse_old_dir_scaled = SparseFlatTensor(
-                        current_sparse_dir_val.starts, current_sparse_dir_val.ends, current_sparse_dir_val.values.to(dtype=torch.float32),
-                        current_sparse_dir_val.total_size, current_sparse_dir_val.unit_indices, current_sparse_dir_val.unit_values.to(dtype=torch.float32)
+                        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
+                        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                     ) * ((-al[i]))
                     q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
-                else:
-                    pass  # No print for alignment
+                
+                # Cleanup and prefetch next
+                del backward_buffer_dict[i]
+                cumulative_values -= num_values
+                
+                # Prefetch next entries until threshold
+                next_i = i - 1
+                while next_i >= 0 and cumulative_values < PREFETCH_THRESHOLD_VALUES:
+                    if next_i not in backward_buffer_dict:
+                        stp_next = old_stps[next_i]
+                        dir_next = old_dirs[next_i]
+                        num_values_next = stp_next.values.numel() + dir_next.values.numel()
+                        
+                        if cumulative_values + num_values_next > PREFETCH_THRESHOLD_VALUES:
+                            break
+                        
+                        if transfer_stream:
+                            with torch.cuda.stream(transfer_stream):
+                                stp_next_device = stp_next.to(torch.device(optimizer_device), non_blocking=True)
+                                dir_next_device = dir_next.to(torch.device(optimizer_device), non_blocking=True)
+                                event_next = torch.cuda.Event()
+                                event_next.record(transfer_stream)
+                                backward_buffer_dict[next_i] = (stp_next_device, dir_next_device, event_next, num_values_next)
+                        else:
+                            stp_next_device = stp_next.to(torch.device(optimizer_device))
+                            dir_next_device = dir_next.to(torch.device(optimizer_device))
+                            backward_buffer_dict[next_i] = (stp_next_device, dir_next_device, None, num_values_next)
+                        
+                        cumulative_values += num_values_next
+                    next_i -= 1
 
                 end_time = time.time()
-                elapsed = end_time - start_time
-                print(f"{elapsed:.4f} ", end='', flush=True)
+                print(f"{end_time - start_time:.4f} ", end='', flush=True)
 
         print("Q max after first loop: " + str(q.max()))
         d = q.mul(H_diag.to(torch.float32))
         del q
         d = torch.nan_to_num(d, nan=0.0)
-        print(f"sparse_direction_approximate hit_miss: {hit_miss}")
 
         if num_old > 0:
             aligned_indices = torch.nonzero(direction_alignment_mask).squeeze(1)
             if aligned_indices.numel() > 0:
-                # Use the same buffer dictionary for forward loop, but only for aligned indices
-                forward_buffer_dict = backward_buffer_dict.copy() if 'backward_buffer_dict' in locals() else {}
+                # Forward loop with dynamic prefetching
+                forward_buffer_dict = {}
+                cumulative_values_fwd = 0
+                aligned_indices_list = aligned_indices.cpu().tolist()
+                
+                # Prefetch aligned indices
+                for idx in aligned_indices_list:
+                    if idx in forward_buffer_dict:
+                        continue
+                    stp = old_stps[idx]
+                    dir = old_dirs[idx]
+                    num_values = stp.values.numel() + dir.values.numel()
+                    
+                    if cumulative_values_fwd + num_values > PREFETCH_THRESHOLD_VALUES:
+                        break
+                    
+                    if transfer_stream:
+                        with torch.cuda.stream(transfer_stream):
+                            stp_device = stp.to(torch.device(optimizer_device), non_blocking=True)
+                            dir_device = dir.to(torch.device(optimizer_device), non_blocking=True)
+                            event = torch.cuda.Event()
+                            event.record(transfer_stream)
+                            forward_buffer_dict[idx] = (stp_device, dir_device, event, num_values)
+                    else:
+                        stp_device = stp.to(torch.device(optimizer_device))
+                        dir_device = dir.to(torch.device(optimizer_device))
+                        forward_buffer_dict[idx] = (stp_device, dir_device, None, num_values)
+                    
+                    cumulative_values_fwd += num_values
 
-                # Prefetch aligned indices that weren't in backward loop
-                aligned_indices_list = aligned_indices.cpu().tolist() if aligned_indices.numel() > 0 else []
-                if transfer_stream:
-                    with torch.cuda.stream(transfer_stream):
-                        for idx in aligned_indices_list:
-                            if idx not in forward_buffer_dict:  # Only prefetch if not already transferred
-                                stp = old_stps[idx].to(torch.device(optimizer_device), non_blocking=True)
-                                dir = old_dirs[idx].to(torch.device(optimizer_device), non_blocking=True)
+                for k in range(len(aligned_indices_list)):
+                    idx = aligned_indices_list[k]
+                    if idx not in forward_buffer_dict:
+                        stp = old_stps[idx]
+                        dir = old_dirs[idx]
+                        num_values = stp.values.numel() + dir.values.numel()
+                        
+                        if transfer_stream:
+                            with torch.cuda.stream(transfer_stream):
+                                stp_device = stp.to(torch.device(optimizer_device), non_blocking=True)
+                                dir_device = dir.to(torch.device(optimizer_device), non_blocking=True)
                                 event = torch.cuda.Event()
                                 event.record(transfer_stream)
-                                forward_buffer_dict[idx] = (stp, dir, event)
-                else:
-                    for idx in aligned_indices_list:
-                        if idx not in forward_buffer_dict:
-                            stp = old_stps[idx].to(torch.device(optimizer_device))
-                            dir = old_dirs[idx].to(torch.device(optimizer_device))
-                            forward_buffer_dict[idx] = (stp, dir, None)
-
-                for k in range(aligned_indices.numel()):
-                    current_idx = aligned_indices_list[k]  # Use list for direct indexing
+                                forward_buffer_dict[idx] = (stp_device, dir_device, event, num_values)
+                        else:
+                            stp_device = stp.to(torch.device(optimizer_device))
+                            dir_device = dir.to(torch.device(optimizer_device))
+                            forward_buffer_dict[idx] = (stp_device, dir_device, None, num_values)
+                        
+                        cumulative_values_fwd += num_values
                     
-                    # Wait for transfer completion if needed
-                    if current_idx in forward_buffer_dict:
-                        stp, dir, event = forward_buffer_dict[current_idx]
-                        if event:
-                            event.wait()
-                        current_old_stp_val = stp
-                        current_old_dir_val = dir
-                    else:
-                        # Fallback to synchronous transfer
-                        print("buffer miss in forward loop - should not happen")
-                        current_old_stp_val = old_stps[current_idx].to(torch.device(optimizer_device))
-                        current_old_dir_val = old_dirs[current_idx].to(torch.device(optimizer_device))
-
-                    # Process current element
+                    stp_device, dir_device, event, num_values = forward_buffer_dict[idx]
+                    if event:
+                        event.wait()
+                    
+                    # Process current aligned index
                     old_dir_for_dense = SparseFlatTensor(
-                        current_old_dir_val.starts, current_old_dir_val.ends, current_old_dir_val.values.to(dtype=torch.float32),
-                        current_old_dir_val.total_size, current_old_dir_val.unit_indices, current_old_dir_val.unit_values.to(dtype=torch.float32)
+                        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
+                        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                     )
                     dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
-                    alpha_val = al[current_idx] - dot_product_val * ro[current_idx].item()
+                    alpha_val = al[idx] - dot_product_val * ro[idx].item()
                     sparse_old_stp_scaled = SparseFlatTensor(
-                        current_old_stp_val.starts, current_old_stp_val.ends, current_old_stp_val.values.to(dtype=torch.float32),
-                        current_old_stp_val.total_size, current_old_stp_val.unit_indices, current_old_stp_val.unit_values.to(dtype=torch.float32)
+                        stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
+                        stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
                     ) * (alpha_val)
                     d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)
+                    
+                    # Cleanup
+                    del forward_buffer_dict[idx]
+                    cumulative_values_fwd -= num_values
+                    
+                    # Prefetch next aligned indices
+                    next_k = k + 1
+                    while next_k < len(aligned_indices_list) and cumulative_values_fwd < PREFETCH_THRESHOLD_VALUES:
+                        next_idx = aligned_indices_list[next_k]
+                        if next_idx in forward_buffer_dict:
+                            next_k += 1
+                            continue
+                        stp_next = old_stps[next_idx]
+                        dir_next = old_dirs[next_idx]
+                        num_values_next = stp_next.values.numel() + dir_next.values.numel()
+                        
+                        if cumulative_values_fwd + num_values_next > PREFETCH_THRESHOLD_VALUES:
+                            break
+                        
+                        if transfer_stream:
+                            with torch.cuda.stream(transfer_stream):
+                                stp_next_device = stp_next.to(torch.device(optimizer_device), non_blocking=True)
+                                dir_next_device = dir_next.to(torch.device(optimizer_device), non_blocking=True)
+                                event_next = torch.cuda.Event()
+                                event_next.record(transfer_stream)
+                                forward_buffer_dict[next_idx] = (stp_next_device, dir_next_device, event_next, num_values_next)
+                        else:
+                            stp_next_device = stp_next.to(torch.device(optimizer_device))
+                            dir_next_device = dir_next.to(torch.device(optimizer_device))
+                            forward_buffer_dict[next_idx] = (stp_next_device, dir_next_device, None, num_values_next)
+                        
+                        cumulative_values_fwd += num_values_next
+                        next_k += 1
 
+        d = torch.nan_to_num(d, nan=0.0)
+        # Normalize per parameter chunk using the same method as initial gradient
+        split_d = self._split_direction_to_layers(d)
+        eps = 1e-8
+        normed_chunks = []
+        for param_d in split_d:
+            if param_d.numel() == 0:
+                normed_chunks.append(param_d)
+                continue
+            
+            param_norm = torch.linalg.vector_norm(param_d, ord=norm)
+            scaled_norm = (param_norm / self.radius_ball) + eps
+            normed = param_d / scaled_norm
+            normed_chunks.append(normed)
+            
+        d = torch.cat(normed_chunks, 0)
         d = torch.nan_to_num(d, nan=0.0).to(torch.float16)
         return d
 
