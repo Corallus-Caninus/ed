@@ -1108,7 +1108,7 @@ class FBFGS(Optimizer):
                     if chk.numel() > 0 else torch.tensor(0., device=device)
                     for chk in chunks
                 ])
-                scaling_factors = (norms / radius_scaling) + eps
+                scaling_factors = (norms / radius_scaling) 
                 chunks = [
                     chk / factor
                     for chk, factor in zip(chunks, scaling_factors)
@@ -1124,7 +1124,7 @@ class FBFGS(Optimizer):
                 ])
                 ball_factors = torch.minimum(
                     torch.tensor(1.0, device=device),
-                    radius_ball / (l2_norms + eps)
+                    radius_ball / (l2_norms )
                 )
                 chunks = [
                     chk * factor
@@ -1167,7 +1167,7 @@ class FBFGS(Optimizer):
         # Vectorized normalization
         valid_mask = norms > 0
         scaling_factors = torch.ones_like(norms)
-        scaling_factors[valid_mask] = norms[valid_mask] / radius_s + eps
+        scaling_factors[valid_mask] = norms[valid_mask] / radius_s 
         inverse_scaling = 1.0 / scaling_factors
         
         # Create mask for all elements in non-empty chunks
@@ -1254,7 +1254,7 @@ class FBFGS(Optimizer):
         return loss, flat_grad
 
     def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int) -> Tensor:
-        PREFETCH_THRESHOLD_VALUES = 17 * 1_000_000  # 17 * 1 million values threshold
+        PREFETCH_THRESHOLD_VALUES = 20 * 1_000_000  # 20 * 1 million values threshold
         compute_stream = torch.cuda.current_stream()
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
         
@@ -1271,7 +1271,7 @@ class FBFGS(Optimizer):
                 continue
             
             param_norm = torch.linalg.vector_norm(param_q, ord=2)
-            scaled_norm = (param_norm / self.radius_ball) + eps
+            scaled_norm = (param_norm / self.radius_ball) 
             normed = param_q / scaled_norm
             normed_chunks.append(normed)
             
@@ -1523,7 +1523,7 @@ class FBFGS(Optimizer):
                 continue
             
             param_norm = torch.linalg.vector_norm(param_d, ord=norm)
-            scaled_norm = (param_norm / self.radius_ball) + eps
+            scaled_norm = (param_norm / self.radius_s) 
             normed = param_d / scaled_norm
             normed_chunks.append(normed)
             
@@ -1789,7 +1789,7 @@ class FBFGS(Optimizer):
                   
                   # Compute L2 norm for this parameter's chunk
                   param_norm = torch.linalg.vector_norm(param_q, ord=2)
-                  scaled_norm = (param_norm / self.radius_ball) + eps
+                  scaled_norm = (param_norm / self.radius_ball) 
                   
                   # Scale the parameter chunk
                   normed = param_q / scaled_norm
@@ -1802,45 +1802,61 @@ class FBFGS(Optimizer):
 
 #TODO: this kinda throws off selection but also makes it independent of s which may be useful. Note here we may want to do this after the initial selection.
 #TODO: this should be done after the div if in place otherwise we dont rescale with the l2 correctly
-#              s_mask = s_sparse.get_nonzero_mask()  # Use the new method
-#              ys_dense = y_dense.clone()
-#              ys_dense[~s_mask] = 0
+              s_mask = s_sparse.get_nonzero_mask()  # Use the new method
+              ys_dense = y_dense.clone()
+              ys_dense[~s_mask] = 0
 
               #Shotgun noise
 #TODO: find the indices of the selected parameters instead of div then multiply since this is lossy in the mantissa
 #TODO: this creates an additional tensor make sure this isnt worst case allocation optimizing the tensor ops for memory
-#              norm_y = torch.linalg.vector_norm(y_dense, ord=y_norm) / radius_y
-#              y_selection = y_dense.div(norm_y)
-#              del y_selection
-#              y_mask = (y_dense == 0)
-#              ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
-#              ys_dense[~ys_mask] = 0
-#              print("y dense pre s-mask " + str((y_dense != 0).sum()))
-#              print("s mask: " + str((s_mask!=0).sum()))
-#              y_dense.add_(ys_dense)
-#              print("y dense + s_mask  " + str((y_dense != 0).sum()))
-#
-#              norm_yf = torch.linalg.vector_norm(y_dense, ord=2.) / radius_ball
-#              print("got norm_yf: " +str(norm_yf))
-#              y_dense.div_(norm_yf)
+              # Layerwise normalization for the first step (replacing norm_y)
+              split_y = self._split_direction_to_layers(y_dense)
+              eps = 1e-8
+              normed_chunks = []
+              for param_y in split_y:
+                  if param_y.numel() == 0:
+                      normed_chunks.append(param_y)
+                      continue
+                  param_norm = torch.linalg.vector_norm(param_y, ord=y_norm)
+                  scaled_norm = (param_norm / self.radius_y) 
+                  normed = param_y / scaled_norm
+                  normed_chunks.append(normed)
+              y_selection = torch.cat(normed_chunks, 0)
+              # Now use y_selection in place of the divided y_dense
+              y_dense = y_selection
+              del y_selection
+
+              y_mask = (y_dense == 0)
+              ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
+              ys_dense[~ys_mask] = 0
+              print("y dense pre s-mask " + str((y_dense != 0).sum()))
+              print("s mask: " + str((s_mask!=0).sum()))
+              y_dense.add_(ys_dense)
+              print("y dense + s_mask  " + str((y_dense != 0).sum()))
+
+              # Layerwise normalization for the second step (replacing norm_yf)
+              split_y = self._split_direction_to_layers(y_dense)
+              normed_chunks = []
+              for param_y in split_y:
+                  if param_y.numel() == 0:
+                      normed_chunks.append(param_y)
+                      continue
+                  param_norm = torch.linalg.vector_norm(param_y, ord=2)
+                  scaled_norm = (param_norm / self.radius_ball) 
+                  normed = param_y / scaled_norm
+                  normed_chunks.append(normed)
+              y_dense = torch.cat(normed_chunks, 0)
+              # Calculate global norm for debugging/compatibility
+#              norm_yf = torch.linalg.vector_norm(y_dense, ord=2.)
+#              print("got norm_yf: " + str(norm_yf))
 
 #              norm_y_dense = norm_y_dense * yf #if the full vector is the unit distance, this should be proportional
-#              del ys_dense
-#              del ys_mask
-#              del y_mask
-#              del s_mask
+              del ys_dense
+              del ys_mask
+              del y_mask
+              del s_mask
               torch.cuda.empty_cache()
               gc.collect() # Collect garbage
-
-#TODO consider scale aware thresholding s.t. ys >= 1e-1* s.dot(s).sqr()
-#TODO: maybe this should be rho so we dont throw off the Hessian diag
-#              yf = self._numel() / (y_dense != 0).sum()
-#              ys = ys * yf
-#              ys = ys * 1e2
-#NOTE: 0.1 is approx 368/30Mill. we may have a better way to formulate this by clipping according to an inverse of yf
-#              yf =  (y_dense != 0).sum() / self._numel()
-#              if ys <= 0.1 and ys > 0 and t > 1: #NOTE: was 0.1
-#                ys = 0.1
 
 #              if ys > 0:
 #                y_squared = y_dense.dot(y_dense)
