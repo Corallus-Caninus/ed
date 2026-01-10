@@ -127,7 +127,7 @@ else:
 batch_train = None
 
 # Initialize FBFGS optimizer
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=0.8,norm=0.8, radius_y = 1,radius_ball = 1,radius_s = 1,c1 = 1e-7, c2=0.1,direction_device="cpu", optimizer_device="cuda", bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 10, rho_rewind=1, orthogonality=1e30, max_ls=10)
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=1, norm=1, radius_y = 1e-2,radius_ball = 1,radius_s = 1e-2,c1 = 1e-7, c2=0.1,direction_device="cpu", optimizer_device="cuda", bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 10, rho_rewind=1, orthogonality=1e30, max_ls=10)
 
 step_count = 0
 step_data = []
