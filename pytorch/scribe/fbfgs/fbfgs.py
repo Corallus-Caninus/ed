@@ -1772,7 +1772,7 @@ class FBFGS(Optimizer):
               original_y_dtype = y_dense.dtype # Store original dtype
 #TODO: we may not need y_dense now
 #              y_dense = y_dense.clone()
-              norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) / self.radius_y
+#              norm_y_dense = torch.linalg.vector_norm(y_dense, ord=2.) / self.radius_y
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
 #              norm_y_dense = max(1e-9, norm_y_dense)
 
@@ -1817,7 +1817,7 @@ class FBFGS(Optimizer):
                       normed_chunks.append(param_y)
                       continue
                   param_norm = torch.linalg.vector_norm(param_y, ord=y_norm)
-                  scaled_norm = (param_norm / self.radius_y) 
+                  scaled_norm = (param_norm / self.radius_y)
                   normed = param_y / scaled_norm
                   normed = normed * scaled_norm
                   normed_chunks.append(normed)
@@ -1827,9 +1827,9 @@ class FBFGS(Optimizer):
               del y_selection
 
 
-              y_mask = (y_dense == 0)
-              ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
-              ys_dense[~ys_mask] = 0
+              y_mask = (y_dense != 0)
+#              ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
+              y_dense[s_mask] = 0
               print("y dense pre s-mask " + str((y_dense != 0).sum()))
               print("s mask: " + str((s_mask!=0).sum()))
               print("ys:: " + str((ys_dense!=0).sum()))
@@ -1854,7 +1854,7 @@ class FBFGS(Optimizer):
 
 #              norm_y_dense = norm_y_dense * yf #if the full vector is the unit distance, this should be proportional
               del ys_dense
-              del ys_mask
+#              del ys_mask
               del y_mask
               del s_mask
               torch.cuda.empty_cache()
@@ -1891,7 +1891,7 @@ class FBFGS(Optimizer):
 #                s = s_dense
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
 #              print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ') # Print S elements
-              print("y-delta elements: " + str((y.to_dense() != 0).sum()) + " total: " + str(y.to_dense().numel()), end=' ')
+              print("y-delta elements: " + str((y_dense != 0).sum()) + " total: " + str(y_dense.numel()), end=' ')
 #TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be modeled as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
 #TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
 #TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
