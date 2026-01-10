@@ -1136,7 +1136,6 @@ class FBFGS(Optimizer):
 
     def _gather_flat_norm_grad(self, order: int = 2, radius_s: float = 1.0):
         """Gather gradients, normalize each layer by norm, then flatten"""
-        eps = 1e-8  # Avoid division by zero
         
         # Collect all gradients with optional zero-fill for None grads
         grads = []
@@ -1261,7 +1260,6 @@ class FBFGS(Optimizer):
         num_old = len(old_dirs)
         q = flat_grad.to(torch.float32).to(optimizer_device).neg()
         split_q = self._split_direction_to_layers(q)
-        eps = 1e-8
         
         # Normalize each parameter's chunk
         normed_chunks = []
@@ -1515,7 +1513,6 @@ class FBFGS(Optimizer):
         d = torch.nan_to_num(d, nan=0.0)
         # Normalize per parameter chunk using the same method as initial gradient
         split_d = self._split_direction_to_layers(d)
-        eps = 1e-8
         normed_chunks = []
         for param_d in split_d:
             if param_d.numel() == 0:
@@ -1742,11 +1739,12 @@ class FBFGS(Optimizer):
 #TODO: clip flat_grad and prev_flat_grad here respectively (if not already done).
               # prev_flat_grad is moved to optimizer_device for calculation, then immediately deleted
               # to free up memory.
-              y_dense = flat_grad.clone() # y_dense is on flat_grad's device (optimizer_device)
-              y_dense.sub_(prev_flat_grad.to(self.optimizer_device)) # Ensure prev_flat_grad is on optimizer_device
+              y_dense = flat_grad.clone().to(torch.float16) # y_dense is on flat_grad's device (optimizer_device)
+              y_dense.sub_(prev_flat_grad.to(torch.float16).to(self.optimizer_device)) # Ensure prev_flat_grad.to(torch.float16) is on optimizer_device
+              y_dense= y_dense.to(torch.float16)
 #              s_dense = (d.mul(t)) # Define s_dense here
-              s_sparse = d * t # Define s_sparse here
-#              ys = y_dense.dot(s_dense)
+              s_sparse = d * t #Define s_sparse here
+#              ys = y_dense.dot(s_sparse)
               ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
               if ys > 0:
                 y_squared = y_dense.dot(y_dense)
@@ -1778,23 +1776,22 @@ class FBFGS(Optimizer):
 #TODO: it may be of note that doing selection on the raw y may remove some of the late convergence aspects of the l2 distribution despite being a sample of the l2 distribution. We may need to normalize first (but keep rho on raw) for the y selection
 #              norm_y_dense = max(1e-9, norm_y_dense)
 
-              eps = 1e-8
-              split_y = self._split_direction_to_layers(y_dense)
-              normed_chunks = []
-              for param_q in split_y:
-                  # Skip empty chunks
-                  if param_q.numel() == 0:
-                      normed_chunks.append(param_q)
-                      continue
-                  
-                  # Compute L2 norm for this parameter's chunk
-                  param_norm = torch.linalg.vector_norm(param_q, ord=2)
-                  scaled_norm = (param_norm / self.radius_ball) 
-                  
-                  # Scale the parameter chunk
-                  normed = param_q / scaled_norm
-                  normed_chunks.append(normed)
-              y_dense = torch.cat(normed_chunks)
+#              split_y = self._split_direction_to_layers(y_dense)
+#              normed_chunks = []
+#              for param_q in split_y:
+#                  # Skip empty chunks
+#                  if param_q.numel() == 0:
+#                      normed_chunks.append(param_q)
+#                      continue
+#                  
+#                  # Compute L2 norm for this parameter's chunk
+#                  param_norm = torch.linalg.vector_norm(param_q, ord=2)
+#                  scaled_norm = (param_norm / self.radius_ball) 
+#                  
+#                  # Scale the parameter chunk
+#                  normed = param_q / scaled_norm
+#                  normed_chunks.append(normed)
+#              y_dense = torch.cat(normed_chunks)
 #              y_dense.div_(norm_y_dense)
 
               torch.cuda.empty_cache() # Clear cache
@@ -1802,7 +1799,10 @@ class FBFGS(Optimizer):
 
 #TODO: this kinda throws off selection but also makes it independent of s which may be useful. Note here we may want to do this after the initial selection.
 #TODO: this should be done after the div if in place otherwise we dont rescale with the l2 correctly
+
+#TODO: this is likely broken test:
               s_mask = s_sparse.get_nonzero_mask()  # Use the new method
+#              s_mask = (s_sparse != 0)
               ys_dense = y_dense.clone()
               ys_dense[~s_mask] = 0
 
@@ -1811,7 +1811,6 @@ class FBFGS(Optimizer):
 #TODO: this creates an additional tensor make sure this isnt worst case allocation optimizing the tensor ops for memory
               # Layerwise normalization for the first step (replacing norm_y)
               split_y = self._split_direction_to_layers(y_dense)
-              eps = 1e-8
               normed_chunks = []
               for param_y in split_y:
                   if param_y.numel() == 0:
@@ -1820,17 +1819,20 @@ class FBFGS(Optimizer):
                   param_norm = torch.linalg.vector_norm(param_y, ord=y_norm)
                   scaled_norm = (param_norm / self.radius_y) 
                   normed = param_y / scaled_norm
+                  normed = normed * scaled_norm
                   normed_chunks.append(normed)
               y_selection = torch.cat(normed_chunks, 0)
               # Now use y_selection in place of the divided y_dense
               y_dense = y_selection
               del y_selection
 
+
               y_mask = (y_dense == 0)
               ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
               ys_dense[~ys_mask] = 0
               print("y dense pre s-mask " + str((y_dense != 0).sum()))
               print("s mask: " + str((s_mask!=0).sum()))
+              print("ys:: " + str((ys_dense!=0).sum()))
               y_dense.add_(ys_dense)
               print("y dense + s_mask  " + str((y_dense != 0).sum()))
 
