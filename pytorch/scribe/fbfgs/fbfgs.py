@@ -219,28 +219,14 @@ class SparseFlatTensor:
         Returns:
             Tensor: The dense result of the addition (dense_tensor_arg is modified in-place).
         """
-        # dense_tensor = dense_tensor_arg # Explicitly use dense_tensor_arg
         assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
-
-        # result_dense_tensor = dense_tensor.clone() # Not needed for in-place
-
-        # Debug statements to identify bounds issue - removed for clarity, can be re-added if needed
-        # print(f"dense_tensor size: {dense_tensor_arg.numel()}")
-        # print(f"sparse_tensor total_size: {sparse_tensor.total_size}")
-        # print(f"offset: {offset}")
-        # if sparse_tensor.starts.numel() > 0:
-        #     # ... (similar debug prints adjusted for offset logic)
-        # print(f"max unit_indices (global): {sparse_tensor.unit_indices.max() if sparse_tensor.unit_indices.numel() > 0 else 'N/A'}")
 
         # Process segments
         if sparse_tensor.starts.numel() > 0:
-            # --- Key Change: Adjust indices relative to the offset ---
-            # Filter segments that potentially overlap with the current dense_tensor region
-            # The dense tensor covers indices [offset, offset + dense_tensor_arg.numel())
             region_start = offset
             region_end = offset + dense_tensor_arg.numel()
 
-            # Find segments that start before the region ends and end after the region starts
+            # Find segments that potentially overlap with the current dense_tensor region
             potential_overlap_mask = (sparse_tensor.starts < region_end) & (sparse_tensor.ends > region_start)
 
             if potential_overlap_mask.any():
@@ -300,6 +286,110 @@ class SparseFlatTensor:
 
         # Return the modified tensor (in-place modification)
         return dense_tensor_arg
+
+    @staticmethod
+    def add_sparse_dense_multiple(sparse_tensor: 'SparseFlatTensor', dense_tensor: Tensor, offsets: list[int], alpha: float = 1.0) -> Tensor:
+        """
+        Adds a SparseFlatTensor to a dense tensor that represents multiple parameter segments,
+        using a list of offsets for each parameter. This is vectorized across all parameters.
+        
+        Args:
+            sparse_tensor (SparseFlatTensor): The sparse tensor to add.
+            dense_tensor (Tensor): The dense tensor containing all parameter segments (modified in-place).
+            offsets (list[int]): List of start offsets for each parameter segment in the dense tensor.
+            alpha (float, optional): Scaling factor. Defaults to 1.0.
+            
+        Returns:
+            Tensor: The modified dense tensor.
+        """
+        assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor to be a SparseFlatTensor"
+        
+        if sparse_tensor.starts.numel() == 0 and sparse_tensor.unit_indices.numel() == 0:
+            return dense_tensor
+            
+        device = dense_tensor.device
+        dtype = dense_tensor.dtype
+        
+        # Process segments
+        if sparse_tensor.starts.numel() > 0:
+            # Find which parameter each segment belongs to using vectorized operations
+            # Create a tensor of segment midpoints
+            segment_midpoints = (sparse_tensor.starts + sparse_tensor.ends) // 2
+            
+            # Use searchsorted to find which parameter offset range each segment belongs to
+            # offsets_tensor should include a final offset for the end (total_size)
+            offsets_tensor = torch.tensor(offsets + [dense_tensor.numel()], device=device, dtype=torch.long)
+            
+            # Find parameter index for each segment
+            param_indices = torch.searchsorted(offsets_tensor, segment_midpoints, right=True) - 1
+            
+            # Filter segments that are within valid parameter ranges
+            valid_segment_mask = (param_indices >= 0) & (param_indices < len(offsets))
+            
+            if valid_segment_mask.any():
+                # Get valid segments and their corresponding parameter indices
+                valid_segments = sparse_tensor.starts[valid_segment_mask]
+                valid_ends = sparse_tensor.ends[valid_segment_mask]
+                valid_param_indices = param_indices[valid_segment_mask]
+                
+                # Calculate local offsets for each segment relative to its parameter
+                param_offsets = torch.tensor(offsets, device=device, dtype=torch.long)[valid_param_indices]
+                segment_starts_local = valid_segments - param_offsets
+                segment_ends_local = valid_ends - param_offsets
+                
+                # Calculate segment lengths
+                segment_lengths = segment_ends_local - segment_lengths
+                
+                # Generate all local indices for all segments
+                local_indices = torch.repeat_interleave(segment_starts_local, segment_lengths) + torch.arange(segment_lengths.sum(), device=device) - torch.repeat_interleave(torch.arange(segment_lengths.numel(), device=device) * segment_lengths, segment_lengths)
+                
+                # Get the corresponding values from the sparse tensor
+                # First, calculate which original segment each local index belongs to
+                original_segment_indices = torch.repeat_interleave(torch.arange(valid_segments.numel(), device=device), segment_lengths)
+                
+                # Then calculate the value index within the sparse tensor's values
+                original_segment_lengths = sparse_tensor.ends - sparse_tensor.starts
+                original_value_starts = torch.cat([torch.tensor([0], device=device), original_segment_lengths.cumsum(0)[:-1]])
+                
+                # Filter to only valid segments
+                valid_original_indices = torch.nonzero(valid_segment_mask).squeeze(1)
+                valid_original_value_starts = original_value_starts[valid_original_indices]
+                value_indices = valid_original_value_starts[original_segment_indices] + (local_indices - torch.repeat_interleave(segment_starts_local, segment_lengths))
+                
+                # Get the values
+                values = sparse_tensor.values[value_indices]
+                
+                # Apply scaling
+                scaled_values = values * alpha
+                
+                # Add to dense tensor
+                dense_tensor[local_indices] += scaled_values
+        
+        # Process unit indices
+        if sparse_tensor.unit_indices.numel() > 0:
+            # Find which parameter each unit index belongs to
+            unit_indices = sparse_tensor.unit_indices
+            
+            # Use searchsorted to find which parameter offset range each unit index belongs to
+            offsets_tensor = torch.tensor(offsets + [dense_tensor.numel()], device=device, dtype=torch.long)
+            param_indices = torch.searchsorted(offsets_tensor, unit_indices, right=True) - 1
+            
+            # Filter unit indices that are within valid parameter ranges
+            valid_unit_mask = (param_indices >= 0) & (param_indices < len(offsets))
+            
+            if valid_unit_mask.any():
+                valid_unit_indices = unit_indices[valid_unit_mask]
+                valid_unit_values = sparse_tensor.unit_values[valid_unit_mask]
+                valid_param_indices = param_indices[valid_unit_mask]
+                
+                # Calculate local offsets for each unit index relative to its parameter
+                param_offsets = torch.tensor(offsets, device=device, dtype=torch.long)[valid_param_indices]
+                local_unit_indices = valid_unit_indices - param_offsets
+                
+                # Apply scaling and add to dense tensor
+                dense_tensor[local_unit_indices] += valid_unit_values * alpha
+        
+        return dense_tensor
 
     @staticmethod
     def _add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor, offset: int = 0) -> Tensor:
@@ -1022,7 +1112,16 @@ class FBFGS(Optimizer):
         self.max_ls= max_ls
         self.max_iter = max_iter
         self.t = 1
-        self._init_flat_params()
+        
+        # Compute and store offsets for parameters
+        self._offsets = []
+        offset = 0
+        for p in self._params:
+            self._offsets.append(offset)
+            if torch.is_complex(p):
+                offset += 2 * p.numel()
+            else:
+                offset += p.numel()
 
     def _numel(self):
         if self._numel_cache is None:
@@ -1033,15 +1132,7 @@ class FBFGS(Optimizer):
 
         return self._numel_cache
 
-    def _init_flat_params(self):
-        """Create a contiguous flat view of all parameters for batch updates"""
-        param_list = []
-        for p in self._params:
-            if torch.is_complex(p):
-                param_list.append(torch.view_as_real(p).view(-1))
-            else:
-                param_list.append(p.view(-1))
-        self._flat_params = torch.cat(param_list)
+    # Remove _init_flat_params method entirely
 
     def _split_direction_to_layers(self, flat_tensor):
         """Split flat tensor into chunks corresponding to parameter sizes."""
@@ -1145,6 +1236,7 @@ class FBFGS(Optimizer):
 
             return torch.cat(chunks)
 
+#TODO: BROKEN!
     def _gather_flat_norm_grad(self, order: int = 2, radius_s: float = 1.0):
         """Gather gradients, normalize each layer by norm, then flatten"""
         
@@ -1195,20 +1287,55 @@ class FBFGS(Optimizer):
         return normed_flat_grad
 
     def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
-        """Perform batch parameter update using vectorized operations"""
+        """Perform batch parameter update using stored offsets in a vectorized manner"""
         if isinstance(update, SparseFlatTensor):
             # Handle sparse updates with vectorized method
-            SparseFlatTensor._add_sparse_dense_alpha(update, self._flat_params, alpha=step_size, offset=0)
+            # Move sparse tensor to optimizer device if needed
+            if update.values.device != self.optimizer_device:
+                update = update.to(self.optimizer_device)
+            
+            # Create a flat view of all parameters for vectorized update
+            flat_params_list = []
+            for p in self._params:
+                if torch.is_complex(p):
+                    flat_params_list.append(torch.view_as_real(p).view(-1))
+                else:
+                    flat_params_list.append(p.view(-1))
+            flat_params = torch.cat(flat_params_list)
+            
+            # Use vectorized sparse update on the flat parameters
+            SparseFlatTensor.add_sparse_dense_multiple(update, flat_params, self._offsets, alpha=step_size)
+            
+            # Copy the updated flat values back to individual parameters
+            offset = 0
+            for p in self._params:
+                numel = p.numel()
+                if torch.is_complex(p):
+                    p_view = torch.view_as_real(p).view(-1)
+                else:
+                    p_view = p.view(-1)
+                p_view.copy_(flat_params[offset:offset+numel])
+                offset += numel
         else:
             # Handle dense updates in batch
             if update.device != self.optimizer_device:
                 update = update.to(self.optimizer_device)
             
-            # Single in-place update for all parameters
-            self._flat_params.add_(update, alpha=step_size)
+            # Update each parameter directly using stored offsets
+            for i, p in enumerate(self._params):
+                start = self._offsets[i]
+                end = self._offsets[i+1] if i+1 < len(self._offsets) else self._numel()
+                numel = p.numel()
+                if torch.is_complex(p):
+                    p_view = torch.view_as_real(p).view(-1)
+                else:
+                    p_view = p.view(-1)
+                
+                p_view.add_(update[start:end], alpha=step_size)
         
-        # NaN guard (vectorized)
-        self._flat_params.nan_to_num_(nan=0.0)
+        # NaN guard - apply to each parameter
+        for p in self._params:
+            p.nan_to_num_(nan=0.0)
         
         return self._numel()
 
@@ -1231,7 +1358,7 @@ class FBFGS(Optimizer):
 
         # Evaluate loss and gradient
         loss = float(closure())
-        flat_grad = self._gather_flat_norm_grad()
+        flat_grad = self._gather_flat_grad()
 
         # Subtract step to restore original parameters
         offset = 0
@@ -1614,8 +1741,6 @@ class FBFGS(Optimizer):
           closure (Callable): A closure that reevaluates the model
               and returns the loss.
       """
-      if not hasattr(self, '_flat_params'):
-          self._init_flat_params()
       assert len(self.param_groups) == 1
 
       # Make sure the closure is always called with grad enabled
@@ -1698,7 +1823,7 @@ class FBFGS(Optimizer):
               restart = False # Flag for restart
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we don't calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
-              flat_grad = self._gather_flat_norm_grad().to(self.optimizer_device)
+              flat_grad = self._gather_flat_grad().to(self.optimizer_device)
 #TODO: clip_grad_norm by the l1 norm for a max norm of 1e9 (if needed)
 #              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
@@ -1709,7 +1834,7 @@ class FBFGS(Optimizer):
                 d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x)
               else:
                 d = self.sparse_direction_approximate([], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=n_iter)
-#                  d = self._gather_flat_norm_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
+#                  d = self._gather_flat_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
 #                  #TODO: should we also do norm float("inf") here to match direction S?
 #    #              total_norm = torch.linalg.vector_norm(d, ord=2.).to(self.optimizer_device)  
 #    #              d = d.div_(total_norm)
@@ -1876,17 +2001,17 @@ class FBFGS(Optimizer):
 #TODO: ys = Y*S was here
               print(f"ys: {ys}")
 #              # Powell dampening modification
-              delta =1   #existing curvature threshold
-              if 0 < ys < delta:
-#                   Calculate ||s||^2 #efficiently from sparse components
-                  ss = (s_sparse.values**2).sum() + (s_sparse.unit_values**2).sum()
-                  if ss > 1e-10:   #avoid division by zero
-                      theta = (delta - ys) / ss
-                      SparseFlatTensor._add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
-                      ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
-                      print(f"\033[94mApplied Powell dampening. New ys: {ys}\033[0m")
-                  else:
-                      print("Skipped Powell dampening due to small ||s||^2")
+#              delta =1   #existing curvature threshold
+#              if 0 < ys < delta:
+##                   Calculate ||s||^2 #efficiently from sparse components
+#                  ss = (s_sparse.values**2).sum() + (s_sparse.unit_values**2).sum()
+#                  if ss > 1e-10:   #avoid division by zero
+#                      theta = (delta - ys) / ss
+#                      SparseFlatTensor._add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
+#                      ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
+#                      print(f"\033[94mApplied Powell dampening. New ys: {ys}\033[0m")
+#                  else:
+#                      print("Skipped Powell dampening due to small ||s||^2")
 
 #              if self.radius_alpha != 0:
               y = dense_to_sparse_flat_tensor(y_dense)
@@ -1983,7 +2108,7 @@ class FBFGS(Optimizer):
               # multiplied by the gradient
               num_old = len(old_dirs)
 
-              flat_grad = self._gather_flat_norm_grad()
+              flat_grad = self._gather_flat_grad()
 #TODO: may need to try this again? the hessian doesn't pertain as much given that the next direction is likely orthogonal to the last.
 #TODO: it might make sense to divide by the history size so we keep curvature normalized to prevent explosions in direction approx.
 #              H_diag = 1
