@@ -1222,9 +1222,7 @@ class FBFGS(Optimizer):
         return self._numel() # Return total numel if no NaN
 
     def _directional_evaluate(self, closure, t, d):
-        # Save current parameters to CPU
-        original_params_cpu = [p.detach().clone().cpu() for p in self._params]
-#        original_params_cpu = [p.pin_memory() for p in original_params_cpu]
+        """Evaluate loss and gradient after applying step t*d in-place, then restore."""
         # Apply step: x_new = x_old + t * d
         offset = 0
         for p in self._params:
@@ -1234,21 +1232,30 @@ class FBFGS(Optimizer):
             else:
                 p_view = p.view(-1)
 
-            # Updated callsite: use the new _add_sparse_dense_alpha function
             if isinstance(d, SparseFlatTensor):
-                # --- Key Change: Pass the current offset ---
                 SparseFlatTensor._add_sparse_dense_alpha(d, p_view, alpha=t, offset=offset)
             else:
-                # Assume d is a dense tensor
                 p_view.add_(d[offset : offset + numel].to(p.device), alpha=t)
             offset += numel
 
+        # Evaluate loss and gradient
         loss = float(closure())
         flat_grad = self._gather_flat_norm_grad()
 
-        # Restore original parameters from CPU
-        for p, original_p_cpu in zip(self._params, original_params_cpu): # type: ignore[possibly-undefined]
-            p.copy_(original_p_cpu.to(p.device))
+        # Subtract step to restore original parameters
+        offset = 0
+        for p in self._params:
+            numel = p.numel()
+            if torch.is_complex(p):
+                p_view = torch.view_as_real(p).view(-1)
+            else:
+                p_view = p.view(-1)
+
+            if isinstance(d, SparseFlatTensor):
+                SparseFlatTensor._add_sparse_dense_alpha(d, p_view, alpha=-t, offset=offset)
+            else:
+                p_view.add_(d[offset : offset + numel].to(p.device), alpha=-t)
+            offset += numel
 
         return loss, flat_grad
 
@@ -1337,7 +1344,10 @@ class FBFGS(Optimizer):
                 
                 stp_device, dir_device, event, num_values = backward_buffer_dict[i]
                 if event:
+                    wait_start = time.time()
                     event.wait()
+                    wait_end = time.time()
+#                    print(f"BW: {i}: {wait_end - wait_start} ",end='')
                 
                 # Process current entry
                 sparse_stp_i = SparseFlatTensor(
@@ -1462,7 +1472,10 @@ class FBFGS(Optimizer):
                     
                     stp_device, dir_device, event, num_values = forward_buffer_dict[idx]
                     if event:
+                        wait_start = time.time()
                         event.wait()
+                        wait_end = time.time()
+#                        print(f"FW: {idx}: {wait_end - wait_start} ",end='')
                     
                     # Process current aligned index
                     old_dir_for_dense = SparseFlatTensor(
