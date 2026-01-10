@@ -1022,6 +1022,7 @@ class FBFGS(Optimizer):
         self.max_ls= max_ls
         self.max_iter = max_iter
         self.t = 1
+        self._init_flat_params()
 
     def _numel(self):
         if self._numel_cache is None:
@@ -1031,6 +1032,16 @@ class FBFGS(Optimizer):
             )
 
         return self._numel_cache
+
+    def _init_flat_params(self):
+        """Create a contiguous flat view of all parameters for batch updates"""
+        param_list = []
+        for p in self._params:
+            if torch.is_complex(p):
+                param_list.append(torch.view_as_real(p).view(-1))
+            else:
+                param_list.append(p.view(-1))
+        self._flat_params = torch.cat(param_list)
 
     def _split_direction_to_layers(self, flat_tensor):
         """Split flat tensor into chunks corresponding to parameter sizes."""
@@ -1184,42 +1195,22 @@ class FBFGS(Optimizer):
         return normed_flat_grad
 
     def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
-        offset = 0
-        for p in self._params:
-            if torch.is_complex(p):
-                p = torch.view_as_real(p)
-            numel = p.numel()
-
-            current_param_end_offset = offset + numel
-            slice_end = min(current_param_end_offset, limit_offset if limit_offset != -1 else current_param_end_offset)
-            slice_numel = slice_end - offset
-
-            if slice_numel <= 0:
-                offset += numel
-                continue
-
-            # Apply update to parameter p_view
-            if isinstance(update, SparseFlatTensor):
-                # For sparse updates, use the dedicated function
-                # step_size acts as the alpha parameter here
-                # Note: _add_sparse_dense_alpha modifies the dense tensor passed to it.
-                # We pass p.view(-1) which is the flattened parameter.
-                # --- Key Change: Pass the current offset ---
-                SparseFlatTensor._add_sparse_dense_alpha(update, p.view(-1), alpha=step_size, offset=offset)
-            else:
-                # For dense updates, use in-place add_
-                view = update[offset : offset + slice_numel].to(p.device)
-                # Get the slice of the parameter tensor directly
-                p_slice = p.view(-1)[0:slice_numel]
-
-                # Use in-place add_ and remove NaN check/clone logic
-                # This directly modifies p_slice, which is a view into p.view(-1)
-                p_slice.add_(view.view_as(p_slice), alpha=step_size)
-
-            offset += numel
-        for p in self._params:
-          p = torch.nan_to_num(p, nan=0.0) #, posinf=finfo.max, neginf=finfo.min)
-        return self._numel() # Return total numel if no NaN
+        """Perform batch parameter update using vectorized operations"""
+        if isinstance(update, SparseFlatTensor):
+            # Handle sparse updates with vectorized method
+            SparseFlatTensor._add_sparse_dense_alpha(update, self._flat_params, alpha=step_size, offset=0)
+        else:
+            # Handle dense updates in batch
+            if update.device != self.optimizer_device:
+                update = update.to(self.optimizer_device)
+            
+            # Single in-place update for all parameters
+            self._flat_params.add_(update, alpha=step_size)
+        
+        # NaN guard (vectorized)
+        self._flat_params.nan_to_num_(nan=0.0)
+        
+        return self._numel()
 
     def _directional_evaluate(self, closure, t, d):
         """Evaluate loss and gradient after applying step t*d in-place, then restore."""
@@ -1623,6 +1614,8 @@ class FBFGS(Optimizer):
           closure (Callable): A closure that reevaluates the model
               and returns the loss.
       """
+      if not hasattr(self, '_flat_params'):
+          self._init_flat_params()
       assert len(self.param_groups) == 1
 
       # Make sure the closure is always called with grad enabled
