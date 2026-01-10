@@ -1227,47 +1227,44 @@ class FBFGS(Optimizer):
 
     def _add_grad(self, step_size, update, limit_offset: int = -1) -> int:
         """Perform batch parameter update using stored offsets"""
+        # New implementation: Direct parameter updates without flat vector
         if isinstance(update, SparseFlatTensor):
-            # Handle sparse updates with vectorized method
+            # Handle sparse updates directly on each parameter
             # Move sparse tensor to optimizer device if needed
             if update.values.device != self.optimizer_device:
                 update = update.to(self.optimizer_device)
             
-            # Create a flat view of all parameters
-            flat_params = torch.cat([
-                torch.view_as_real(p).view(-1) if torch.is_complex(p) else p.view(-1)
-                for p in self._params
-            ]).to(self.optimizer_device)
-            
-            # Update all parameters at once using batched sparse update
-#TODO: this shouldnt need the for loop to copy. also _offsets was supposed to be a view this is unaffordable
-            SparseFlatTensor.add_sparse_dense_multiple(
-                update, flat_params, self._offsets, alpha=step_size
-            )
-            
-            # Update original parameters from flat view
+            # Apply sparse update to each parameter individually
             offset = 0
             for p in self._params:
                 numel = p.numel()
-                p_view = torch.view_as_real(p).view(-1) if torch.is_complex(p) else p.view(-1)
-                p_view.copy_(flat_params[offset:offset+numel])
-                offset += numel
-        else:
-            # Handle dense updates in batch
-            if update.device != self.optimizer_device:
-                update = update.to(self.optimizer_device)
-            
-            # Update each parameter directly using stored offsets
-            for i, p in enumerate(self._params):
-                start = self._offsets[i]
-                end = self._offsets[i+1] if i+1 < len(self._offsets) else self._numel()
-                numel = p.numel()
+                # Apply the sparse update to this parameter's view
                 if torch.is_complex(p):
                     p_view = torch.view_as_real(p).view(-1)
                 else:
                     p_view = p.view(-1)
                 
-                p_view.add_(update[start:end], alpha=step_size)
+                # Use the existing static method to handle the update
+                SparseFlatTensor._add_sparse_dense_alpha(update, p_view, alpha=step_size, offset=offset)
+                
+                offset += numel
+        else:
+            # Handle dense updates directly on each parameter
+            if update.device != self.optimizer_device:
+                update = update.to(self.optimizer_device)
+            
+            offset = 0
+            for p in self._params:
+                numel = p.numel()
+                param_update = update[offset:offset+numel]
+                
+                if torch.is_complex(p):
+                    p_view = torch.view_as_real(p).view(-1)
+                else:
+                    p_view = p.view(-1)
+                
+                p_view.add_(param_update, alpha=step_size)
+                offset += numel
         
         # NaN guard - apply to each parameter
         for p in self._params:
@@ -1277,44 +1274,27 @@ class FBFGS(Optimizer):
 
     def _directional_evaluate(self, closure, t, d):
         """Evaluate loss and gradient after applying step t*d in-place, then restore."""
-        # Create a flat view of all parameters (original)
-        flat_params = torch.cat([
-            torch.view_as_real(p).view(-1) if torch.is_complex(p) else p.view(-1)
-            for p in self._params
-        ]).to(self.optimizer_device)
-        orig_flat_params = flat_params.clone()
-
+        # Save current parameters
+        saved_params = [p.clone() for p in self._params]
+        
         # Apply step: x_new = x_old + t * d
         if isinstance(d, SparseFlatTensor):
             # Move sparse tensor to optimizer device if needed
             if d.values.device != self.optimizer_device:
                 d = d.to(self.optimizer_device)
-            SparseFlatTensor.add_sparse_dense_multiple(
-                d, flat_params, self._offsets, alpha=t
-            )
+            # Apply the step
+            self._add_grad(t, d)
         else:
             # Dense update
-            flat_params.add_(d.to(self.optimizer_device), alpha=t)
-
-        # Update parameters from flat view
-        offset = 0
-        for p in self._params:
-            numel = p.numel()
-            p_view = torch.view_as_real(p).view(-1) if torch.is_complex(p) else p.view(-1)
-            p_view.copy_(flat_params[offset:offset+numel])
-            offset += numel
+            self._add_grad(t, d.to(self.optimizer_device))
 
         # Evaluate loss and gradient
         loss = float(closure())
         flat_grad = self.gather_norm_flat_grad()
 
-        # Restore parameters from original flat view
-        offset = 0
-        for p in self._params:
-            numel = p.numel()
-            p_view = torch.view_as_real(p).view(-1) if torch.is_complex(p) else p.view(-1)
-            p_view.copy_(orig_flat_params[offset:offset+numel])
-            offset += numel
+        # Restore parameters to original state
+        for p, p_saved in zip(self._params, saved_params):
+            p.data.copy_(p_saved)
 
         return loss, flat_grad
 
@@ -1419,13 +1399,14 @@ class FBFGS(Optimizer):
                 )
 
                 curvature_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
-                if curvature_similarity != 0:
-#                    direction_similarity = ro[i].item()/curvature_similarity
-                    direction_similarity = 1/curvature_similarity
-                else:
-                    direction_similarity = orthogonality + 1
+#                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
+#                if curvature_similarity != 0:
+##                    direction_similarity = ro[i].item()/curvature_similarity
+#                    direction_similarity = 1/curvature_similarity
+#                else:
+#                    direction_similarity = orthogonality + 1
                     
+                direction_similarity = curvature_similarity
                 aligned = (direction_similarity <= orthogonality and direction_similarity >= -orthogonality)
                 direction_alignment_mask[i] = aligned
                 
@@ -1437,6 +1418,20 @@ class FBFGS(Optimizer):
                         dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                     ) * ((-al[i]))
                     q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
+                    
+#                    # Normalize q after update
+#                    split_q = self._split_direction_to_layers(q)
+#                    normed_chunks = []
+#                    for param_q in split_q:
+#                        if param_q.numel() == 0:
+#                            normed_chunks.append(param_q)
+#                            continue
+#                        param_norm = torch.linalg.vector_norm(param_q, ord=2)
+#                        scaled_norm = (param_norm / self.radius_ball) 
+#                        normed = param_q / scaled_norm
+#                        normed_chunks.append(normed)
+#                    q = torch.cat(normed_chunks, 0)
+                    q = torch.nan_to_num(q, nan=0.0)
                 
                 # Cleanup and prefetch next
                 del backward_buffer_dict[i]
@@ -1470,10 +1465,12 @@ class FBFGS(Optimizer):
 
                 end_time = time.time()
                 symbol = "|" if direction_alignment_mask[i] else "_"
-                print(f"{end_time - start_time:.4f}{symbol}{direction_similarity:.4f} ", end='', flush=True)
+#                print(f"{end_time - start_time:.4f}{symbol}{direction_similarity:.4f} ", end='', flush=True)
+                print(f"{symbol}", end='', flush=True)
 
         print("Q max after first loop: " + str(q.max()))
         d = q.mul(H_diag.to(torch.float32))
+#        d = q
         del q
         d = torch.nan_to_num(d, nan=0.0)
 
@@ -1892,9 +1889,23 @@ class FBFGS(Optimizer):
                       continue
                   param_norm = torch.linalg.vector_norm(param_y, ord=y_norm)
                   scaled_norm = (param_norm / self.radius_y)
-                  normed = param_y / scaled_norm
-                  normed = normed * scaled_norm
-                  normed_chunks.append(normed)
+                  scaled_norm = param_y / scaled_norm
+                  
+                  # 1. Get the mask for zero values (underflow detection)
+                  # We check if the scaled_norm is effectively zero.
+                  # If scaled_norm is 0, the division would underflow/overflow or result in NaN.
+                  mask = (scaled_norm > 1e-9)
+                  
+                  # 2. Apply the mask to the original param_y
+                  # If mask is True (valid), we keep the original values (or normalized values).
+                  # If mask is False (underflow), we zero out the elements.
+                  # Since the requirement is to "zero out the original elements", we can simply
+                  # multiply the original tensor by the mask (True=1, False=0).
+                  result_chunk = param_y * mask
+                  
+                  # 3. Append the masked result
+                  normed_chunks.append(result_chunk)
+              
               y_selection = torch.cat(normed_chunks, 0)
               # Now use y_selection in place of the divided y_dense
               y_dense = y_selection
@@ -2100,6 +2111,9 @@ class FBFGS(Optimizer):
           # optional line search: user function
           ls_func_evals = 0
           if line_search_fn is not None:
+              # Save parameters before line search
+#              saved_params = [p.clone() for p in self._params]
+              
               # perform line search, using user function
               if line_search_fn != "strong_wolfe":
                   raise RuntimeError("Only 'strong_wolfe' is supported for line search.")
@@ -2118,7 +2132,10 @@ class FBFGS(Optimizer):
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
               if not success:
-                  print("\033[91mLinesearch failure, Rho rewind and skip.\033[0m")
+                  # Restore parameters from before line search
+#                  for p, p_saved in zip(self._params, saved_params):
+#                      p.data.copy_(p_saved)
+                  print("\033[91mLinesearch failure, Rho rewind and skip. Parameters restored.\033[0m")
 #TODO: this is wrong we arent usinc rho_rewinh
 #TODO: consider Rho rewind as a parameter passed into direction approximate that temporarily ignores the top N rho entries, similar to similarity (Since similarity no longer considers the al rho scaled term just q curvature)
 # Remove 10 largest rho entries from history if line search fails
@@ -2141,19 +2158,18 @@ class FBFGS(Optimizer):
 #TODO: or we could simply set similarity as a momentum like factor for convergence. Possibly even scaling it by the gradient gtd convergence metric with a scalar coefficient hyperparameter.
 #TODO: Actually Rho Rewind.. or not?
 #                  prev_flat_grad = None # Force gradient search on next iteration
-                      ls_failed = True
-                      state["ls_failed"] = True # Store ls_failed state
-                      # Save the modified history back to state before returning
-                      state["old_dirs"] = old_dirs
-                      state["old_stps"] = old_stps
-                      state["ro"] = ro
-                      self.t = 1
+                  ls_failed = True
+                  state["ls_failed"] = True # Store ls_failed state
+                  # Save the modified history back to state before returning
+                  state["old_dirs"] = old_dirs
+                  state["old_stps"] = old_stps
+                  state["ro"] = ro
+                  self.t = 1
                   return orig_loss # Skip this data point
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
                   state["ls_failed"] = False # Store ls_failed state
 
-              if not ls_failed: # If line search (or needle) was successful
                   # Ensure t and d are on the correct device (optimizer_device) for _add_grad
 #                  t = t.to(self.optimizer_device)
 #                  d = d.to(self.optimizer_device)
