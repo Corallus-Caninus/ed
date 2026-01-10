@@ -1275,6 +1275,7 @@ class FBFGS(Optimizer):
     def _directional_evaluate(self, closure, t, d):
         """Evaluate loss and gradient after applying step t*d in-place, then restore."""
         # Save current parameters
+#TODO: instead of this, swap the parameters with the direction such that we only save a sparseflattensor representation of the parameters that were changed.like the xor trick but Im a C wannabe
         saved_params = [p.clone() for p in self._params]
         
         # Apply step: x_new = x_old + t * d
