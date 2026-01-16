@@ -129,6 +129,15 @@ class SparseFlatTensor:
             self.unit_indices, multiplied_unit_values
         )
 
+    def __div__(self, scalar):
+        """Scalar multiplication."""
+        multiplied_values = self.values / scalar
+        multiplied_unit_values = self.unit_values / scalar
+        return SparseFlatTensor(
+            self.starts, self.ends, multiplied_values, self.total_size,
+            self.unit_indices, multiplied_unit_values
+        )
+
     def __rmul__(self, other):
         """Right multiplication. Handles multiplication with dense tensors."""
         if isinstance(other, Tensor):
@@ -1350,29 +1359,30 @@ class FBFGS(Optimizer):
 #                    print(f"BW: {i}: {wait_end - wait_start} ",end='')
                 
                 # Process current entry
-                sparse_stp_i = SparseFlatTensor(
-                    stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
-                    stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
-                )
+#                sparse_stp_i = SparseFlatTensor(
+#                    stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
+#                    stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
+#                )
                 sparse_dir_i = SparseFlatTensor(
                     dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
                     dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                 )
 
                 curvature_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-#                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
-#                if curvature_similarity != 0:
-##                    direction_similarity = ro[i].item()/curvature_similarity
-#                    direction_similarity = 1/curvature_similarity
-#                else:
-#                    direction_similarity = orthogonality + 1
+#TODO: reduce the actual vector being added to q instead of this. Rho and stp alignment matter.
+#                reduction_bound = (-1 * sparse_dir_i.dot(sparse_dir_i))/2
                     
-                direction_similarity = curvature_similarity
+                direction_similarity = curvature_similarity#* ro[i].item()
 #                aligned = (direction_similarity >= orthogonality or direction_similarity <= -orthogonality)
                 aligned = (direction_similarity <= orthogonality and direction_similarity >= -orthogonality)
+#                aligned = direction_similarity <= reduction_bound
                 direction_alignment_mask[i] = aligned
                 
                 if direction_alignment_mask[i]:
+                    sparse_stp_i = SparseFlatTensor(
+                        stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
+                        stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
+                    )
                     alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
                     al[i] = alpha * ro[i].item()
                     sparse_old_dir_scaled = SparseFlatTensor(
@@ -1568,6 +1578,7 @@ class FBFGS(Optimizer):
             scaled_norm = (param_norm / self.radius_s) 
             normed = param_d / scaled_norm
             mask = (normed != 0)
+#            result_chunk = normed
             result_chunk = param_d * mask
 #            normed = normed * scaled_norm
             normed_chunks.append(result_chunk)
@@ -1735,7 +1746,7 @@ class FBFGS(Optimizer):
           ############################################################
           # If this is the first iteration or history was reset
 #TODO: add a special condition such that if num iters is 1 we start with the direction otherwise we do the gradient.
-          if  n_iter== 1 or prev_flat_grad is None:#TODO: dont need to check prev_flat_grad here since we dont use the needle anymore
+          if  n_iter== 1 or prev_flat_grad is None:
 #          if prev_flat_grad is None:
               restart = False # Flag for restart
 #TODO: use the proper flat_grad (the l1 instead of l2) here since we don't calculate direction first
@@ -1747,7 +1758,7 @@ class FBFGS(Optimizer):
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
-              if len(old_dirs) > 0  and n_iter > 1:
+              if len(old_dirs) > 0  : # and n_iter > 1:
                 d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x)
               else:
                 d = self.sparse_direction_approximate([], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=n_iter)
@@ -2081,6 +2092,7 @@ class FBFGS(Optimizer):
           ls_func_evals = 0
           if line_search_fn is not None:
               # Save parameters before line search
+#TODO: instead of saving all the params, save the SparseFlatTensor of params masked by indices of d. Write save and restore dense methods for SparseFlatTensor.
               saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
               
               # perform line search, using user function
