@@ -867,7 +867,8 @@ class FBFGS(Optimizer):
         orthogonality: float = 1e-2,
         max_ls: int = 10,
         prefetch_buffer: int = 20_000_000,
-        norm_group: Union[int, float] = 1,  # New parameter
+        norm_group_s: Optional[Union[int, float]] = None,  # New parameter
+        norm_group_y: Optional[Union[int, float]] = None,  # New parameter
     ):
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -900,7 +901,8 @@ class FBFGS(Optimizer):
             orthogonality=orthogonality,
             max_ls=max_ls,
             prefetch_buffer=prefetch_buffer,
-            norm_group=norm_group,  # Add to defaults
+            norm_group_s=norm_group_s,  # Add to defaults
+            norm_group_y=norm_group_y,  # Add to defaults
         )
         super().__init__(params, defaults)
         if len(self.param_groups) != 1:
@@ -928,7 +930,8 @@ class FBFGS(Optimizer):
             else:
                 offset += p.numel()
         self.prefetch_buffer = prefetch_buffer
-        self.norm_group = norm_group  # Store as instance variable
+        self.norm_group_s = norm_group_s if norm_group_s is not None else len(self._params)  # Default to vector norm (num_layers)
+        self.norm_group_y = norm_group_y if norm_group_y is not None else 1  # Default to matrix norm (1)
     def _numel(self):
         if self._numel_cache is None:
             self._numel_cache = sum(
@@ -946,7 +949,7 @@ class FBFGS(Optimizer):
             chunks.append(flat_tensor[offset:offset+size])
             offset += size
         return chunks
-    def _split_direction_to_groups(self, flat_tensor):
+    def _split_direction_to_groups(self, flat_tensor, norm_group=None):
         """Split flat tensor into groups based on norm_group parameter.
         
         norm_group behavior:
@@ -960,11 +963,14 @@ class FBFGS(Optimizer):
         total_size = sum(param_sizes)
         num_layers = len(self._params)
         
+        # Use provided norm_group or fall back to instance variable
+        effective_norm_group = norm_group if norm_group is not None else self.norm_group
+        
         # Handle norm_group == 0 as norm_group == 1
-        if self.norm_group == 0:
+        if effective_norm_group == 0:
             norm_group = 1
         else:
-            norm_group = self.norm_group
+            norm_group = effective_norm_group
             
         # Determine number of groups
         if norm_group == 1:
@@ -1003,6 +1009,7 @@ class FBFGS(Optimizer):
                 offset += size
             return groups
         else:
+#TODO: I think this should just be an error.
             # norm_group > num_layers: Split total parameters into norm_group groups
             num_groups = int(norm_group)
             if num_groups <= 0:
@@ -1012,6 +1019,7 @@ class FBFGS(Optimizer):
             group_size = total_size // num_groups
             remainder = total_size % num_groups
             
+#TODO: this is wrong the remainder should go with the last layer as a jumbo layer
             for i in range(num_groups):
                 # Distribute remainder among first few groups
                 current_size = group_size + (1 if i < remainder else 0)
@@ -1023,7 +1031,8 @@ class FBFGS(Optimizer):
                    norm: int = 2,
                    radius_scaling: float = 1.0,
                    radius_ball: float = 1.0,
-                   eps: float = 1e-8) -> Tensor:
+                   eps: float = 1e-8,
+                   norm_group: Optional[Union[int, float]] = None) -> Tensor:
         """
         Encapsulates the normalization logic based on norm_group parameter.
         Splits the tensor into groups based on norm_group and applies normalization.
@@ -1036,48 +1045,52 @@ class FBFGS(Optimizer):
         """
         with torch.no_grad():
             # Split tensor into groups based on norm_group
-            chunks = self._split_direction_to_groups(tensor)
+            effective_norm_group = norm_group if norm_group is not None else self.norm_group
+            chunks = self._split_direction_to_groups(tensor, norm_group=effective_norm_group)
             
-            # Phase 1: Parameter-wise scaling (optional) - zero out small elements per group
+            # Vectorized Phase 1: Parameter-wise scaling (optional) - zero out small elements per group
             if radius_scaling > 0:
-                new_chunks = []
-                for chk in chunks:
-                    if chk.numel() == 0:
-                        new_chunks.append(chk)
-                        continue
-                    chk_norm = torch.linalg.vector_norm(chk, ord=norm)
-                    if chk_norm == 0:
-                        new_chunks.append(torch.zeros_like(chk))
-                        continue
-                    # Compute threshold for each element: radius_scaling * eps * norm
-                    threshold = radius_scaling * eps * chk_norm
-                    # Create mask where absolute value >= threshold
-                    mask = torch.abs(chk) >= threshold
-                    # Keep elements that meet threshold, zero out others
-                    masked_chk = chk * mask
-                    new_chunks.append(masked_chk)
-                chunks = new_chunks
-            # Phase 2: Ball projection (optional) - unchanged
+                # Compute norms for all chunks at once
+                norms = torch.stack([
+                    torch.linalg.vector_norm(chk, ord=norm)
+                    if chk.numel() > 0 else torch.tensor(0., device=tensor.device)
+                    for chk in chunks
+                ])
+                # Broadcast threshold calculation: radius_scaling * eps * norms
+                thresholds =   norms.unsqueeze(1) / radius_scaling  # shape: (num_chunks, 1) / radius_scaling
+                # Create mask for each chunk by comparing absolute values with threshold
+                masks = [
+                    torch.abs(chk) >= threshold.expand_as(chk)
+                    if chk.numel() > 0 else torch.zeros_like(chk)
+                    for chk, threshold in zip(chunks, thresholds)
+                ]
+                # Apply masks
+                chunks = [chk * mask for chk, mask in zip(chunks, masks)]
+            
+            # Vectorized Phase 2: Ball projection (optional)
             if radius_ball > 0:
                 l2_norms = torch.stack([
                     torch.linalg.vector_norm(chk, ord=2)
                     if chk.numel() > 0 else torch.tensor(0., device=tensor.device)
                     for chk in chunks
                 ])
+#TODO: this is wrong, we actually want the ball to boost the signal up when possible. This is like clip_grad_norm
                 # Avoid division by zero for zero norms
                 ball_factors = torch.minimum(
                     torch.tensor(1.0, device=tensor.device),
                     torch.where(
                         l2_norms > eps,
-                        radius_ball / l2_norms,
+                        l2_norms / radius_ball,
                         torch.tensor(1.0, device=tensor.device)
                     )
-                )
+                ).unsqueeze(1)  # shape: (num_chunks, 1)
+                
                 chunks = [
-                    chk * factor
+                    chk * factor.expand_as(chk)
+                    if chk.numel() > 0 else chk
                     for chk, factor in zip(chunks, ball_factors)
-                    if chk.numel() > 0
                 ]
+            
             if len(chunks) == 0:
                 return tensor  # Return original if no chunks
             return torch.cat(chunks)
@@ -1188,7 +1201,7 @@ class FBFGS(Optimizer):
         for p, p_saved in zip(self._params, saved_params):
             p.copy_(p_saved)
         return loss, flat_grad
-    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int) -> Tensor:
+    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None) -> Tensor:
         PREFETCH_THRESHOLD_VALUES = self.prefetch_buffer  # Use hyperparameter
         compute_stream = torch.cuda.current_stream()
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -1480,7 +1493,8 @@ class FBFGS(Optimizer):
                         cumulative_values_fwd += num_values_next
                         next_k += 1
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
-        d = self.matrix_norm(d, norm=norm, radius_scaling=radius_s, radius_ball=2.)
+        effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
+        d = self.matrix_norm(d, norm=norm, radius_scaling=radius_s, radius_ball=2., norm_group=effective_norm_group)
         # Normalize using matrix_norm (already done in the return statement above)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0).to(torch.float16)
         return d
@@ -1629,9 +1643,9 @@ class FBFGS(Optimizer):
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
               if len(old_dirs) > 0  : # and n_iter > 1:
-                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x)
+                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s)
               else:
-                d = self.sparse_direction_approximate([], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=n_iter)
+                d = self.sparse_direction_approximate([], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=n_iter, norm_group=self.norm_group_s)
 #                  d = self._gather_flat_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
 #                  #TODO: should we also do norm float("inf") here to match direction S?
 #    #              total_norm = torch.linalg.vector_norm(d, ord=2.).to(self.optimizer_device)  
@@ -1731,11 +1745,15 @@ class FBFGS(Optimizer):
 #TODO: find the indices of the selected parameters instead of div then multiply since this is lossy in the mantissa
 #TODO: this creates an additional tensor make sure this isnt worst case allocation optimizing the tensor ops for memory
               # Use matrix_norm for normalization instead of manual per-parameter normalization
-              y_dense = self.matrix_norm(y_dense, norm=y_norm, radius_scaling=self.radius_y, radius_ball=0.)
+#NOTE: WE CANNOT PUT Y ON THE BALL HERE SINCE WE ARE ADDING THE MASK BACK. we would have to renorm after we add back ys_dense.
+#TODO: WE CANT TAKE RADIUS SCALING HERE SINCE WE ADD BACK THE MASK. need to implement radius and/or ball feature as a second norm op.
+              print("y dense raw before ops: " + str((y_dense != 0).sum()))
+              y_dense = self.matrix_norm(y_dense, norm=y_norm, radius_scaling=self.radius_y, radius_ball=0., norm_group=self.norm_group_y)
               y_mask = (y_dense != 0)
 #              ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
-              y_dense[s_mask] = 0
               print("y dense pre s-mask " + str((y_dense != 0).sum()))
+              y_dense[s_mask] = 0
+              print("y dense post s-mask " + str((y_dense != 0).sum()))
               print("s mask: " + str((s_mask!=0).sum()))
               print("ys:: " + str((ys_dense!=0).sum()))
               y_dense.add_(ys_dense)
@@ -1880,7 +1898,7 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x)
+              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s)
               # sparse_direction_approximate already applies matrix_norm
               del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
