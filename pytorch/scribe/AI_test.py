@@ -1,12 +1,10 @@
 import os
 import sys
 import time  # Added missing import
-
 # Apply workaround for CVE-2025-32434 before importing transformers
 import transformers.utils.import_utils
 original_check = transformers.utils.import_utils.check_torch_load_is_safe
 transformers.utils.import_utils.check_torch_load_is_safe = lambda: None
-
 import math
 import csv
 import matplotlib.pyplot as plt
@@ -19,56 +17,43 @@ from transformers import Trainer, TrainingArguments
 from datasets import load_dataset
 import datasets
 from datasets import Dataset
-
 # Restore original check after transformers is imported
 transformers.utils.import_utils.check_torch_load_is_safe = original_check
-
 os.environ["TRANSFORMERS_NO_IMAGE"] = "1"
 from transformers import MambaConfig, Mamba2ForCausalLM, AutoTokenizer, AutoModelForCausalLM, AutoConfig, Mamba2Config, GPTNeoXTokenizerFast
-
-
 num_cores = os.cpu_count()
 torch.set_num_threads(num_cores)
 torch.set_num_interop_threads(num_cores)
-
 filename = "AI_Checkpoint.ai"
 history_filename = "fbfgs_history.pth"
 indices_filename = "dataset_indices.pth"
-
 # Load GPT-2 tokenizer (byte-level BPE tokenizer) with maximum sequence length
 print("Loading GPT-2 tokenizer...")
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
-
 # Set pad token to eos token for compatibility
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
     print(f"Set pad_token to eos_token: {tokenizer.pad_token}")
-
 # Set maximum sequence length to a billion (effectively no truncation)
 tokenizer.model_max_length = 1000000000  # 1 billion tokens
 tokenizer.truncation_side = "right"  # Truncate from the right (preserves beginning)
 tokenizer.padding_side = "right"  # Pad from the right
-
 print(f"Successfully loaded GPT-2 tokenizer with vocab size: {tokenizer.vocab_size} and max length: {tokenizer.model_max_length}")
-
 # Load the base config from the 370m model and modify specific parameters
-config = Mamba2Config.from_pretrained("state-spaces/mamba2-370m")
+config = Mamba2Config.from_pretrained("AntonV/mamba2-370m-hf")
 # Reduced parameter configuration (~20M parameters)
-config.hidden_size = 128      # Reduced from 200 (primary reduction)
-config.num_hidden_layers = 20 # Reduced from 24
-config.num_heads = 16          # Kept same (1216/16 = 16 head_dim)
-config.head_dim = 16          # Must be hidden_size/num_heads = 128/8 = 16
+config.hidden_size = 200      # Reduced from 200 (primary reduction)
+config.num_hidden_layers = 60 # Reduced from 24
+config.num_heads = 5          # Kept same (125/5 = 5 head_dim)
+config.head_dim = 80          # Must be hidden_size/num_heads = 128/8 = 80
 config.state_size = 16        # Reduced from 54 (SSM state size)
 config.dtype = "float16"
-
 # Set the model's maximum sequence length to a billion (effectively no truncation)
 config.seq_len = 1000000000  # 1 billion tokens
-
 # Update config vocab_size to match tokenizer
 config.vocab_size = tokenizer.vocab_size
 print(f"Updated config vocab_size to: {config.vocab_size}")
 print(f"Model seq_len set to: {config.seq_len}")
-
 # Always use custom config for both saving and loading
 # Try to use GPU if available, otherwise fallback to CPU
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -91,43 +76,35 @@ else:
     model = Mamba2ForCausalLM(config).to(device)
     dataset_indices = {}
     seen_indices = []
-
 # Initialize dataset_indices if not already done
 if 'dataset_indices' not in locals():
     dataset_indices = {}
 if 'seen_indices' not in locals():
     seen_indices = []
-
 model.train()
-
 # Ensure all parameters have gradients enabled and verify
 params_without_gradients = []
 for name, param in model.named_parameters():
     if not param.requires_grad:
         params_without_gradients.append(name)
         param.requires_grad = True  # Enable gradients if disabled
-
 if params_without_gradients:
     print(f"WARNING: Found {len(params_without_gradients)} parameters without gradients enabled. Enabled gradients for:")
     for name in params_without_gradients:
         print(f"  - {name}")
 else:
     print("All parameters have gradients enabled.")
-
 # Verify all parameters have gradients after setting
 all_have_gradients = True
 for name, param in model.named_parameters():
     if not param.requires_grad:
         all_have_gradients = False
         break
-
 if not all_have_gradients:
     raise AssertionError("Some parameters still don't have gradients enabled after initialization!")
-
-batch_size = 1 # Define batch size here (changed from 1 to 1)
+batch_size = 2 # Define batch size here (changed from 2 to 2)
 pytorch_total_params = sum(p.numel() for p in model.parameters())
 print(f"Model has {pytorch_total_params:,} parameters")
-
 datalist = []
 dataset_filename = "haskell_code_dataset.ds"
 if os.path.exists(dataset_filename):
@@ -135,14 +112,11 @@ if os.path.exists(dataset_filename):
 else:
     dataset = load_dataset("codeparrot/github-code", split="train", name="Haskell-all", streaming=False)
     dataset.save_to_disk(dataset_filename)
-
 batch_train = None
-
 # Initialize FBFGS optimizer
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
-optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=1.1, norm=1, radius_y = 1e-8,radius_ball = 1,radius_s = 1e-20,c1 = 1e-7, c2=0.1,direction_device="cpu", optimizer_device=optimizer_device, bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 0.01, rho_rewind=10, orthogonality=1, max_ls=10)
-
+optimizer = FBFGS(model.parameters(), lr=1., history_size=9, tolerance_change=16, max_iter=10, max_eval=1, line_search_fn="strong_wolfe", y_norm=1., norm=1.2, radius_y=1e6,radius_ball = 1, radius_s=1e6,c1 = 1e-7, c2=0.1,direction_device="cpu", optimizer_device=optimizer_device, bracket_shift = 1/3, bracket_shove=1/3, capture_max_step = 10, capture_min_step = 0.01, rho_rewind=10, orthogonality=0.5, max_ls=10, norm_group_s = 5, norm_group_y=0.2)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
@@ -160,23 +134,18 @@ if os.path.exists(history_filename):
         print(f"Loaded FBFGS history from {history_filename}")
     except Exception as e:
         print(f"Error loading FBFGS history: {e}. Starting from scratch.")
-
 step_count = 0
 step_data = []
 losses_before = []
 losses_deltas = []
-
 # Initialize single figure with subplots
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 plt.tight_layout(pad=3.0)
-
 import random
-
 dataset_size = len(dataset)
 dataset_shuffled_indices = list(range(dataset_size))
 current_dataset_filename = dataset_filename
 dataset_index = 0
-
 batch_input_ids_list = []
 batch_attention_mask_list = []
 cache = None
@@ -185,7 +154,6 @@ outputs = None
 random_starts_list = []
 # Global list to store sequence indices for the current batch
 sequence_indices_list = []
-
 def closure():
     global batch_input_ids_list
     global batch_attention_mask_list
@@ -307,22 +275,18 @@ def closure():
     print(f"Last segment loss: {loss_last_avg.item():.16f}")
     print(f"Averaged loss: {loss_avg.item():.16f}")
     return loss_avg
-
 # Main training loop
 while True:
     cache = None
     dataset_shuffled_indices = list(range(dataset_size))
     random.shuffle(dataset_shuffled_indices)
-
     if not dataset_shuffled_indices:
         dataset_shuffled_indices = list(range(dataset_size))
         random.shuffle(dataset_shuffled_indices)
         seen_indices = []
-
     if not dataset_shuffled_indices:
         print("Dataset is empty, stopping training for this dataset.")
         break
-
     dataset_idx = dataset_shuffled_indices.pop()
     while dataset_idx in seen_indices and dataset_shuffled_indices:
         dataset_idx = dataset_shuffled_indices.pop()
@@ -332,7 +296,6 @@ while True:
         random.shuffle(dataset_shuffled_indices)
         seen_indices = []
         continue
-
     batch_input_ids_list = []
     batch_attention_mask_list = []
     batch_count = 0
@@ -340,14 +303,12 @@ while True:
         if not dataset_shuffled_indices:
             print(f"Dataset indices exhausted before filling batch. Current batch size: {batch_count}")
             break
-
         dataset_idx = dataset_shuffled_indices.pop()
         while dataset_idx in seen_indices and dataset_shuffled_indices:
             dataset_idx = dataset_shuffled_indices.pop()
         if dataset_idx in seen_indices:
             print("All indices seen, ending batch collection early.")
             break
-
         seen_indices.append(dataset_idx)
         batch_train = dataset[dataset_idx]['code']
         # Use tokenizer with maximum length (1 billion tokens)
@@ -370,7 +331,6 @@ while True:
         print(f"Got num_tokens: {input_ids.size(1)}")
         
         # Removed truncation logic as requested
-
         current_num_tokens = input_ids.size(1)
         
         # Apply some length filtering/truncation based on your training preferences
@@ -381,21 +341,17 @@ while True:
             input_ids = input_ids[:, start_idx : start_idx + max_len_global]
             attention_mask = attention_mask[:, start_idx : start_idx + max_len_global]
             current_num_tokens = input_ids.size(1)
-
         max_warmup_length = 200
         if len(seen_indices) < 0 and current_num_tokens > max_warmup_length:
             start_idx = random.randint(0, current_num_tokens - max_warmup_length)
             input_ids = input_ids[:, start_idx : start_idx + max_warmup_length]
             attention_mask = attention_mask[:, start_idx : start_idx + max_warmup_length]
             current_num_tokens = input_ids.size(1)
-
         if current_num_tokens < max_warmup_length:
             continue
-
         batch_input_ids_list.append(input_ids)
         batch_attention_mask_list.append(attention_mask)
         batch_count += 1
-
     # Calculate random starts for each sequence in the batch BEFORE calling closure
     grad_vector_size = 2  # Must match the grad_vector_size in closure
     random_starts_list = []
@@ -438,7 +394,6 @@ while True:
         sequence_indices_list.append(seq_idx)
     
     print(f"Calculated random starts for batch: {[rs if isinstance(rs, list) else [rs] for rs in random_starts_list]}")
-
     prompt = "-- A Haskell Module that opens a file and prints it to stdout:"
     out = tokenizer(prompt, return_tensors="pt").to(device)
     
@@ -455,12 +410,9 @@ while True:
             print(f"Generation failed: {e}")
             generated_text = "Generation failed"
         model.train()
-
     loss_before = closure()
     print(f"Loss before step: {loss_before:.16f}")
-
     optimizer.step(closure)
-
     step_text = f" STEP {step_count} "
     color_cycle = ["\033[38;2;255;0;0m", "\033[38;2;0;255;0m", "\033[38;2;0;0;255m"]
     reset = "\033[0m"
@@ -497,7 +449,6 @@ while True:
     ax2.set_ylabel("Loss Delta")
     
     plt.savefig("training.png")
-
     csv_filename = "loss_data.csv"
     file_exists = os.path.exists(csv_filename)
     with open(csv_filename, 'a', newline='') as csvfile:
@@ -505,14 +456,12 @@ while True:
         if not file_exists:
             writer.writerow(['step', 'loss_before', 'loss_delta'])
         writer.writerow([step_count, loss_before.item(), loss_delta.item()])
-
     step_count += 1
     gc.collect()
     
     # Clear CUDA cache if using GPU
     if device == "cuda":
         torch.cuda.empty_cache()
-
     if step_count % 10 == 0:
         current_dataset_filename = dataset_filename
         dataset_indices[current_dataset_filename] = seen_indices
