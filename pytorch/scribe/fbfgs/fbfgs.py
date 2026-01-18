@@ -1067,6 +1067,7 @@ class FBFGS(Optimizer):
                 # Apply masks
                 chunks = [chk * mask for chk, mask in zip(chunks, masks)]
             
+#TODO: extract this and create the functions group_select_norm and group_norm respectively (former masking and later norm dividing)or just make one function with a boolean for whether we select or div the norm
             # Vectorized Phase 2: Ball projection (optional)
             if radius_ball > 0:
                 l2_norms = torch.stack([
@@ -1493,8 +1494,9 @@ class FBFGS(Optimizer):
                         cumulative_values_fwd += num_values_next
                         next_k += 1
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+#TODO: remove this..
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
-        d = self.matrix_norm(d, norm=norm, radius_scaling=radius_s, radius_ball=2., norm_group=effective_norm_group)
+        d = self.matrix_norm(d, norm=norm, radius_scaling=radius_s, radius_ball=0., norm_group=effective_norm_group)
         # Normalize using matrix_norm (already done in the return statement above)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0).to(torch.float16)
         return d
