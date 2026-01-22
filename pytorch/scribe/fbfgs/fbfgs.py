@@ -1027,7 +1027,7 @@ class FBFGS(Optimizer):
                     groups.append(flat_tensor[offset:offset+current_size])
                     offset += current_size
             return groups
-    def matrix_norm(self, tensor: Tensor, 
+    def norm_select(self, tensor: Tensor, 
                    norm: int = 2,
                    radius_scaling: float = 1.0,
                    radius_ball: float = 1.0,
@@ -1067,7 +1067,7 @@ class FBFGS(Optimizer):
                 # Apply masks
                 chunks = [chk * mask for chk, mask in zip(chunks, masks)]
             
-#TODO: extract this and create the functions group_select_norm and group_norm respectively (former masking and later norm dividing)or just make one function with a boolean for whether we select or div the norm
+#TODO: extract this
             # Vectorized Phase 2: Ball projection (optional)
             if radius_ball > 0:
                 l2_norms = torch.stack([
@@ -1075,21 +1075,17 @@ class FBFGS(Optimizer):
                     if chk.numel() > 0 else torch.tensor(0., device=tensor.device)
                     for chk in chunks
                 ])
-#TODO: this is wrong, we actually want the ball to boost the signal up when possible. This is like clip_grad_norm
-                # Avoid division by zero for zero norms
-                ball_factors = torch.minimum(
-                    torch.tensor(1.0, device=tensor.device),
-                    torch.where(
-                        l2_norms > eps,
-                        l2_norms / radius_ball,
-                        torch.tensor(1.0, device=tensor.device)
-                    )
+                # Divide each group by their l2 norm (scale l2 norm by radius_ball before dividing)
+                factors = torch.where(
+                    l2_norms > eps,
+                    l2_norms / radius_ball,
+                    torch.tensor(1.0, device=tensor.device)
                 ).unsqueeze(1)  # shape: (num_chunks, 1)
                 
                 chunks = [
-                    chk * factor.expand_as(chk)
+                    chk / factor.expand_as(chk)
                     if chk.numel() > 0 else chk
-                    for chk, factor in zip(chunks, ball_factors)
+                    for chk, factor in zip(chunks, factors)
                 ]
             
             if len(chunks) == 0:
@@ -1125,8 +1121,8 @@ class FBFGS(Optimizer):
     def gather_norm_flat_grad(self, norm=2, radius_ball=1.0):
         """Gather flat gradients and normalize based on norm_group parameter."""
         flat_grad = self._gather_flat_grad()
-        # Use matrix_norm to handle normalization based on norm_group
-        normed_grad = self.matrix_norm(flat_grad, norm=norm, radius_scaling=radius_ball, radius_ball=2.)
+        # Use norm_select to handle normalization based on norm_group
+        normed_grad = self.norm_select(flat_grad, norm=norm, radius_scaling=radius_ball, radius_ball=2.)
         return normed_grad
     def normalize_per_parameter_chunks(self, tensor: Tensor, 
                                      norm: int = 2,
@@ -1141,7 +1137,7 @@ class FBFGS(Optimizer):
         - norm_group < 1: Sub-layer norm (split each layer into groups)
         - norm_group > num_layers: Group norm (split parameters into norm_group groups)
         """
-        return self.matrix_norm(tensor, norm=norm, radius_scaling=radius_scaling, radius_ball=radius_ball, eps=eps)
+        return self.norm_select(tensor, norm=norm, radius_scaling=radius_scaling, radius_ball=radius_ball, eps=eps)
 #TODO: BROKEN!
     def _add_grad(self, step_size, update):
         """Perform parameter update with a dense or sparse tensor update."""
@@ -1496,8 +1492,8 @@ class FBFGS(Optimizer):
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
 #TODO: remove this..
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
-        d = self.matrix_norm(d, norm=norm, radius_scaling=radius_s, radius_ball=0., norm_group=effective_norm_group)
-        # Normalize using matrix_norm (already done in the return statement above)
+        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=1., norm_group=effective_norm_group)
+        # Normalize using norm_select (already done in the return statement above)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0).to(torch.float16)
         return d
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_alpha: float, norm: float) -> Tensor:
@@ -1509,8 +1505,8 @@ class FBFGS(Optimizer):
         if t < 1:
           similarity = similarity/t
         q = flat_grad.neg().to(flat_grad.device)
-        # Use matrix_norm for normalization instead of manual division
-        q = self.matrix_norm(q, norm=2, radius_scaling=1.0, radius_ball=2.)
+        # Use norm_select for normalization instead of manual division
+        q = self.norm_select(q, norm=2, radius_scaling=1.0, radius_ball=2.)
         q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
         al = torch.empty(num_old, dtype=q.dtype, device=q.device) # Initialize al as tensor on q's device
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=q.device) # Initialize mask on q's device
@@ -1551,8 +1547,8 @@ class FBFGS(Optimizer):
                   alpha_val = al[i] - be_i.sum() * ro[i].item() # Use al[i] and ro[i]
                   d = d + (current_old_stp_val * (alpha_val)) # Use current_old_stp_val
         print(hit_miss)
-        # Use matrix_norm for normalization instead of manual division
-        d = self.matrix_norm(d, norm=norm, radius_scaling=radius_alpha, radius_ball=2.)
+        # Use norm_select for normalization instead of manual division
+        d = self.norm_select(d, norm=norm, radius_scaling=radius_alpha, radius_ball=2.)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         return d
     @torch.no_grad()
@@ -1746,11 +1742,11 @@ class FBFGS(Optimizer):
               #Shotgun noise
 #TODO: find the indices of the selected parameters instead of div then multiply since this is lossy in the mantissa
 #TODO: this creates an additional tensor make sure this isnt worst case allocation optimizing the tensor ops for memory
-              # Use matrix_norm for normalization instead of manual per-parameter normalization
+              # Use norm_select for normalization instead of manual per-parameter normalization
 #NOTE: WE CANNOT PUT Y ON THE BALL HERE SINCE WE ARE ADDING THE MASK BACK. we would have to renorm after we add back ys_dense.
 #TODO: WE CANT TAKE RADIUS SCALING HERE SINCE WE ADD BACK THE MASK. need to implement radius and/or ball feature as a second norm op.
               print("y dense raw before ops: " + str((y_dense != 0).sum()))
-              y_dense = self.matrix_norm(y_dense, norm=y_norm, radius_scaling=self.radius_y, radius_ball=0., norm_group=self.norm_group_y)
+              y_dense = self.norm_select(y_dense, norm=y_norm, radius_scaling=self.radius_y, radius_ball=0., norm_group=self.norm_group_y)
               y_mask = (y_dense != 0)
 #              ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
               print("y dense pre s-mask " + str((y_dense != 0).sum()))
@@ -1901,7 +1897,7 @@ class FBFGS(Optimizer):
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
               d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s)
-              # sparse_direction_approximate already applies matrix_norm
+              # sparse_direction_approximate already applies norm_select
               del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
 #TODO: this or the above should be redundant trace and remove redundancy
