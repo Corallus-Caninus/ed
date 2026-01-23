@@ -1068,16 +1068,17 @@ class FBFGS(Optimizer):
                 chunks = [chk * mask for chk, mask in zip(chunks, masks)]
             
 #TODO: extract this
-            # Vectorized Phase 2: Ball projection (optional)
+            # Vectorized Phase 2: Ball projection (optional) - only apply if l2_norm/radius_ball >= 1 so we never increase the vector
             if radius_ball > 0:
                 l2_norms = torch.stack([
                     torch.linalg.vector_norm(chk, ord=2)
                     if chk.numel() > 0 else torch.tensor(0., device=tensor.device)
                     for chk in chunks
                 ])
-                # Divide each group by their l2 norm (scale l2 norm by radius_ball before dividing)
+                # Only scale down when l2_norm/radius_ball >= 1 (i.e., l2_norm >= radius_ball) to avoid increasing the vector
+                # When l2_norm < radius_ball, use factor of 1 (no change)
                 factors = torch.where(
-                    l2_norms > eps,
+                    (l2_norms > eps) & (l2_norms/radius_ball >= 1),
                     l2_norms / radius_ball,
                     torch.tensor(1.0, device=tensor.device)
                 ).unsqueeze(1)  # shape: (num_chunks, 1)
