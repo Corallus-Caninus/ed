@@ -859,6 +859,7 @@ class FBFGS(Optimizer):
         radius_s: float = 0,
         radius_y: float = 0,
         radius_ball: float = 0,
+        radius_ball_s: float = 1.0,
         direction_device: str = 'cpu',
         optimizer_device: str = 'cuda',
         norm: float = 1.0,
@@ -893,6 +894,7 @@ class FBFGS(Optimizer):
             radius_s=radius_s,
             radius_y=radius_y,
             radius_ball=radius_ball,
+            radius_ball_s=radius_ball_s,
             direction_device=direction_device,
             optimizer_device=optimizer_device,
             norm=norm,
@@ -914,6 +916,7 @@ class FBFGS(Optimizer):
         self.radius_s = radius_s
         self.radius_y = radius_y
         self.radius_ball = radius_ball
+        self.radius_ball_s = radius_ball_s
         self.direction_device = direction_device
         self.optimizer_device = optimizer_device
         self.max_ls= max_ls
@@ -1495,6 +1498,9 @@ class FBFGS(Optimizer):
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=1., norm_group=effective_norm_group)
         # Normalize using norm_select (already done in the return statement above)
+        # Normalize using norm_select with radius_ball_s
+        effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
+        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0).to(torch.float16)
         return d
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_alpha: float, norm: float) -> Tensor:
@@ -1549,7 +1555,7 @@ class FBFGS(Optimizer):
                   d = d + (current_old_stp_val * (alpha_val)) # Use current_old_stp_val
         print(hit_miss)
         # Use norm_select for normalization instead of manual division
-        d = self.norm_select(d, norm=norm, radius_scaling=radius_alpha, radius_ball=2.)
+        d = self.norm_select(d, norm=norm, radius_scaling=radius_alpha, radius_ball=self.radius_ball_s)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         return d
     @torch.no_grad()
@@ -1747,7 +1753,8 @@ class FBFGS(Optimizer):
 #NOTE: WE CANNOT PUT Y ON THE BALL HERE SINCE WE ARE ADDING THE MASK BACK. we would have to renorm after we add back ys_dense.
 #TODO: WE CANT TAKE RADIUS SCALING HERE SINCE WE ADD BACK THE MASK. need to implement radius and/or ball feature as a second norm op.
               print("y dense raw before ops: " + str((y_dense != 0).sum()))
-              y_dense = self.norm_select(y_dense, norm=y_norm, radius_scaling=self.radius_y, radius_ball=0., norm_group=self.norm_group_y)
+#TODO: test the ball here
+              y_dense = self.norm_select(y_dense, norm=y_norm, radius_scaling=self.radius_y, radius_ball=self.radius_ball, norm_group=self.norm_group_y)
               y_mask = (y_dense != 0)
 #              ys_mask = s_mask & y_mask  # Use & instead of torch.logical_and
               print("y dense pre s-mask " + str((y_dense != 0).sum()))
