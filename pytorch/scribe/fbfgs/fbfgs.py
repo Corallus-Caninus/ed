@@ -341,13 +341,27 @@ class SparseFlatTensor:
         """
         sparse_tensor = sparse_tensor_arg # Explicitly use sparse_tensor_arg
         assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
-        # Cast sparse tensor values to match the dense tensor's dtype to avoid precision errors
-        sparse_values = sparse_tensor.values.to(dense_tensor.dtype)
-        unit_values = sparse_tensor.unit_values.to(dense_tensor.dtype)
+        # Get the target dtype. If dense_tensor has a dtype attribute (like a tensor), use it.
+        # Otherwise, if dense_tensor is a SparseFlatTensor, use its values dtype as fallback.
+        if hasattr(dense_tensor, 'dtype'):
+            target_dtype = dense_tensor.dtype
+        elif isinstance(dense_tensor, SparseFlatTensor):
+            target_dtype = dense_tensor.values.dtype
+        else:
+            # Fallback to float32 if dtype is not available
+            target_dtype = torch.float32
+        # Cast sparse tensor values to match the target dtype to avoid precision errors
+        sparse_values = sparse_tensor.values.to(target_dtype)
+        unit_values = sparse_tensor.unit_values.to(target_dtype)
         # Initialize dot product with unit indices contribution
-        dot_product = torch.tensor(0.0, device=sparse_tensor.values.device, dtype=dense_tensor.dtype)
+        dot_product = torch.tensor(0.0, device=sparse_tensor.values.device, dtype=target_dtype)
         if sparse_tensor.unit_indices.numel() > 0:
-            unit_values_from_dense = dense_tensor.view(-1)[sparse_tensor.unit_indices]
+            # Handle dense_tensor: if it's SparseFlatTensor, convert to dense first
+            if isinstance(dense_tensor, SparseFlatTensor):
+                dense_tensor_flat = dense_tensor.to_dense().view(-1)
+            else:
+                dense_tensor_flat = dense_tensor.view(-1)
+            unit_values_from_dense = dense_tensor_flat[sparse_tensor.unit_indices]
             dot_product += torch.dot(unit_values_from_dense, unit_values)
         # Process segments if they exist
         if sparse_tensor.starts.numel() > 0:
@@ -360,7 +374,12 @@ class SparseFlatTensor:
             segment_internal_indices = indices - start_indices[segment_ids]
             segment_indices = segment_indices_offsets + segment_internal_indices
             # Extract corresponding values from dense tensor using sparse indices
-            sparse_values_from_dense = dense_tensor.view(-1)[segment_indices]
+            # Handle dense_tensor: if it's SparseFlatTensor, convert to dense first
+            if isinstance(dense_tensor, SparseFlatTensor):
+                dense_tensor_flat = dense_tensor.to_dense().view(-1)
+            else:
+                dense_tensor_flat = dense_tensor.view(-1)
+            sparse_values_from_dense = dense_tensor_flat[segment_indices]
             # Add segment contribution to dot product
             dot_product += torch.dot(sparse_values_from_dense, sparse_values)
         return dot_product
@@ -866,6 +885,7 @@ class FBFGS(Optimizer):
         prefetch_buffer: int = 20_000_000,
         norm_group_s: Optional[Union[int, float]] = None,  # New parameter
         norm_group_y: Optional[Union[int, float]] = None,  # New parameter
+        ro_threshold_rate: float = 1e-3,  # New parameter
     ):
         defaults = dict(
             max_iter=max_iter,
@@ -893,6 +913,7 @@ class FBFGS(Optimizer):
             prefetch_buffer=prefetch_buffer,
             norm_group_s=norm_group_s,  # Add to defaults
             norm_group_y=norm_group_y,  # Add to defaults
+            ro_threshold_rate=ro_threshold_rate,  # Add to defaults
         )
         super().__init__(params, defaults)
         if len(self.param_groups) != 1:
@@ -923,6 +944,8 @@ class FBFGS(Optimizer):
         self.prefetch_buffer = prefetch_buffer
         self.norm_group_s = norm_group_s if norm_group_s is not None else len(self._params)  # Default to vector norm (num_layers)
         self.norm_group_y = norm_group_y if norm_group_y is not None else 1  # Default to matrix norm (1)
+        self.ro_threshold_rate = ro_threshold_rate
+        self.current_ro_threshold = 0  # Start at threshold of 0
     def _numel(self):
         if self._numel_cache is None:
             self._numel_cache = sum(
@@ -1070,6 +1093,7 @@ class FBFGS(Optimizer):
                 # When l2_norm < radius_ball, use factor of 1 (no change)
                 factors = torch.where(
                     (l2_norms > eps) & (l2_norms/radius_ball >= 1),
+#                    (l2_norms > eps) ,
                     l2_norms / radius_ball,
                     torch.tensor(1.0, device=tensor.device)
                 ).unsqueeze(1)  # shape: (num_chunks, 1)
@@ -1190,7 +1214,7 @@ class FBFGS(Optimizer):
         for p, p_saved in zip(self._params, saved_params):
             p.copy_(p_saved)
         return loss, flat_grad
-    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None) -> Tensor:
+    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> Tensor:
         PREFETCH_THRESHOLD_VALUES = self.prefetch_buffer  # Use hyperparameter
         compute_stream = torch.cuda.current_stream()
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -1206,16 +1230,23 @@ class FBFGS(Optimizer):
         al = torch.empty(num_old, dtype=q.dtype, device=optimizer_device)
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=optimizer_device)
         if num_old > 0:
-            # Backward loop with dynamic prefetching
+            # Create filtered list of indices where ro[i] >= ro_threshold_val
+            valid_indices = []
+            for idx in range(num_old):
+                if ro_threshold_val == 0 or ro[idx] < ro_threshold_val:
+                    valid_indices.append(idx)
+            
+            # Backward loop with dynamic prefetching over filtered indices
             backward_buffer_dict = {}
             cumulative_values = 0
-            next_i = num_old - 1  # Start from last index
+            filtered_idx = len(valid_indices) - 1  # Start from last valid index
             
             # Initial prefetch until threshold
-            while next_i >= 0 and cumulative_values < PREFETCH_THRESHOLD_VALUES:
-                if next_i not in backward_buffer_dict:
-                    stp = old_stps[next_i]
-                    dir = old_dirs[next_i]
+            while filtered_idx >= 0 and cumulative_values < PREFETCH_THRESHOLD_VALUES:
+                i = valid_indices[filtered_idx]
+                if i not in backward_buffer_dict:
+                    stp = old_stps[i]
+                    dir = old_dirs[i]
                     num_values = stp.values.numel() + dir.values.numel()
                     
                     if cumulative_values + num_values > PREFETCH_THRESHOLD_VALUES:
@@ -1227,16 +1258,18 @@ class FBFGS(Optimizer):
                             dir_device = dir.to(torch.device(optimizer_device), non_blocking=True)
                             event = torch.cuda.Event()
                             event.record(transfer_stream)
-                            backward_buffer_dict[next_i] = (stp_device, dir_device, event, num_values)
+                            backward_buffer_dict[i] = (stp_device, dir_device, event, num_values)
                     else:
                         stp_device = stp.to(torch.device(optimizer_device))
                         dir_device = dir.to(torch.device(optimizer_device))
-                        backward_buffer_dict[next_i] = (stp_device, dir_device, None, num_values)
+                        backward_buffer_dict[i] = (stp_device, dir_device, None, num_values)
                     
                     cumulative_values += num_values
-                next_i -= 1
-            # Process indices
-            for i in range(num_old - 1, -1, -1):
+                filtered_idx -= 1
+            
+            # Process valid indices in reverse order
+            for idx_pos in range(len(valid_indices)-1, -1, -1):
+                i = valid_indices[idx_pos]
                 start_time = time.time()
                 
                 # Get current from buffer or prefetch
@@ -1265,28 +1298,60 @@ class FBFGS(Optimizer):
                     event.wait()
                     wait_end = time.time()
                 
+                # Early check for rho threshold
                 # Process current entry
                 sparse_dir_i = SparseFlatTensor(
                     dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
                     dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                 )
+                
                 curvature_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-                    
                 direction_similarity = curvature_similarity#* ro[i].item()
                 aligned = (direction_similarity <= orthogonality and direction_similarity >= -orthogonality)
                 direction_alignment_mask[i] = aligned
                 
                 if direction_alignment_mask[i]:
+                    # Create sparse_dir_i for use in orthogonalization
+                    sparse_dir_i = SparseFlatTensor(
+                        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
+                        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
+                    )
+                    
+                    # GRAM-SCHMIDT ORTHOGONALIZATION - COMMENTED OUT
+                    # # Compute orthogonal component of dir_i with respect to q
+                    # # First compute projection: proj = (dir_i · q) / (dir_i · dir_i) * dir_i
+                    # dir_i_dot_q = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
+                    # 
+                    # # Compute norm of dir_i (avoid division by zero)
+                    # dir_i_dot_dir_i = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, sparse_dir_i).item()
+                    # projection_coefficient = dir_i_dot_q / dir_i_dot_dir_i
+                    # # Create orthogonalized direction: dir_orth = dir_i - proj
+                    # # We'll compute this by subtracting the projection from dir_i
+                    # sparse_dir_orth = SparseFlatTensor(
+                    #     dir_device.starts, dir_device.ends, 
+                    #     dir_device.values.to(dtype=torch.float32) - projection_coefficient * dir_device.values.to(dtype=torch.float32),
+                    #     dir_device.total_size, dir_device.unit_indices, 
+                    #     (dir_device.unit_values.to(dtype=torch.float32) - projection_coefficient * dir_device.unit_values.to(dtype=torch.float32)) 
+                    #     if dir_device.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=dir_device.values.device)
+                    # )
+                    
+                    # Use original direction instead of orthogonalized direction
+                    # Create sparse_stp_i (needed for second loop)
                     sparse_stp_i = SparseFlatTensor(
                         stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
                         stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
                     )
+                    # Calculate alpha using original direction
                     alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
                     al[i] = alpha * ro[i].item()
+                    
+                    # Use original direction for the update
                     sparse_old_dir_scaled = SparseFlatTensor(
-                        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
-                        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
-                    ) * ((-al[i]))
+                        sparse_dir_i.starts, sparse_dir_i.ends, 
+                        sparse_dir_i.values * (-al[i]),
+                        sparse_dir_i.total_size, sparse_dir_i.unit_indices,
+                        sparse_dir_i.unit_values * (-al[i]) if sparse_dir_i.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_dir_i.values.device)
+                    )
                     q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
                     
                     q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
@@ -1295,17 +1360,18 @@ class FBFGS(Optimizer):
                 del backward_buffer_dict[i]
                 cumulative_values -= num_values
                 
-                # Prefetch next entries until threshold
-                next_i = i - 1
-                while next_i >= 0 and cumulative_values < PREFETCH_THRESHOLD_VALUES:
+                # Prefetch next valid entries until threshold
+                next_filtered_idx = idx_pos - 1
+                while next_filtered_idx >= 0 and cumulative_values < PREFETCH_THRESHOLD_VALUES:
+                    next_i = valid_indices[next_filtered_idx]
                     if next_i not in backward_buffer_dict:
                         stp_next = old_stps[next_i]
                         dir_next = old_dirs[next_i]
                         num_values_next = stp_next.values.numel() + dir_next.values.numel()
-                        
+                            
                         if cumulative_values + num_values_next > PREFETCH_THRESHOLD_VALUES:
                             break
-                        
+                            
                         if transfer_stream:
                             with torch.cuda.stream(transfer_stream):
                                 stp_next_device = stp_next.to(torch.device(optimizer_device), non_blocking=True)
@@ -1317,13 +1383,15 @@ class FBFGS(Optimizer):
                             stp_next_device = stp_next.to(torch.device(optimizer_device))
                             dir_next_device = dir_next.to(torch.device(optimizer_device))
                             backward_buffer_dict[next_i] = (stp_next_device, dir_next_device, None, num_values_next)
-                        
+                            
                         cumulative_values += num_values_next
-                    next_i -= 1
+                    next_filtered_idx -= 1
                 end_time = time.time()
                 symbol = "|" if direction_alignment_mask[i] else "_"
                 print(f"{symbol}", end='', flush=True)
         print("Q max after first loop: " + str(q.max()))
+        # q_for_orthogonalization is no longer needed since we're not doing orthogonalization
+        # q_for_orthogonalization = q.clone()  # COMMENTED OUT
         d = q.mul(H_diag.to(torch.float32))
         del q
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
@@ -1393,10 +1461,33 @@ class FBFGS(Optimizer):
                     )
                     dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
                     alpha_val = al[idx] - dot_product_val * ro[idx].item()
-                    sparse_old_stp_scaled = SparseFlatTensor(
+                    
+                    # Create sparse_stp_i for orthogonalization
+                    sparse_stp_i = SparseFlatTensor(
                         stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
                         stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
-                    ) * (alpha_val)
+                    )
+                    
+                    # Gram-Schmidt orthogonalization - COMMENTED OUT
+                    # # Gram-Schmidt orthogonalization for stp with respect to q_for_orthogonalization
+                    # stp_i_dot_q = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q_for_orthogonalization).item()
+                    # stp_i_dot_stp_i = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, sparse_stp_i).item()
+                    # projection_coefficient_stp = stp_i_dot_q / stp_i_dot_stp_i
+                    # sparse_stp_orth = SparseFlatTensor(
+                    #     stp_device.starts, stp_device.ends,
+                    #     stp_device.values.to(dtype=torch.float32) - projection_coefficient_stp * stp_device.values.to(dtype=torch.float32),
+                    #     stp_device.total_size, stp_device.unit_indices,
+                    #     (stp_device.unit_values.to(dtype=torch.float32) - projection_coefficient_stp * stp_device.unit_values.to(dtype=torch.float32))
+                    #     if stp_device.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=stp_device.values.device)
+                    # )
+                    
+                    # Use original step tensor instead of orthogonalized one
+                    # Scale the original stp by alpha_val and add to d
+                    sparse_old_stp_scaled = SparseFlatTensor(
+                        sparse_stp_i.starts, sparse_stp_i.ends, sparse_stp_i.values * (alpha_val),
+                        sparse_stp_i.total_size, sparse_stp_i.unit_indices,
+                        sparse_stp_i.unit_values * (alpha_val) if sparse_stp_i.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_stp_i.values.device)
+                    )
                     d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)
                     
                     # Cleanup
@@ -1517,6 +1608,7 @@ class FBFGS(Optimizer):
       y_norm = group["y_norm"]
       rho_rewind = group["rho_rewind"]
       orthogonality = group["orthogonality"]
+      ro_thresholding = 1
       # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
       state = self.state[self._params[0]]
@@ -1543,6 +1635,7 @@ class FBFGS(Optimizer):
         H_diag = torch.tensor(H_diag)
       H_diag = 1
       H_diag = torch.tensor(H_diag)
+      self.t = 1
 #      flat_grad = None
 #      prev_flat_grad = None # Initialize prev_flat_grad to None
 #
@@ -1556,10 +1649,38 @@ class FBFGS(Optimizer):
 #TODO: we arent storing the last iteration in history. Consider reworking the last iteration logic for step function
 #      while n_iter < max_iter:
       while True:
+          if ro and len(ro) > 0:
+              # Use current_ro_threshold instead of ro_threshold_rate
+              print(f"self.current_ro_threshold values count: {self.current_ro_threshold}")
+              if ro:
+                  if self.current_ro_threshold > 0:
+                      k = self.current_ro_threshold
+                      actual_k = min(k, len(ro))
+                      if actual_k > 0:
+                          ro_values = torch.stack(ro)
+                          # Sort ro values in descending order (largest first) and get sorted indices
+                          sorted_ro, sorted_indices = torch.sort(ro_values, descending=True, dim=0)
+                          # Get the nth largest value (0 = largest, 1 = second largest, etc.)
+                          # Since sorted_ro is in descending order, the nth largest is at index actual_k - 1
+                          nth_index = max(0, actual_k - 1)  # Ensure we don't go out of bounds
+                          ro_threshold_val = sorted_ro[nth_index].item()  # Convert to Python scalar
+#                          print(f"Sorted ro values: {sorted_ro}")
+                          print(f"ro_threshold_val: {ro_threshold_val}")
+                          print(f"ro values max: {sorted_ro[0].item()}, min: {sorted_ro[-1].item()}")
+#                          print(f"Selected index: {nth_index}, original index: {sorted_indices[nth_index].item()}")
+                      else:
+                          ro_threshold_val = 0
+                  else:
+                      ro_threshold_val = 0
+              else:
+                  ro_threshold_val = 0
+          else:
+              ro_threshold_val = 0
           torch.cuda.empty_cache() # Clear cache before direction calculation
           # keep track of nb of iterations
           n_iter += 1
-          print("iteration: " + str(n_iter))
+          stored_dirs = len(old_dirs)
+          print(f"iteration: {n_iter} (stored directions: {stored_dirs})")
           print("[CRAM]")
           ############################################################
           # compute gradient descent direction
@@ -1578,10 +1699,21 @@ class FBFGS(Optimizer):
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
-              if len(old_dirs) > 0  : # and n_iter > 1:
-                d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s)
+              # Calculate the top k ro threshold if we have history
+              if len(old_dirs) > 0: # and n_iter > 1:
+                d = self.sparse_direction_approximate(
+                    old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, 
+                    t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
+                    y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, 
+                    norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val
+                )
               else:
-                d = self.sparse_direction_approximate([], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm = y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=n_iter, norm_group=self.norm_group_s)
+                d = self.sparse_direction_approximate(
+                    [], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, 
+                    t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
+                    y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, 
+                    n_iter=n_iter, norm_group=self.norm_group_s, ro_threshold_val=0
+                )
 #                  d = self._gather_flat_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
 #                  #TODO: should we also do norm float("inf") here to match direction S?
 #    #              total_norm = torch.linalg.vector_norm(d, ord=2.).to(self.optimizer_device)  
@@ -1672,7 +1804,7 @@ class FBFGS(Optimizer):
 #TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be modeled as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
 #TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
 #TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
-              if (ys >= 1e-3  ) :#TODO: is this Kosher?
+              if (ys >= self.ro_threshold_rate  ) :#TODO: is this Kosher?
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1721,15 +1853,17 @@ class FBFGS(Optimizer):
                 ls_failed = True
                 state["ls_failed"] = True
               if n_iter > max_iter or loss == 0:
+                self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
                 break
               if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
+                self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
-                return orig_loss
+                break
               # Update scale of initial Hessian approximation
 #              if ys > 0:
 #                y_squared = y_dense.dot(y_dense)
@@ -1756,7 +1890,7 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s)
+              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
               # sparse_direction_approximate already applies norm_select
               del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
@@ -1809,41 +1943,15 @@ class FBFGS(Optimizer):
                   # Reset parameters to the state before line search
                   for p, p_saved in zip(self._params, saved_params):
                       p.copy_(p_saved)
-                  print("\033[91mLinesearch failure, Rho rewind and skip. Parameters restored.\033[0m")
-#TODO: this is wrong we arent usinc rho_rewinh
-#TODO: consider Rho rewind as a parameter passed into direction approximate that temporarily ignores the top N rho entries, similar to similarity (Since similarity no longer considers the al rho scaled term just q curvature)
-# Remove 10 largest rho entries from history if line search fails
-                  if len(ro) > 0:
-                      magnitudes = [
-#TODO: sqrt the pow so we dont skew to direction over Rho
-#                          (s.values.pow(2).sum() + s.unit_values.pow(2).sum()) * r.item()
-                           r.item()
-                          for s, r in zip(old_stps, ro)
-                      ]
-                      num_to_remove = min(rho_rewind, len(magnitudes))
-                      magnitudes_tensor = torch.tensor(magnitudes)
-                      _, indices_to_remove = torch.topk(magnitudes_tensor, num_to_remove, largest=True)
-                      
-                      for idx in sorted(indices_to_remove.tolist(), reverse=True):
-                          if idx < len(old_dirs):
-                              old_dirs.pop(idx)
-                              old_stps.pop(idx)
-                              ro.pop(idx)
-#                      print(f"  Removed {num_to_remove} largest and {num_oldest_to_remove} oldest rho entries due to line search failure.")
-#TODO: or we could simply set similarity as a momentum like factor for convergence. Possibly even scaling it by the gradient gtd convergence metric with a scalar coefficient hyperparameter.
-#TODO: Actually Rho Rewind.. or not?
-#                  prev_flat_grad = None # Force gradient search on next iteration
-                  ls_failed = True
-                  state["ls_failed"] = True # Store ls_failed state
-                  # Save the modified history back to state before returning
-                  state["old_dirs"] = old_dirs
-                  state["old_stps"] = old_stps
-                  state["ro"] = ro
-                  self.t = 1
-                  return orig_loss # Skip this data point
+                  print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
+                  # Increment threshold on line search failure
+                  self.current_ro_threshold += 10
+                  # Continue to next iteration to retry
+                  continue
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
                   state["ls_failed"] = False # Store ls_failed state
+                  # Decrement threshold on successful line search
                   # Ensure t and d are on the correct device (optimizer_device) for _add_grad
 #                  t = t.to(self.optimizer_device)
 #                  d = d.to(self.optimizer_device)
@@ -1901,6 +2009,7 @@ class FBFGS(Optimizer):
 #              break
 #      state["d"] = d
 #      state["t"] = t
+      self.current_ro_threshold = max(self.current_ro_threshold - 10, 0)
       state["old_dirs"] = old_dirs
       state["d"] = d
       state["old_stps"] = old_stps
@@ -1926,6 +2035,7 @@ class FBFGS(Optimizer):
             "t": self.t, # Save step size t
             "ls_failed": state_dict.get("ls_failed", False), # Save ls_failed state
             "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
+            "current_ro_threshold": self.current_ro_threshold, # Save current_ro_threshold
         }
         torch.save(history, filename)
     def _move_item_to_device(self, item, device_obj, non_blocking=False):
@@ -1964,6 +2074,7 @@ class FBFGS(Optimizer):
                 self.t = t_val
             state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
             state["ls_failed"] = history.get("ls_failed", False) # Load ls_failed state
+            self.current_ro_threshold = history.get("current_ro_threshold", 0) # Load current_ro_threshold
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
