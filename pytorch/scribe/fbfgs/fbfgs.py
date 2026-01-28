@@ -1308,6 +1308,7 @@ class FBFGS(Optimizer):
                 eps = 0
                 # Use precomputed L2 norms
                 dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
+#TODO: if we havent changed q, dont recalculate its norm.
                 q_norm = torch.linalg.vector_norm(q, ord=2).item()
                 
                 if dir_norm > eps and q_norm > eps:
@@ -1714,7 +1715,7 @@ class FBFGS(Optimizer):
               flat_grad = self._gather_flat_grad().to(self.optimizer_device)
 #TODO: clip_grad_norm by the l1 norm for a max norm of 1e9 (if needed)
 #              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
-              if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
+              if flat_grad.abs().max() <= tolerance_change: #TODO: check if this is even possible given normalization.
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
@@ -1879,7 +1880,7 @@ class FBFGS(Optimizer):
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
                 break
-              if flat_grad.abs().max() <= tolerance_grad: #TODO: check if this is even possible given normalization.
+              if flat_grad.abs().max() <= tolerance_change: #TODO: check if this is even possible given normalization.
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
                 state["ro"] = ro
@@ -1967,7 +1968,7 @@ class FBFGS(Optimizer):
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
                   # Mark failure and adjust threshold
                   any_line_search_failed = True
-                  self.current_ro_threshold += 10
+                  self.current_ro_threshold = min(len(ro), self.current_ro_threshold + 10)
                   # Continue to next iteration to retry
                   continue
               else: # Strong Wolfe line search succeeded

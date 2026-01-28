@@ -116,7 +116,7 @@ batch_train = None
 # Initialize FBFGS optimizer
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=16, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.2, radius_y=5e4, radius_ball=0.8, radius_ball_s=1, radius_s=1e5, c1=1e-7, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.01, rho_rewind=10, orthogonality=1, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=1e-4, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.2, radius_y=5e4, radius_ball=500, radius_ball_s=1, radius_s=1e5, c1=1e-7, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
