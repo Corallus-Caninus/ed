@@ -1305,9 +1305,24 @@ class FBFGS(Optimizer):
                     dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                 )
                 
-                curvature_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-                direction_similarity = curvature_similarity#* ro[i].item()
-                aligned = (direction_similarity <= orthogonality and direction_similarity >= -orthogonality)
+                eps = 0
+                # Compute L2 norms
+                dir_norm = torch.sqrt(SparseFlatTensor.sparse_dot_dense(sparse_dir_i, sparse_dir_i)).item()
+                q_norm = torch.linalg.vector_norm(q, ord=2).item()
+                
+                if dir_norm > eps and q_norm > eps:
+                    # Normalize both vectors
+                    normalized_dir = SparseFlatTensor(
+                        sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values / dir_norm,
+                        sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
+                        sparse_dir_i.unit_values / dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
+                    )
+                    normalized_q = q / q_norm
+                    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
+                else:
+                    direction_similarity = 0.0  # Treat as orthogonal if any norm is near zero
+                
+                aligned = (abs(direction_similarity) <= orthogonality)
                 direction_alignment_mask[i] = aligned
                 
                 if direction_alignment_mask[i]:
@@ -1662,7 +1677,7 @@ class FBFGS(Optimizer):
                           sorted_ro, sorted_indices = torch.sort(ro_values, descending=True, dim=0)
                           # Get the nth largest value (0 = largest, 1 = second largest, etc.)
                           # Since sorted_ro is in descending order, the nth largest is at index actual_k - 1
-                          nth_index = max(0, actual_k - 1)  # Ensure we don't go out of bounds
+                          nth_index = max(0, int(actual_k) - 1)  # Ensure we don't go out of bounds and index is integer
                           ro_threshold_val = sorted_ro[nth_index].item()  # Convert to Python scalar
 #                          print(f"Sorted ro values: {sorted_ro}")
                           print(f"ro_threshold_val: {ro_threshold_val}")
