@@ -1214,7 +1214,7 @@ class FBFGS(Optimizer):
         for p, p_saved in zip(self._params, saved_params):
             p.copy_(p_saved)
         return loss, flat_grad
-    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> Tensor:
+    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> Tensor:
         PREFETCH_THRESHOLD_VALUES = self.prefetch_buffer  # Use hyperparameter
         compute_stream = torch.cuda.current_stream()
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -1306,8 +1306,8 @@ class FBFGS(Optimizer):
                 )
                 
                 eps = 0
-                # Compute L2 norms
-                dir_norm = torch.sqrt(SparseFlatTensor.sparse_dot_dense(sparse_dir_i, sparse_dir_i)).item()
+                # Use precomputed L2 norms
+                dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
                 q_norm = torch.linalg.vector_norm(q, ord=2).item()
                 
                 if dir_norm > eps and q_norm > eps:
@@ -1627,7 +1627,10 @@ class FBFGS(Optimizer):
       # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
       state = self.state[self._params[0]]
+      if "y_norms" not in state:
+          state["y_norms"] = []  # Precomputed L2 norms of y vectors
       # evaluate initial f(x) and df/dx
+      state = self.state[self._params[0]]
       orig_loss = closure()
         #TODO: this should probably be direction_evaluate so we include the radius_alphaping factor
       loss = float(orig_loss)
@@ -1663,6 +1666,7 @@ class FBFGS(Optimizer):
       ls_failed = state.get("ls_failed", False) # Retrieve ls_failed state
 #TODO: we arent storing the last iteration in history. Consider reworking the last iteration logic for step function
 #      while n_iter < max_iter:
+      any_line_search_failed = False  # Track if any line search failed in this iteration
       while True:
           if ro and len(ro) > 0:
               # Use current_ro_threshold instead of ro_threshold_rate
@@ -1717,14 +1721,14 @@ class FBFGS(Optimizer):
               # Calculate the top k ro threshold if we have history
               if len(old_dirs) > 0: # and n_iter > 1:
                 d = self.sparse_direction_approximate(
-                    old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, 
+                    old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, 
                     norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val
                 )
               else:
                 d = self.sparse_direction_approximate(
-                    [], [], [], flat_grad, H_diag, optimizer_device=self.optimizer_device, 
+                    [], [], [], flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, 
                     n_iter=n_iter, norm_group=self.norm_group_s, ro_threshold_val=0
@@ -1857,12 +1861,14 @@ class FBFGS(Optimizer):
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
                 print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
                 torch.cuda.empty_cache() # Clear cache before history update
-                # Store new direction/step
-                old_dirs.append(y.to(self.direction_device, non_blocking=False, pin_memory=True)) # Store y as SparseFlatTensor
-                old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True)) # Store s as SparseFlatTensor #TODO: pinme
-# TODO: if we fixed the memory error, reintroduce pinned memory here
-                ro.append(torch.tensor([(1. / ys)])) #TODO: pinme
-#TODO: we have a problem with ys here +gtd - -gtd_new == ys < 0
+                # Store new direction/step and compute its L2 norm
+                y_to_store = y.to(self.direction_device, non_blocking=False, pin_memory=True)
+                old_dirs.append(y_to_store)
+                old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True))
+                ro.append(torch.tensor([(1. / ys)]))
+                # Convert dense y to compute norm
+                y_dense = y_to_store.to_dense().float()
+                state["y_norms"].append(torch.sqrt(torch.sum(y_dense**2)))
                 new_ys_x = new_ys_x + 1
               else:
                 ls_failed = True
@@ -1905,7 +1911,7 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
+              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
               # sparse_direction_approximate already applies norm_select
               del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
@@ -1959,14 +1965,14 @@ class FBFGS(Optimizer):
                   for p, p_saved in zip(self._params, saved_params):
                       p.copy_(p_saved)
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
-                  # Increment threshold on line search failure
+                  # Mark failure and adjust threshold
+                  any_line_search_failed = True
                   self.current_ro_threshold += 10
                   # Continue to next iteration to retry
                   continue
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
                   state["ls_failed"] = False # Store ls_failed state
-                  # Decrement threshold on successful line search
                   # Ensure t and d are on the correct device (optimizer_device) for _add_grad
 #                  t = t.to(self.optimizer_device)
 #                  d = d.to(self.optimizer_device)
@@ -2024,7 +2030,9 @@ class FBFGS(Optimizer):
 #              break
 #      state["d"] = d
 #      state["t"] = t
-      self.current_ro_threshold = max(self.current_ro_threshold - 10, 0)
+      # Only reduce threshold if all line searches succeeded in this iteration
+      if not any_line_search_failed:
+          self.current_ro_threshold = max(self.current_ro_threshold - 10, 0)
       state["old_dirs"] = old_dirs
       state["d"] = d
       state["old_stps"] = old_stps
