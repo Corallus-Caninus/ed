@@ -1828,7 +1828,7 @@ class FBFGS(Optimizer):
 #TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be modeled as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
 #TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
 #TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
-              if (ys >= self.ro_threshold_rate  ) :#TODO: is this Kosher?
+              if ys >= self.ro_threshold_rate:  # TODO: is this Kosher?
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
                     cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
@@ -1876,6 +1876,40 @@ class FBFGS(Optimizer):
                 state["y_norms"].append(torch.sqrt(torch.sum(y_dense**2)))
                 new_ys_x = new_ys_x + 1
               else:
+                # Include Ro Rewind logic when ys < threshold
+                if "recycle_bin" not in state:
+                    state["recycle_bin"] = []
+                recycle_bin = state["recycle_bin"]
+                
+                if len(ro) >= 10:
+                    # Get indices where alignment mask is True
+                    alignment_mask = state.get("direction_alignment_mask")
+                    if alignment_mask is None:
+                        aligned_indices = []
+                    else:
+                        aligned_indices = torch.nonzero(alignment_mask).squeeze(1).tolist()
+                    
+                    if aligned_indices:
+                        # Get (index, ro) pairs for aligned entries
+                        aligned_ro_pairs = [(i, ro[i].item()) for i in aligned_indices]
+                        # Sort by ro value descending
+                        sorted_aligned_ro = sorted(aligned_ro_pairs, key=lambda x: x[1], reverse=True)
+                        indices_to_remove = [i for i, _ in sorted_aligned_ro[:min(10, len(sorted_aligned_ro))]]
+                        
+                        # Store entries and their original indices in recycle_bin
+                        for idx in sorted(indices_to_remove, reverse=True):
+                            idx = int(idx)
+                            recycle_entry = {
+                                'index': idx,
+                                'dir': old_dirs.pop(idx),
+                                'stp': old_stps.pop(idx),
+                                'ro': ro.pop(idx),
+                            }
+                            if idx < len(state["y_norms"]):
+                                recycle_entry['y_norm'] = state["y_norms"].pop(idx)
+                            recycle_bin.append(recycle_entry)
+                        print(f"Moved {len(indices_to_remove)} largest ALIGNED ro entries to recycle_bin (ys threshold)")
+                
                 ls_failed = True
                 state["ls_failed"] = True
               if n_iter > max_iter or loss == 0:
@@ -1972,44 +2006,49 @@ class FBFGS(Optimizer):
                   for p, p_saved in zip(self._params, saved_params):
                       p.copy_(p_saved)
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
-                  # Mark failure and adjust threshold
+                  # Mark failure and reset step size to 1
                   any_line_search_failed = True
+                  t = torch.tensor(1.)
+                  self.t = t.item()  # Also reset class-level step size
 #Ro Rewind
                   # Temporary Ro Rewind - move entries to recycle_bin
-                  if "recycle_bin" not in state:
-                      state["recycle_bin"] = []
-                  recycle_bin = state["recycle_bin"]
-                  
-                  if len(ro) >= 10:
-                      # Get indices where alignment mask is True
-                      alignment_mask = state.get("direction_alignment_mask")
-                      if alignment_mask is None:
-                          aligned_indices = []
-                      else:
-                          aligned_indices = torch.nonzero(alignment_mask).squeeze(1).tolist()
-                      
-                      if aligned_indices:
-                          # Get (index, ro) pairs for aligned entries
-                          aligned_ro_pairs = [(i, ro[i].item()) for i in aligned_indices]
-                          # Sort by ro value descending
-                          sorted_aligned_ro = sorted(aligned_ro_pairs, key=lambda x: x[1], reverse=True)
-                          indices_to_remove = [i for i, _ in sorted_aligned_ro[:min(10, len(sorted_aligned_ro))]]
-                          
-                          # Store entries and their original indices in recycle_bin
-                          for idx in sorted(indices_to_remove, reverse=True):
-                              idx = int(idx)
-                              recycle_entry = {
-                                  'index': idx,
-                                  'dir': old_dirs.pop(idx),
-                                  'stp': old_stps.pop(idx),
-                                  'ro': ro.pop(idx),
-                              }
-                              if idx < len(state["y_norms"]):
-                                  recycle_entry['y_norm'] = state["y_norms"].pop(idx)
-                              recycle_bin.append(recycle_entry)
-                          print(f"Moved {len(indices_to_remove)} largest ALIGNED ro entries to recycle_bin")
-                      else:
-                          print("No aligned ro entries to move")
+#                  if "recycle_bin" not in state:
+#                      state["recycle_bin"] = []
+#                  recycle_bin = state["recycle_bin"]
+#                  
+#                  if len(ro) >= 10:
+#                      # Get indices where alignment mask is True
+#                      alignment_mask = state.get("direction_alignment_mask")
+#                      if alignment_mask is None:
+#                          aligned_indices = []
+#                      else:
+#                          aligned_indices = torch.nonzero(alignment_mask).squeeze(1).tolist()
+#                      
+#                      if aligned_indices:
+#                          # Only process indices that exist in ro list
+#                          aligned_ro_pairs = []
+#                          valid_indices = [i for i in aligned_indices if i < len(ro)]
+#                          for i in valid_indices:
+#                              aligned_ro_pairs.append((i, ro[i].item()))
+#                          # Sort by ro value descending
+#                          sorted_aligned_ro = sorted(aligned_ro_pairs, key=lambda x: x[1], reverse=True)
+#                          indices_to_remove = [i for i, _ in sorted_aligned_ro[:min(10, len(sorted_aligned_ro))]]
+#                          
+#                          # Store entries and their original indices in recycle_bin
+#                          for idx in sorted(indices_to_remove, reverse=True):
+#                              idx = int(idx)
+#                              recycle_entry = {
+#                                  'index': idx,
+#                                  'dir': old_dirs.pop(idx),
+#                                  'stp': old_stps.pop(idx),
+#                                  'ro': ro.pop(idx),
+#                              }
+#                              if idx < len(state["y_norms"]):
+#                                  recycle_entry['y_norm'] = state["y_norms"].pop(idx)
+#                              recycle_bin.append(recycle_entry)
+#                          print(f"Moved {len(indices_to_remove)} largest ALIGNED ro entries to recycle_bin")
+#                      else:
+#                          print("No aligned ro entries to move")
                   
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
