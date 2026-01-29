@@ -1975,7 +1975,11 @@ class FBFGS(Optimizer):
                   # Mark failure and adjust threshold
                   any_line_search_failed = True
 #Ro Rewind
-                  # Remove top 10 largest ALIGNED ro entries when linesearch fails
+                  # Temporary Ro Rewind - move entries to recycle_bin
+                  if "recycle_bin" not in state:
+                      state["recycle_bin"] = []
+                  recycle_bin = state["recycle_bin"]
+                  
                   if len(ro) >= 10:
                       # Get indices where alignment mask is True
                       alignment_mask = state.get("direction_alignment_mask")
@@ -1989,19 +1993,23 @@ class FBFGS(Optimizer):
                           aligned_ro_pairs = [(i, ro[i].item()) for i in aligned_indices]
                           # Sort by ro value descending
                           sorted_aligned_ro = sorted(aligned_ro_pairs, key=lambda x: x[1], reverse=True)
-                          # Take top 10 largest ro entries (or all if less than 10 available)
                           indices_to_remove = [i for i, _ in sorted_aligned_ro[:min(10, len(sorted_aligned_ro))]]
                           
+                          # Store entries and their original indices in recycle_bin
                           for idx in sorted(indices_to_remove, reverse=True):
-                              idx = int(idx)  # Ensure index is integer
-                              old_dirs.pop(idx)
-                              old_stps.pop(idx)
-                              ro.pop(idx)
+                              idx = int(idx)
+                              recycle_entry = {
+                                  'index': idx,
+                                  'dir': old_dirs.pop(idx),
+                                  'stp': old_stps.pop(idx),
+                                  'ro': ro.pop(idx),
+                              }
                               if idx < len(state["y_norms"]):
-                                  state["y_norms"].pop(idx)
-                          print(f"Removed {len(indices_to_remove)} largest ALIGNED ro entries due to linesearch failure")
+                                  recycle_entry['y_norm'] = state["y_norms"].pop(idx)
+                              recycle_bin.append(recycle_entry)
+                          print(f"Moved {len(indices_to_remove)} largest ALIGNED ro entries to recycle_bin")
                       else:
-                          print("No aligned ro entries to remove")
+                          print("No aligned ro entries to move")
                   
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
@@ -2067,16 +2075,26 @@ class FBFGS(Optimizer):
 #              break
 #      state["d"] = d
 #      state["t"] = t
+      # Restore any entries from recycle_bin
+      if "recycle_bin" in state:
+          recycle_bin = state["recycle_bin"]
+          while recycle_bin:
+              entry = recycle_bin.pop()
+              idx = entry['index']
+              old_dirs.insert(idx, entry['dir'])
+              old_stps.insert(idx, entry['stp'])
+              ro.insert(idx, entry['ro'])
+              if 'y_norm' in entry:
+                  state["y_norms"].insert(idx, entry['y_norm'])
+      
       # Clear threshold logic since we're removing entries directly
       state["old_dirs"] = old_dirs
       state["d"] = d
       state["old_stps"] = old_stps
       state["ro"] = ro
-#      state["H_diag"] = H_diag
+      state["recycle_bin"] = []  # Reset recycle_bin
       state["prev_flat_grad"] = prev_flat_grad
       state["ls_failed"] = ls_failed # Store ls_failed state
-#      state["prev_loss"] = prev_loss
-#      state["n_iter"] = 0 #TODO: MoE equivalent centinuous sparse model using l1 with novel direction per iteration, if we reuse the hessian and there is sparsity the curvature will bias to a lopsided model but is appropriate for l2
       return orig_loss
     def save_history(self, filename):
         """Save FBFGS history to a file."""
