@@ -1214,7 +1214,7 @@ class FBFGS(Optimizer):
         for p, p_saved in zip(self._params, saved_params):
             p.copy_(p_saved)
         return loss, flat_grad
-    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> Tensor:
+    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> tuple[Tensor, Tensor]:
         PREFETCH_THRESHOLD_VALUES = self.prefetch_buffer  # Use hyperparameter
         compute_stream = torch.cuda.current_stream()
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -1305,28 +1305,30 @@ class FBFGS(Optimizer):
                     dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                 )
                 
-                eps = 0
-                # Use precomputed L2 norms
-                dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
-#TODO: if we havent changed q, dont recalculate its norm.
-                q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#                eps = 0
+#                # Use precomputed L2 norms
+#                dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
+##TODO: if we havent changed q, dont recalculate its norm.
+#                q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#                
+#                if dir_norm > eps and q_norm > eps:
+#                    # Normalize both vectors
+#                    normalized_dir = SparseFlatTensor(
+#                        sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values / dir_norm,
+#                        sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
+#                        sparse_dir_i.unit_values / dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
+#                    )
+#                    normalized_q = q / q_norm
+#                    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
+#                else:
+#                    direction_similarity = 0.0  # Treat as orthogonal if any norm is near zero
                 
-                if dir_norm > eps and q_norm > eps:
-                    # Normalize both vectors
-                    normalized_dir = SparseFlatTensor(
-                        sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values / dir_norm,
-                        sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
-                        sparse_dir_i.unit_values / dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
-                    )
-                    normalized_q = q / q_norm
-                    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
-                else:
-                    direction_similarity = 0.0  # Treat as orthogonal if any norm is near zero
-                
+                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
                 aligned = (abs(direction_similarity) <= orthogonality)
                 direction_alignment_mask[i] = aligned
                 
                 if direction_alignment_mask[i]:
+#                    orthogonality = orthogonality - 0.1*orthogonality
                     # Create sparse_dir_i for use in orthogonalization
                     sparse_dir_i = SparseFlatTensor(
                         dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
@@ -1542,7 +1544,7 @@ class FBFGS(Optimizer):
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0).to(torch.float16)
-        return d
+        return d, direction_alignment_mask
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_alpha: float, norm: float) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
@@ -1721,14 +1723,14 @@ class FBFGS(Optimizer):
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
               # Calculate the top k ro threshold if we have history
               if len(old_dirs) > 0: # and n_iter > 1:
-                d = self.sparse_direction_approximate(
+                d, direction_alignment_mask = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, 
                     norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val
                 )
               else:
-                d = self.sparse_direction_approximate(
+                d, direction_alignment_mask = self.sparse_direction_approximate(
                     [], [], [], flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, 
@@ -1764,6 +1766,8 @@ class FBFGS(Optimizer):
               y_dense = flat_grad.clone().to(torch.float32) # y_dense is on flat_grad's device (optimizer_device)
               y_dense.sub_(prev_flat_grad.to(torch.float32).to(self.optimizer_device)) # Ensure prev_flat_grad.to(torch.float32) is on optimizer_device
               y_dense= y_dense.to(torch.float32)
+#TODO: y going to epsilon is really the problem for ys. ys cant be below a certain amount due to the obvious calculations involved but if y is very small, the approximation blows up with false curvature etc. due to precision inaccuracies.
+#TODO: consider skipping based on y and setting ys thresholding based strictly on the numeric stability of the calculations. Need to think about this..
               s_sparse = d * t #Define s_sparse here
               ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
               if ys > 0:
@@ -1912,7 +1916,8 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
+              d, direction_alignment_mask = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
+              state["direction_alignment_mask"] = direction_alignment_mask
               # sparse_direction_approximate already applies norm_select
               del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
@@ -1928,6 +1933,7 @@ class FBFGS(Optimizer):
           # reset initial guess for step size
           # directional derivative
    #TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
+          # Unpack d from tuple before using it
           gtd_sparse_product = flat_grad * d.to(self.optimizer_device) # Ensure d is on optimizer_device
           gtd = gtd_sparse_product.sum()  # g * d
           del gtd_sparse_product
@@ -1968,7 +1974,37 @@ class FBFGS(Optimizer):
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
                   # Mark failure and adjust threshold
                   any_line_search_failed = True
-                  self.current_ro_threshold = min(len(ro), self.current_ro_threshold + 10)
+#Ro Rewind
+                  # Remove top 10 largest ALIGNED ro entries when linesearch fails
+                  if len(ro) >= 10:
+                      # Get indices where alignment mask is True
+                      alignment_mask = state.get("direction_alignment_mask")
+                      if alignment_mask is None:
+                          aligned_indices = []
+                      else:
+                          aligned_indices = torch.nonzero(alignment_mask).squeeze(1).tolist()
+                      
+                      if aligned_indices:
+                          # Get (index, ro) pairs for aligned entries
+                          aligned_ro_pairs = [(i, ro[i].item()) for i in aligned_indices]
+                          # Sort by ro value descending
+                          sorted_aligned_ro = sorted(aligned_ro_pairs, key=lambda x: x[1], reverse=True)
+                          # Take top 10 largest ro entries (or all if less than 10 available)
+                          indices_to_remove = [i for i, _ in sorted_aligned_ro[:min(10, len(sorted_aligned_ro))]]
+                          
+                          for idx in sorted(indices_to_remove, reverse=True):
+                              idx = int(idx)  # Ensure index is integer
+                              old_dirs.pop(idx)
+                              old_stps.pop(idx)
+                              ro.pop(idx)
+                              if idx < len(state["y_norms"]):
+                                  state["y_norms"].pop(idx)
+                          print(f"Removed {len(indices_to_remove)} largest ALIGNED ro entries due to linesearch failure")
+                      else:
+                          print("No aligned ro entries to remove")
+                  
+                  # Cleanup: always store direction alignment mask in state
+                  state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
                   # Continue to next iteration to retry
                   continue
               else: # Strong Wolfe line search succeeded
@@ -2031,9 +2067,7 @@ class FBFGS(Optimizer):
 #              break
 #      state["d"] = d
 #      state["t"] = t
-      # Only reduce threshold if all line searches succeeded in this iteration
-      if not any_line_search_failed:
-          self.current_ro_threshold = max(self.current_ro_threshold - 10, 0)
+      # Clear threshold logic since we're removing entries directly
       state["old_dirs"] = old_dirs
       state["d"] = d
       state["old_stps"] = old_stps
