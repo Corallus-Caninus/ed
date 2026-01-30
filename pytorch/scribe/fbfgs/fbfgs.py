@@ -885,7 +885,7 @@ class FBFGS(Optimizer):
         prefetch_buffer: int = 20_000_000,
         norm_group_s: Optional[Union[int, float]] = None,  # New parameter
         norm_group_y: Optional[Union[int, float]] = None,  # New parameter
-        ro_threshold_rate: float = 1e-3,  # New parameter
+        ro_threshold_rate: float = 1,  # New parameter
     ):
         defaults = dict(
             max_iter=max_iter,
@@ -1214,7 +1214,7 @@ class FBFGS(Optimizer):
         for p, p_saved in zip(self._params, saved_params):
             p.copy_(p_saved)
         return loss, flat_grad
-    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> tuple[Tensor, Tensor]:
+    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> tuple[Tensor, Tensor, list[float]]:
         PREFETCH_THRESHOLD_VALUES = self.prefetch_buffer  # Use hyperparameter
         compute_stream = torch.cuda.current_stream()
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -1229,6 +1229,7 @@ class FBFGS(Optimizer):
         print("q max value after layer norm: " + str(q.max()))
         al = torch.empty(num_old, dtype=q.dtype, device=optimizer_device)
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=optimizer_device)
+        direction_similarities = []
         if num_old > 0:
             # Create filtered list of indices where ro[i] >= ro_threshold_val
             valid_indices = []
@@ -1305,27 +1306,29 @@ class FBFGS(Optimizer):
                     dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
                 )
                 
-#                eps = 0
-#                # Use precomputed L2 norms
-#                dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
-##TODO: if we havent changed q, dont recalculate its norm.
-#                q_norm = torch.linalg.vector_norm(q, ord=2).item()
-#                
-#                if dir_norm > eps and q_norm > eps:
-#                    # Normalize both vectors
-#                    normalized_dir = SparseFlatTensor(
-#                        sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values / dir_norm,
-#                        sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
-#                        sparse_dir_i.unit_values / dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
-#                    )
-#                    normalized_q = q / q_norm
-#                    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
-#                else:
-#                    direction_similarity = 0.0  # Treat as orthogonal if any norm is near zero
+                eps = 0
+#                 Use precomputed L2 norms
+                dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
+#TODO: if we havent changed q, dont recalculate its norm.
+                q_norm = torch.linalg.vector_norm(q, ord=2).item()
                 
-                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
+                if dir_norm > eps and q_norm > eps:
+#                     Normalize both vectors
+                    normalized_dir = SparseFlatTensor(
+                        sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values / dir_norm,
+                        sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
+                        sparse_dir_i.unit_values / dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
+                    )
+                    normalized_q = q / q_norm
+                    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
+                else:
+                    direction_similarity = 0.0   #trea as orthogonal if any norm is near zero
+                
+                direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
+#                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
                 aligned = (abs(direction_similarity) <= orthogonality)
                 direction_alignment_mask[i] = aligned
+                direction_similarities.append(direction_similarity)  # Store similarity
                 
                 if direction_alignment_mask[i]:
 #                    orthogonality = orthogonality - 0.1*orthogonality
@@ -1544,7 +1547,7 @@ class FBFGS(Optimizer):
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0).to(torch.float16)
-        return d, direction_alignment_mask
+        return d, direction_alignment_mask, direction_similarities
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_alpha: float, norm: float) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
         num_old = len(old_dirs)
@@ -1723,14 +1726,14 @@ class FBFGS(Optimizer):
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
               # Calculate the top k ro threshold if we have history
               if len(old_dirs) > 0: # and n_iter > 1:
-                d, direction_alignment_mask = self.sparse_direction_approximate(
+                d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, 
                     norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val
                 )
               else:
-                d, direction_alignment_mask = self.sparse_direction_approximate(
+                d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     [], [], [], flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, 
@@ -1828,6 +1831,49 @@ class FBFGS(Optimizer):
 #TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be modeled as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
 #TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
 #TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
+              # Always run Ro Rewind when ys < 1
+              if ys < 1:
+                if "recycle_bin" not in state:
+                    state["recycle_bin"] = []
+                recycle_bin = state["recycle_bin"]
+
+                # Calculate product of ro[i] and direction_similarity[i]
+                ro_products = [abs(ro[i].item() * direction_similarities[i]) 
+                               for i in range(len(ro))]
+                
+                # Calculate total history length including recycle bin
+                total_history_len = len(ro) + len(recycle_bin)
+                # Calculate 10% of total history (minimum 1)
+                rewind_amount = max(1, int(0.1 * total_history_len))
+                # Ensure we don't rewind more than available active history
+                rewind_amount = min(rewind_amount, len(ro))
+                
+                if rewind_amount > 0:
+                    # Sort indices by ro*direction_similarity product descending
+                    ro_product_tensor = torch.tensor(ro_products)
+                    sorted_values, sorted_indices = torch.sort(ro_product_tensor, descending=True)
+                    
+                    # Select top rewind_amount largest ro*direction_similarity products
+                    indices_to_remove = sorted_indices[:rewind_amount].tolist()
+                    
+                    # Sort indices in reverse order to safely remove from lists
+                    indices_to_remove.sort(reverse=True)
+                    
+                    for idx in indices_to_remove:
+                        recycle_entry = {
+                            'index': idx,
+                            'dir': old_dirs.pop(idx),
+                            'stp': old_stps.pop(idx),
+                            'ro': ro.pop(idx),
+                        }
+                        if idx < len(state["y_norms"]):
+                            recycle_entry['y_norm'] = state["y_norms"].pop(idx)
+                        recycle_bin.append(recycle_entry)
+                    print(f"Moved {rewind_amount} largest ro*direction_similarity products to recycle_bin (ys threshold)")
+                
+                ls_failed = True
+                state["ls_failed"] = True
+              # Only add to history if ys meets threshold
               if ys >= self.ro_threshold_rate:  # TODO: is this Kosher?
                 if self.direction_device != 'cpu' and torch.cuda.is_available():
                   try:
@@ -1875,43 +1921,6 @@ class FBFGS(Optimizer):
                 y_dense = y_to_store.to_dense().float()
                 state["y_norms"].append(torch.sqrt(torch.sum(y_dense**2)))
                 new_ys_x = new_ys_x + 1
-              else:
-                # Include Ro Rewind logic when ys < threshold
-                if "recycle_bin" not in state:
-                    state["recycle_bin"] = []
-                recycle_bin = state["recycle_bin"]
-                
-                if len(ro) >= 10:
-                    # Get indices where alignment mask is True
-                    alignment_mask = state.get("direction_alignment_mask")
-                    if alignment_mask is None:
-                        aligned_indices = []
-                    else:
-                        aligned_indices = torch.nonzero(alignment_mask).squeeze(1).tolist()
-                    
-                    if aligned_indices:
-                        # Get (index, ro) pairs for aligned entries
-                        aligned_ro_pairs = [(i, ro[i].item()) for i in aligned_indices]
-                        # Sort by ro value descending
-                        sorted_aligned_ro = sorted(aligned_ro_pairs, key=lambda x: x[1], reverse=True)
-                        indices_to_remove = [i for i, _ in sorted_aligned_ro[:min(10, len(sorted_aligned_ro))]]
-                        
-                        # Store entries and their original indices in recycle_bin
-                        for idx in sorted(indices_to_remove, reverse=True):
-                            idx = int(idx)
-                            recycle_entry = {
-                                'index': idx,
-                                'dir': old_dirs.pop(idx),
-                                'stp': old_stps.pop(idx),
-                                'ro': ro.pop(idx),
-                            }
-                            if idx < len(state["y_norms"]):
-                                recycle_entry['y_norm'] = state["y_norms"].pop(idx)
-                            recycle_bin.append(recycle_entry)
-                        print(f"Moved {len(indices_to_remove)} largest ALIGNED ro entries to recycle_bin (ys threshold)")
-                
-                ls_failed = True
-                state["ls_failed"] = True
               if n_iter > max_iter or loss == 0:
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
@@ -1950,7 +1959,7 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d, direction_alignment_mask = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
+              d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
               state["direction_alignment_mask"] = direction_alignment_mask
               # sparse_direction_approximate already applies norm_select
               del H_diag
@@ -2151,6 +2160,7 @@ class FBFGS(Optimizer):
             "ls_failed": state_dict.get("ls_failed", False), # Save ls_failed state
             "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
             "current_ro_threshold": self.current_ro_threshold, # Save current_ro_threshold
+            "y_norms": state_dict.get("y_norms", []), # Save y_norms
         }
         torch.save(history, filename)
     def _move_item_to_device(self, item, device_obj, non_blocking=False):
@@ -2189,6 +2199,8 @@ class FBFGS(Optimizer):
                 self.t = t_val
             state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
             state["ls_failed"] = history.get("ls_failed", False) # Load ls_failed state
+            state["y_norms"] = [self._move_item_to_device(item, device_obj, non_blocking=False) 
+                                for item in history.get("y_norms", [])]
             self.current_ro_threshold = history.get("current_ro_threshold", 0) # Load current_ro_threshold
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
