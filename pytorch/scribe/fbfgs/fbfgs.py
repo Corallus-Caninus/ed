@@ -547,7 +547,7 @@ def _strong_wolfe(
     done = False
     ls_iter = 0 # Initialize ls_iter
 #    t_best = t
-    t = torch.tensor(t) # Ensure t is a tensor before the loop
+    t = torch.tensor(1) # Ensure t is a tensor before the loop
     t_best = t
     device = gtd.device
     f_best = torch.tensor(f, device=device)
@@ -578,20 +578,20 @@ def _strong_wolfe(
 #        print("Ward condition: " + str((gtd_new + gtd_prev)/(f_new - f_prev) ))
 #        print("gtd delta: " + str(gtd_new - gtd_prev))
 #        if (gtd_new + gtd_prev) / (f_new - f_prev)< c1 and (gtd_new - gtd_prev != 0 ) or f_new != f_new:
-        if f_new > (f+ c1 * t * gtd)  or (f_new != f_new and is_nan == True):  #or f_new >= f_prev: #NOTE: Ward condition
-#Insta-Wolfe reset to avoid jumbo bracket zoom phase
-#            if t_prev == 0:
-#              t = 1
-#              continue
-#            else:
-              bracket = [t_prev, t]
-              bracket_f = [f_prev, f_new]
-  #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
-              bracket_g = [g_prev, g_new]
-              bracket_gtd = [gtd_prev, gtd_new]
-              break
+#        if f_new > (f+ c1 * t * gtd)  or (f_new != f_new and is_nan == True) :  #or f_new >= f_prev: #NOTE: Ward condition
+##Insta-Wolfe reset to avoid jumbo bracket zoom phase
+##            if t_prev == 0:
+##              t = 1
+##              continue
+##            else:
+#              bracket = [t_prev, t]
+#              bracket_f = [f_prev, f_new]
+#  #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+#              bracket_g = [g_prev, g_new]
+#              bracket_gtd = [gtd_prev, gtd_new]
+#              break
 ##TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if abs(gtd_new) <= abs(-c2 * gtd) and f_new < f :
+        if (abs(gtd_new) <= abs(-c2 * gtd) and f_new < f) or (f_new < (f + c1 * t * gtd)):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -604,7 +604,7 @@ def _strong_wolfe(
             print("FAST WOLFE")
             break
 #TODO: we can still totally bracket the wrong convexity with this because we are moving the minima bracket each time? trace this out
-        if gtd_new >= 0 :
+        if gtd_new >= 0 or True:
             print("NOT DESCENDING")
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
@@ -963,6 +963,30 @@ class FBFGS(Optimizer):
             chunks.append(flat_tensor[offset:offset+size])
             offset += size
         return chunks
+    def gram_schmidt_orthogonalization(self, flat_grad: Tensor) -> Tensor:
+        """Orthogonalize flat_grad with respect to parameter values using Modified Gram-Schmidt"""
+        device = flat_grad.device
+        flat_grad = flat_grad.to(torch.float64).clone()
+        param_chunks = self._split_direction_to_layers(flat_grad)
+        epsilon = torch.tensor(0, device=device)
+        
+        # Split gradients by parameter layers
+        orthogonal_chunks = []
+        for p, grad_chunk in zip(self._params, param_chunks):
+            param_values = p.detach().view(-1).to(torch.float64)
+            
+            # Project gradient onto parameter vector
+            grad_projection = torch.dot(grad_chunk, param_values)
+            param_norm_sq = torch.dot(param_values, param_values) + epsilon
+            
+            # Only orthogonalize if parameter norm is significant
+            if param_norm_sq > epsilon:
+                grad_ortho = grad_chunk - (grad_projection / param_norm_sq) * param_values
+            else:
+                grad_ortho = grad_chunk  # No change if parameter is near-zero
+                
+            orthogonal_chunks.append(grad_ortho)
+        return torch.cat(orthogonal_chunks).to(dtype=flat_grad.dtype).contiguous()
     def _split_direction_to_groups(self, flat_tensor, norm_group=None):
         """Split flat tensor into groups based on norm_group parameter.
         
@@ -1269,6 +1293,7 @@ class FBFGS(Optimizer):
                 filtered_idx -= 1
             
             # Process valid indices in reverse order
+            q_norm = torch.linalg.vector_norm(q, ord=2).item()
             for idx_pos in range(len(valid_indices)-1, -1, -1):
                 i = valid_indices[idx_pos]
                 start_time = time.time()
@@ -1310,7 +1335,7 @@ class FBFGS(Optimizer):
 #                 Use precomputed L2 norms
                 dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
 #TODO: if we havent changed q, dont recalculate its norm.
-                q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#                q_norm = torch.linalg.vector_norm(q, ord=2).item()
                 
                 if dir_norm > eps and q_norm > eps:
 #                     Normalize both vectors
@@ -1374,6 +1399,7 @@ class FBFGS(Optimizer):
                         sparse_dir_i.unit_values * (-al[i]) if sparse_dir_i.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_dir_i.values.device)
                     )
                     q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
+                    q_norm = torch.linalg.vector_norm(q, ord=2).item()
                     
                     q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
                 
@@ -1545,8 +1571,12 @@ class FBFGS(Optimizer):
                         next_k += 1
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
+#        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
+#        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+        d = self.gram_schmidt_orthogonalization(d)
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
-        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0).to(torch.float16)
+        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+        d = d.to(torch.float16)
         return d, direction_alignment_mask, direction_similarities
     def dense_direction_approximate(old_stps: list[Tensor], old_dirs: list[Tensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, optimizer_device: str, t: float, radius_alpha: float, norm: float) -> Tensor:
         torch.cuda.synchronize() # Ensure all previous CUDA operations are complete, especially non-blocking transfers to calculation device
@@ -1836,7 +1866,6 @@ class FBFGS(Optimizer):
                 if "recycle_bin" not in state:
                     state["recycle_bin"] = []
                 recycle_bin = state["recycle_bin"]
-
                 # Calculate product of ro[i] and direction_similarity[i]
                 ro_products = [abs(ro[i].item() * direction_similarities[i]) 
                                for i in range(len(ro))]
