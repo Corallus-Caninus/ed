@@ -963,8 +963,13 @@ class FBFGS(Optimizer):
             chunks.append(flat_tensor[offset:offset+size])
             offset += size
         return chunks
-    def gram_schmidt_orthogonalization(self, flat_grad: Tensor) -> Tensor:
-        """Orthogonalize flat_grad with respect to parameter values using Modified Gram-Schmidt"""
+    def gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
+        """Orthogonalize flat_grad with respect to parameter values using Modified Gram-Schmidt
+        with boolean L2-thresholded negative projection
+        
+        Args:
+            l2_threshold: When layer's L2 norm exceeds this value, apply full negative projection
+        """
         device = flat_grad.device
         flat_grad = flat_grad.to(torch.float64).clone()
         param_chunks = self._split_direction_to_layers(flat_grad)
@@ -975,17 +980,28 @@ class FBFGS(Optimizer):
         for p, grad_chunk in zip(self._params, param_chunks):
             param_values = p.detach().view(-1).to(torch.float64)
             
+            # Calculate layer's L2 norm
+            layer_l2 = torch.norm(param_values, p=2)
+            
+            # Determine projection direction based on L2 threshold
+            proj_direction = 1.0  # set to standard orthogonal projection
+            if layer_l2 > l2_threshold and l2_threshold > 0:
+                print(f"Layer L2 norm {layer_l2.item()} exceeds threshold {l2_threshold} - applying full negative projection")
+                proj_direction = -1.0  # Apply full negative projection   
+            
             # Project gradient onto parameter vector
             grad_projection = torch.dot(grad_chunk, param_values)
             param_norm_sq = torch.dot(param_values, param_values) + epsilon
             
-            # Only orthogonalize if parameter norm is significant
+            # Apply orthogonalization with direction control
             if param_norm_sq > epsilon:
-                grad_ortho = grad_chunk - (grad_projection / param_norm_sq) * param_values
+                projection = (proj_direction * grad_projection / param_norm_sq)
+                grad_ortho = grad_chunk - projection * param_values
             else:
-                grad_ortho = grad_chunk  # No change if parameter is near-zero
+                grad_ortho = grad_chunk  # Keep original if parameter near zero
                 
             orthogonal_chunks.append(grad_ortho)
+            
         return torch.cat(orthogonal_chunks).to(dtype=flat_grad.dtype).contiguous()
     def _split_direction_to_groups(self, flat_tensor, norm_group=None):
         """Split flat tensor into groups based on norm_group parameter.
@@ -1573,7 +1589,7 @@ class FBFGS(Optimizer):
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
 #        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
-        d = self.gram_schmidt_orthogonalization(d)
+        d = self.gram_schmidt_orthogonalization(d, l2_threshold=250.0)
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         d = d.to(torch.float16)
