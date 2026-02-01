@@ -964,46 +964,77 @@ class FBFGS(Optimizer):
             offset += size
         return chunks
     def gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
-        """Orthogonalize flat_grad with respect to parameter values using Modified Gram-Schmidt
-        with boolean L2-thresholded negative projection
+        """Adjust flat_grad to enforce L2 norm constraints on parameters.
+        
+        For layers above threshold: amplify natural antiparallel gradient components (270°) 
+        to reduce parameter norms to threshold. For others: apply standard orthogonalization.
         
         Args:
-            l2_threshold: When layer's L2 norm exceeds this value, apply full negative projection
+            l2_threshold: Maximum allowed L2 norm for parameter layers
         """
         device = flat_grad.device
         flat_grad = flat_grad.to(torch.float64).clone()
         param_chunks = self._split_direction_to_layers(flat_grad)
-        epsilon = torch.tensor(0, device=device)
         
-        # Split gradients by parameter layers
-        orthogonal_chunks = []
+        adjusted_chunks = []
         for i, (p, grad_chunk) in enumerate(zip(self._params, param_chunks)):
-            param_values = p.detach().view(-1).to(torch.float64)
+            param = p.detach().view(-1).to(torch.float64)
+            param_norm = torch.norm(param, p=2)
+            grad = grad_chunk.to(torch.float64)
             
-            # Calculate layer's L2 norm
-            layer_l2 = torch.norm(param_values, p=2)
-                    
-            # Project gradient onto parameter vector
-            grad_projection = torch.dot(grad_chunk, param_values)
-            param_norm_sq = torch.dot(param_values, param_values) + epsilon
-
-            if layer_l2 > l2_threshold and l2_threshold > 0:
-                # Compute unit parameter vector
-                unit_param = param_values / layer_l2
-                # Calculate maximal reduction to bring parameters to threshold
-                param_reduction = (layer_l2 - l2_threshold) * unit_param
-                # Apply projection to maximize parameter magnitude reduction
-                grad_ortho = grad_chunk - param_reduction
-                print(f"Layer {i} L2 norm {layer_l2.item():.4f} reduced to threshold {l2_threshold:.1f}")
+            # Compute square norm and check threshold with safeguards
+            param_sq_norm = torch.dot(param, param)
+            param_norm = torch.sqrt(param_sq_norm) if param_sq_norm > 0 else 0.0
+            
+            if param_norm > l2_threshold and l2_threshold > 0 and param_sq_norm > 0:
+                # Gram-Schmidt inspired parameter reduction
+                # 1. Compute standard projection coefficient
+                proj_coeff = torch.dot(grad, param) / param_sq_norm
+                
+                # 2. Calculate the canceling projection coefficient
+                cancel_coeff = -proj_coeff
+                
+                # 3. Create canceling projection vector
+                cancel_proj = cancel_coeff * param
+                
+                # 4. Standard orthogonal component remains for learning
+                orthogonal_grad = grad - proj_coeff * param
+                
+                # 5. Combined effect: learning + parameter reduction
+                combined = cancel_proj #orthogonal_grad + cancel_proj
+                
+                adjusted_chunks.append(combined)
+                print(f"Layer {i} ǁpǁ={param_norm:.12f} │ Ortho: {torch.norm(orthogonal_grad).item():.12f} Cancel: {torch.norm(cancel_proj).item():.12f} ProjCoef: {proj_coeff.item():.12f}")
+#TODO: also include the orthogonal components and maybe always include the subtractive (kind of like how weight-decay always bleeds the parameters to 0 like a leaky integrator)
+                
             else:
-                # Traditional Gram-Schmidt orthogonal projection
-                proj_direction = -grad_projection / param_norm_sq
-                grad_ortho = grad_chunk - proj_direction * param_values
-            
-            # For regular GS projection, no additional clamping needed
-            orthogonal_chunks.append(grad_ortho)
-            
-        return torch.cat(orthogonal_chunks).to(dtype=flat_grad.dtype).contiguous()
+                # Gram-Schmidt inspired parameter reduction
+                # 1. Compute standard projection coefficient
+                proj_coeff = torch.dot(grad, param) / param_sq_norm
+                
+                # 2. Calculate the canceling projection coefficient
+                cancel_coeff = -proj_coeff
+                
+                # 3. Create canceling projection vector
+                cancel_proj = cancel_coeff * param
+                
+                # 4. Standard orthogonal component remains for learning
+                orthogonal_grad = grad - proj_coeff * param
+                
+                # 5. Combined effect: learning + parameter reduction
+                combined = orthogonal_grad + cancel_proj
+                
+                adjusted_chunks.append(combined)
+                # Standard orthogonalization (90°)
+#                param_sq_norm = torch.dot(param, param)
+#                if param_sq_norm > 0:
+#                    proj = (torch.dot(grad, param) / param_sq_norm) * param
+#                    adj_grad = grad - proj
+#                    adjusted_chunks.append(adj_grad)
+#                else:
+#                    adjusted_chunks.append(grad)
+                
+        return torch.cat(adjusted_chunks).to(dtype=flat_grad.dtype).contiguous()
     def _split_direction_to_groups(self, flat_tensor, norm_group=None):
         """Split flat tensor into groups based on norm_group parameter.
         
