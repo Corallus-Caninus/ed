@@ -1747,9 +1747,10 @@ class FBFGS(Optimizer):
           state["y_norms"] = []  # Precomputed L2 norms of y vectors
       # evaluate initial f(x) and df/dx
       state = self.state[self._params[0]]
+      # For first iteration, get regularized gradient via _directional_evaluate
       orig_loss = closure()
-        #TODO: this should probably be direction_evaluate so we include the radius_alphaping factor
       loss = float(orig_loss)
+      flat_grad = self._gather_flat_grad()
       current_evals = 1
 #      state["func_evals"] += 1
       al = []
@@ -2067,7 +2068,8 @@ class FBFGS(Optimizer):
               # compute the approximate (L-BFGS) inverse Hessian
               # multiplied by the gradient
               num_old = len(old_dirs)
-              flat_grad = self._gather_flat_grad()
+#TODO: TEST THIS!
+#              flat_grad = self._gather_flat_grad()
 #TODO: may need to try this again? the hessian doesn't pertain as much given that the next direction is likely orthogonal to the last.
 #TODO: it might make sense to divide by the history size so we keep curvature normalized to prevent explosions in direction approx.
 #              H_diag = 1
