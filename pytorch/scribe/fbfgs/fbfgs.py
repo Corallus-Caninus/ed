@@ -1001,7 +1001,7 @@ class FBFGS(Optimizer):
                 cancel_proj = cancel_coeff * param
                 
                 # 4. Standard orthogonal component remains for learning
-                orthogonal_grad = grad - proj_coeff * param
+#                orthogonal_grad = grad - proj_coeff * param
                 
                 # 5. Combined effect: learning + parameter reduction
                 combined = cancel_proj #orthogonal_grad + cancel_proj
@@ -1946,11 +1946,13 @@ class FBFGS(Optimizer):
 #TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be modeled as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
 #TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
 #TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
-              # Always run Ro Rewind when ys < 1
+              # Rho Rewind when ys is too small
               if ys < 1:
-                if "recycle_bin" not in state:
-                    state["recycle_bin"] = []
-                recycle_bin = state["recycle_bin"]
+                # Ensure recycle_bin is initialized before use
+                recycle_bin = state.setdefault("recycle_bin", [])
+                old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
+                ls_failed = True
+                state["ls_failed"] = True
                 # Calculate product of ro[i] and direction_similarity[i]
                 ro_products = [abs(ro[i].item() * direction_similarities[i]) 
                                for i in range(len(ro))]
@@ -2134,6 +2136,12 @@ class FBFGS(Optimizer):
                   for p, p_saved in zip(self._params, saved_params):
                       p.copy_(p_saved)
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
+                  # If last iteration, return early
+                  if n_iter >= max_iter:
+                      state["old_stps"] = old_stps
+                      state["ro"] = ro
+                      state["old_dirs"] = old_dirs
+                      return orig_loss
                   # Mark failure and reset step size to 1
                   any_line_search_failed = True
                   t = torch.tensor(1.)
@@ -2141,10 +2149,8 @@ class FBFGS(Optimizer):
                   flat_grad = prev_flat_grad
                   prev_flat_grad = None
 #Ro Rewind
-                  # Temporary Ro Rewind - move entries to recycle_bin
-#                  if "recycle_bin" not in state:
-#                      state["recycle_bin"] = []
-#                  recycle_bin = state["recycle_bin"]
+                  # Perform Rho Rewind on linesearch failure
+                  old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
 #                  
 #                  if len(ro) >= 10:
 #                      # Get indices where alignment mask is True
@@ -2284,6 +2290,52 @@ class FBFGS(Optimizer):
             "y_norms": state_dict.get("y_norms", []), # Save y_norms
         }
         torch.save(history, filename)
+    def _rho_rewind(self, state, old_dirs, old_stps, ro, direction_similarities):
+        """Perform Rho Rewind by removing history entries with highest ro*direction_similarity products."""
+        recycle_bin = state.setdefault("recycle_bin", [])
+        
+        # Calculate product of ro[i] and direction_similarity[i]
+        ro_products = []
+        for i in range(len(ro)):
+            # Ensure we don't access out of bounds for direction_similarities
+            if i < len(direction_similarities):
+                ro_product = abs(ro[i].item() * direction_similarities[i])
+            else:
+                # Fallback to just ro magnitude if no similarity available
+                ro_product = abs(ro[i].item())
+            ro_products.append(ro_product)
+        
+        # Calculate total history length including recycle bin
+        total_history_len = len(ro) + len(recycle_bin)
+        # Calculate 10% of total history (minimum 1)
+        rewind_amount = max(1, int(0.1 * total_history_len))
+        # Ensure we don't rewind more than available active history
+        rewind_amount = min(rewind_amount, len(ro))
+        
+        if rewind_amount > 0:
+            # Sort indices by ro*direction_similarity product descending
+            ro_product_tensor = torch.tensor(ro_products)
+            sorted_values, sorted_indices = torch.sort(ro_product_tensor, descending=True)
+            
+            # Select top rewind_amount largest ro*direction_similarity products
+            indices_to_remove = sorted_indices[:rewind_amount].tolist()
+            
+            # Sort indices in reverse order to safely remove from lists
+            indices_to_remove.sort(reverse=True)
+            
+            for idx in indices_to_remove:
+                recycle_entry = {
+                    'index': idx,
+                    'dir': old_dirs.pop(idx),
+                    'stp': old_stps.pop(idx),
+                    'ro': ro.pop(idx),
+                }
+                if idx < len(state["y_norms"]):
+                    recycle_entry['y_norm'] = state["y_norms"].pop(idx)
+                recycle_bin.append(recycle_entry)
+            print(f"Moved {rewind_amount} largest ro*direction_similarity products to recycle_bin")
+        
+        return old_dirs, old_stps, ro
     def _move_item_to_device(self, item, device_obj, non_blocking=False):
         if item is None:
             return None
