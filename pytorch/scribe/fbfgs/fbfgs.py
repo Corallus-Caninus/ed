@@ -886,7 +886,10 @@ class FBFGS(Optimizer):
         norm_group_s: Optional[Union[int, float]] = None,  # New parameter
         norm_group_y: Optional[Union[int, float]] = None,  # New parameter
         ro_threshold_rate: float = 1,  # New parameter
+        lambda_reg: float = 0.01,  # Regularization strength
     ):
+        self.lambda_reg = lambda_reg  # Regularization strength hyperparameter
+        self._last_penalty = 0.0  # Track regularization penalty
         defaults = dict(
             max_iter=max_iter,
             tolerance_grad=tolerance_grad,
@@ -1181,31 +1184,40 @@ class FBFGS(Optimizer):
             return torch.cat(chunks)
 #TODO: allow this to be distributive, such that we can have multiple nodes generate grads and keep them on their respective devices for all of fbfgs.
     def _gather_flat_grad(self):
-        # Perform gradient clipping before gathering
-#        torch.nn.utils.clip_grad_norm_(
-#            self._params, 
-#            max_norm=0.5,
-#            norm_type=2
-#        )
         views = []
-        for p in self._params: # Iterate over parameters
-            grad_device = p.device # Get the device of the gradient (e.g., cuda:1)
+        self._last_penalty = 0.0  # Reset for each grad gather
+        
+        for p in self._params:
+            if p.grad is not None and not p.grad.is_sparse:
+                # Compute gradient-parameter dot product
+                p_flat = p.detach().view(-1).to(p.grad.dtype)
+                g_flat = p.grad.view(-1)
+                
+                if p_flat.numel() > 0 and g_flat.numel() > 0:
+                    dot = torch.dot(p_flat, g_flat)
+                    
+                    if dot > 0:
+                        # Accumulate penalty for loss (0.5 * p·g)
+                        self._last_penalty += 0.5 * dot.item()
+                        
+                        # Scale gradients where p·g > 0 (g' = g * (1 + p·g))
+                        with torch.no_grad():
+                            p.grad.mul_(1 + dot.item())
+            
+            # Standard gradient collection unchanged
             if p.grad is None:
-                view = p.new(p.numel()).zero_()
+                view = p.new_zeros(p.numel())
             elif p.grad.is_sparse:
-                view = p.grad.view(-1) # Move sparse grad to direction_device
+                view = p.grad.view(-1)
             else:
-                view = p.grad.view(-1) # Move dense grad to direction_device
+                view = p.grad.view(-1)
+                
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view.to(self.optimizer_device))
+            
         grad = torch.cat(views, 0)
-#        grad_norm = torch.linalg.vector_norm(grad, ord=2.)
-#        grad = grad.div_(grad_norm)
-#        grad_max = grad.max()
-#TODO: this is a good idea but I would prefer a more functional and elegant way to handle rollover since it can in theory occur throughout the algorithm and pytorch doesnt solve this elegantly (which it should).
-        grad = torch.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0) #, posinf=finfo.max, neginf=finfo.min)
-        return grad
+        return torch.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0)
     def gather_norm_flat_grad(self, norm=2, radius_ball=1.0):
         """Gather flat gradients and normalize based on norm_group parameter."""
         flat_grad = self._gather_flat_grad()
@@ -1258,34 +1270,55 @@ class FBFGS(Optimizer):
             p.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
         return self._numel()
     def _directional_evaluate(self, closure, t, d, saved_params):
-        """Evaluate loss and gradient after applying step t*d in-place, then restore using saved_params."""
-        # Apply step: x_new = x_old + t * d
+        """Evaluate with gradient regularization via second backward pass"""
+        # Apply step
         if isinstance(d, SparseFlatTensor):
-            # Move sparse tensor to optimizer device if needed
             if d.values.device != self.optimizer_device:
                 d = d.to(self.optimizer_device)
-            # Apply the step
             self._add_grad(t, d)
         else:
-            # Dense update
             self._add_grad(t, d.to(self.optimizer_device))
-#TODO: NAN CHECK!!
-        # Evaluate loss and gradient
-        loss = float(closure())
-        flat_grad = self._gather_flat_grad()
-#        if isinstance(d, SparseFlatTensor):
-#            # Move sparse tensor to optimizer device if needed
-#            if d.values.device != self.optimizer_device:
-#                d = d.to(self.optimizer_device)
-#            # Apply the step
-#            self._add_grad(-t, d)
-#        else:
-#            # Dense update
-#            self._add_grad(-t, d.to(self.optimizer_device))
-        # Restore parameters to original state using saved_params
-        for p, p_saved in zip(self._params, saved_params):
-            p.copy_(p_saved)
-        return loss, flat_grad
+            
+        try:
+            # First evaluate original loss to get gradients
+            loss = float(closure())
+            flat_grad = self._gather_flat_grad()
+            
+            # Calculate regularization penalty (0.5 * sum p·g where p·g > 0)
+            penalty = 0.0
+            param_offset = 0
+            for p in self._params:
+                numel = p.numel()
+                if numel == 0:
+                    continue
+                
+                # Extract gradient slice corresponding to parameter
+                p_grad = flat_grad[param_offset:param_offset+numel].view_as(p).to(p.dtype)
+                
+                # Compute dot product
+                dot = (p.detach() * p_grad).sum()
+                if dot > 0:
+                    penalty += 0.5 * dot.item()
+                
+                param_offset += numel
+            
+            # Add regularization to loss
+            total_loss = loss + self.lambda_reg * penalty
+            
+            # Use already computed penalty (already tracked grad modifications)
+            total_loss_tensor = torch.tensor(loss + self.lambda_reg * penalty, 
+                                            device=self.optimizer_device, 
+                                            requires_grad=True)
+            
+            # Single backward pass through the loss (accumulate gradients)
+            total_loss_tensor.backward()
+            reg_flat_grad = self._gather_flat_grad().clone()  # Capture gradients before zeroing
+        finally:
+            # Restore parameters regardless of exceptions
+            for p, p_saved in zip(self._params, saved_params):
+                p.copy_(p_saved)
+            
+        return total_loss, reg_flat_grad
     def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> tuple[Tensor, Tensor, list[float]]:
         PREFETCH_THRESHOLD_VALUES = self.prefetch_buffer  # Use hyperparameter
         compute_stream = torch.cuda.current_stream()
@@ -1621,7 +1654,6 @@ class FBFGS(Optimizer):
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
 #        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
-        d = self.gram_schmidt_orthogonalization(d, l2_threshold=250.0)
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         d = d.to(torch.float16)
@@ -1798,7 +1830,11 @@ class FBFGS(Optimizer):
               flat_grad = self._gather_flat_grad().to(self.optimizer_device)
 #TODO: clip_grad_norm by the l1 norm for a max norm of 1e9 (if needed)
 #              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
-              if flat_grad.abs().max() <= tolerance_change: #TODO: check if this is even possible given normalization.
+              q = flat_grad.neg()
+              max_abs_grad = flat_grad.abs().max()
+              max_abs_q = q.abs().max()
+              if max_abs_grad <= tolerance_change:
+                print(f"Exiting: max gradient element {max_abs_grad} < tolerance {tolerance_change} (q max: {max_abs_q})")
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
@@ -2004,7 +2040,11 @@ class FBFGS(Optimizer):
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
                 break
-              if flat_grad.abs().max() <= tolerance_change: #TODO: check if this is even possible given normalization.
+              q = flat_grad.neg()
+              max_abs_grad = flat_grad.abs().max()
+              max_abs_q = q.abs().max()
+              if max_abs_grad <= tolerance_change:
+                print(f"Exiting: max gradient element {max_abs_grad} < tolerance {tolerance_change} (q max: {max_abs_q})")
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
                 state["ro"] = ro
