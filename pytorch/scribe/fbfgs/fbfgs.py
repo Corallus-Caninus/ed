@@ -982,27 +982,19 @@ class FBFGS(Optimizer):
             
             # Calculate layer's L2 norm
             layer_l2 = torch.norm(param_values, p=2)
-            
+                    
             # Project gradient onto parameter vector
             grad_projection = torch.dot(grad_chunk, param_values)
             param_norm_sq = torch.dot(param_values, param_values) + epsilon
 
             if layer_l2 > l2_threshold and l2_threshold > 0:
-                # Exact L2 norm reduction calculation
+                # Compute unit parameter vector
                 unit_param = param_values / layer_l2
-                reduce_scale = (layer_l2 - l2_threshold) / layer_l2
-                
-                # Calculate projection to exactly reduce parameters to threshold
-                param_reduction = reduce_scale * param_values
-                
-                # Traditional Gram-Schmidt orthogonalization
-                grad_projection = torch.dot(grad_chunk, param_values)
-                param_norm_sq = torch.dot(param_values, param_values) + epsilon
-                orthogonal_projection = grad_projection / param_norm_sq * param_values
-                
-                # Combine both projections
-                grad_ortho = grad_chunk - (orthogonal_projection + param_reduction)
-                print(f"Layer {i} L2 norm {layer_l2.item():.4f} exceeds threshold - reduced to {layer_l2.item()*(1-reduce_scale):.1f}")
+                # Calculate maximal reduction to bring parameters to threshold
+                param_reduction = (layer_l2 - l2_threshold) * unit_param
+                # Apply projection to maximize parameter magnitude reduction
+                grad_ortho = grad_chunk - param_reduction
+                print(f"Layer {i} L2 norm {layer_l2.item():.4f} reduced to threshold {l2_threshold:.1f}")
             else:
                 # Traditional Gram-Schmidt orthogonal projection
                 proj_direction = -grad_projection / param_norm_sq
