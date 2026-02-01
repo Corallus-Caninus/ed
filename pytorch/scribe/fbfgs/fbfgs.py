@@ -977,29 +977,38 @@ class FBFGS(Optimizer):
         
         # Split gradients by parameter layers
         orthogonal_chunks = []
-        for p, grad_chunk in zip(self._params, param_chunks):
+        for i, (p, grad_chunk) in enumerate(zip(self._params, param_chunks)):
             param_values = p.detach().view(-1).to(torch.float64)
             
             # Calculate layer's L2 norm
             layer_l2 = torch.norm(param_values, p=2)
             
-            # Determine projection direction based on L2 threshold
-            proj_direction = 1.0  # set to standard orthogonal projection
-            if layer_l2 > l2_threshold and l2_threshold > 0:
-                print(f"Layer L2 norm {layer_l2.item()} exceeds threshold {l2_threshold} - applying full negative projection")
-                proj_direction = -1.0  # Apply full negative projection   
-            
             # Project gradient onto parameter vector
             grad_projection = torch.dot(grad_chunk, param_values)
             param_norm_sq = torch.dot(param_values, param_values) + epsilon
-            
-            # Apply orthogonalization with direction control
-            if param_norm_sq > epsilon:
-                projection = (proj_direction * grad_projection / param_norm_sq)
-                grad_ortho = grad_chunk - projection * param_values
-            else:
-                grad_ortho = grad_chunk  # Keep original if parameter near zero
+
+            if layer_l2 > l2_threshold and l2_threshold > 0:
+                # Exact L2 norm reduction calculation
+                unit_param = param_values / layer_l2
+                reduce_scale = (layer_l2 - l2_threshold) / layer_l2
                 
+                # Calculate projection to exactly reduce parameters to threshold
+                param_reduction = reduce_scale * param_values
+                
+                # Traditional Gram-Schmidt orthogonalization
+                grad_projection = torch.dot(grad_chunk, param_values)
+                param_norm_sq = torch.dot(param_values, param_values) + epsilon
+                orthogonal_projection = grad_projection / param_norm_sq * param_values
+                
+                # Combine both projections
+                grad_ortho = grad_chunk - (orthogonal_projection + param_reduction)
+                print(f"Layer {i} L2 norm {layer_l2.item():.4f} exceeds threshold - reduced to {layer_l2.item()*(1-reduce_scale):.1f}")
+            else:
+                # Traditional Gram-Schmidt orthogonal projection
+                proj_direction = -grad_projection / param_norm_sq
+                grad_ortho = grad_chunk - proj_direction * param_values
+            
+            # For regular GS projection, no additional clamping needed
             orthogonal_chunks.append(grad_ortho)
             
         return torch.cat(orthogonal_chunks).to(dtype=flat_grad.dtype).contiguous()
