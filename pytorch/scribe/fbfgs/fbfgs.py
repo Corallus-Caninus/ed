@@ -2138,6 +2138,8 @@ class FBFGS(Optimizer):
                   any_line_search_failed = True
                   t = torch.tensor(1.)
                   self.t = t.item()  # Also reset class-level step size
+                  flat_grad = prev_flat_grad
+                  prev_flat_grad = None
 #Ro Rewind
                   # Temporary Ro Rewind - move entries to recycle_bin
 #                  if "recycle_bin" not in state:
