@@ -1375,6 +1375,8 @@ class FBFGS(Optimizer):
             
             # Process valid indices in reverse order
             q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#            inv_q_norm = 1.0 / torch.linalg.vector_norm(q, ord=2)
+            normalized_q = q / q_norm
             for idx_pos in range(len(valid_indices)-1, -1, -1):
                 i = valid_indices[idx_pos]
                 start_time = time.time()
@@ -1413,24 +1415,19 @@ class FBFGS(Optimizer):
                 )
                 
                 eps = 0
-#                 Use precomputed L2 norms
-                dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
-#TODO: if we havent changed q, dont recalculate its norm.
-#                q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#                 Use precomputed inverse L2 norms
+                inv_dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
+#                inv_q_norm = 1.0 / torch.linalg.vector_norm(q, ord=2)
                 
-                if dir_norm > eps and q_norm > eps:
-#                     Normalize both vectors
-                    normalized_dir = SparseFlatTensor(
-                        sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values / dir_norm,
-                        sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
-                        sparse_dir_i.unit_values / dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
-                    )
-                    normalized_q = q / q_norm
-                    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
-                else:
-                    direction_similarity = 0.0   #trea as orthogonal if any norm is near zero
-                
+                normalized_dir = SparseFlatTensor(
+                    sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values * inv_dir_norm,
+                    sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
+                    sparse_dir_i.unit_values * inv_dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
+                )
+#                normalized_q = q * inv_q_norm
                 direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
+                
+                # Similarity calculated above
 #                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
                 aligned = (abs(direction_similarity) <= orthogonality)
                 direction_alignment_mask[i] = aligned
@@ -1481,6 +1478,8 @@ class FBFGS(Optimizer):
                     )
                     q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
                     q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#                    inv_q_norm = 1.0 / torch.linalg.vector_norm(q, ord=2)
+                    normalized_q = q / q_norm
                     
                     q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
                 
@@ -2036,7 +2035,7 @@ class FBFGS(Optimizer):
                 ro.append(torch.tensor([(1. / ys)]))
                 # Convert dense y to compute norm
                 y_dense = y_to_store.to_dense().float()
-                state["y_norms"].append(torch.sqrt(torch.sum(y_dense**2)))
+                state["y_norms"].append(1/torch.sqrt(torch.sum(y_dense**2)))
                 new_ys_x = new_ys_x + 1
               if n_iter > max_iter or loss == 0:
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
@@ -2292,19 +2291,11 @@ class FBFGS(Optimizer):
         }
         torch.save(history, filename)
     def _rho_rewind(self, state, old_dirs, old_stps, ro, direction_similarities):
-        """Perform Rho Rewind by removing history entries with highest ro*direction_similarity products."""
+        """Perform Rho Rewind by removing history entries with highest ro values."""
         recycle_bin = state.setdefault("recycle_bin", [])
         
-        # Calculate product of ro[i] and direction_similarity[i]
-        ro_products = []
-        for i in range(len(ro)):
-            # Ensure we don't access out of bounds for direction_similarities
-            if i < len(direction_similarities):
-                ro_product = abs(ro[i].item() * direction_similarities[i])
-            else:
-                # Fallback to just ro magnitude if no similarity available
-                ro_product = abs(ro[i].item())
-            ro_products.append(ro_product)
+        # Extract just ro magnitudes
+        ro_magnitudes = [abs(r.item()) for r in ro]
         
         # Calculate total history length including recycle bin
         total_history_len = len(ro) + len(recycle_bin)
@@ -2314,11 +2305,11 @@ class FBFGS(Optimizer):
         rewind_amount = min(rewind_amount, len(ro))
         
         if rewind_amount > 0:
-            # Sort indices by ro*direction_similarity product descending
-            ro_product_tensor = torch.tensor(ro_products)
-            sorted_values, sorted_indices = torch.sort(ro_product_tensor, descending=True)
+            # Sort indices by ro value descending
+            ro_magnitudes_tensor = torch.tensor(ro_magnitudes)
+            sorted_values, sorted_indices = torch.sort(ro_magnitudes_tensor, descending=True)
             
-            # Select top rewind_amount largest ro*direction_similarity products
+            # Select top rewind_amount largest ro values
             indices_to_remove = sorted_indices[:rewind_amount].tolist()
             
             # Sort indices in reverse order to safely remove from lists
@@ -2334,7 +2325,7 @@ class FBFGS(Optimizer):
                 if idx < len(state["y_norms"]):
                     recycle_entry['y_norm'] = state["y_norms"].pop(idx)
                 recycle_bin.append(recycle_entry)
-            print(f"Moved {rewind_amount} largest ro*direction_similarity products to recycle_bin")
+            print(f"Moved {rewind_amount} largest ro entries to recycle_bin")
         
         return old_dirs, old_stps, ro
     def _move_item_to_device(self, item, device_obj, non_blocking=False):
