@@ -1195,14 +1195,14 @@ class FBFGS(Optimizer):
                 
                 if p_flat.numel() > 0 and g_flat.numel() > 0:
                     dot = torch.dot(p_flat, g_flat)
-                    
+                
                     if dot > 0:
                         # Accumulate penalty for loss (0.5 * p·g)
                         self._last_penalty += 0.5 * dot.item()
-                        
-                        # Scale gradients where p·g > 0 (g' = g * (1 + p·g))
-                        with torch.no_grad():
-                            p.grad.mul_(1 + dot.item())
+                    
+                        # Scale gradients where p·g > 0 (g' = g * (1 + p·g)) - COMMENTED OUT
+                        # with torch.no_grad():
+                        #    p.grad.mul_(1 + dot.item())
             
             # Standard gradient collection unchanged
             if p.grad is None:
