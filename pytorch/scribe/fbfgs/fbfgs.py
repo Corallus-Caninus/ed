@@ -1749,8 +1749,9 @@ class FBFGS(Optimizer):
       state = self.state[self._params[0]]
       # For first iteration, get regularized gradient via _directional_evaluate
       orig_loss = closure()
-      loss = float(orig_loss)
+      # Add regularization to the loss since _gather_flat_grad applies it to gradients
       flat_grad = self._gather_flat_grad()
+      loss = float(orig_loss) + self.lambda_reg * self._last_penalty
       current_evals = 1
 #      state["func_evals"] += 1
       al = []
