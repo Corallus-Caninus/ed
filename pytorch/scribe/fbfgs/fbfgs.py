@@ -966,7 +966,7 @@ class FBFGS(Optimizer):
             chunks.append(flat_tensor[offset:offset+size])
             offset += size
         return chunks
-    def gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
+    def gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 500.0) -> Tensor:
         """Adjust flat_grad to enforce L2 norm constraints on parameters.
         
         For layers above threshold: amplify natural antiparallel gradient components (270°) 
@@ -1001,12 +1001,13 @@ class FBFGS(Optimizer):
                 cancel_proj = cancel_coeff * param
                 
                 # 4. Standard orthogonal component remains for learning
-#                orthogonal_grad = grad - proj_coeff * param
+                orthogonal_grad = grad - proj_coeff * param
                 
                 # 5. Combined effect: learning + parameter reduction
                 combined = cancel_proj #orthogonal_grad + cancel_proj
                 
                 adjusted_chunks.append(combined)
+#                print(f"Layer {i} ǁpǁ={param_norm:.12f} │ Ortho: {torch.norm(orthogonal_grad).item():.12f} Cancel: {torch.norm(cancel_proj).item():.12f} ProjCoef: {proj_coeff.item():.12f}")
                 print(f"Layer {i} ǁpǁ={param_norm:.12f} │ Ortho: {torch.norm(orthogonal_grad).item():.12f} Cancel: {torch.norm(cancel_proj).item():.12f} ProjCoef: {proj_coeff.item():.12f}")
 #TODO: also include the orthogonal components and maybe always include the subtractive (kind of like how weight-decay always bleeds the parameters to 0 like a leaky integrator)
                 
@@ -1026,6 +1027,7 @@ class FBFGS(Optimizer):
                 
                 # 5. Combined effect: learning + parameter reduction
                 combined = orthogonal_grad + cancel_proj
+#                combined =   orthogonal_grad
                 
                 adjusted_chunks.append(combined)
                 # Standard orthogonalization (90°)
@@ -1430,7 +1432,10 @@ class FBFGS(Optimizer):
                 
                 # Similarity calculated above
 #                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-                aligned = (abs(direction_similarity) <= orthogonality)
+#TODO: try only the negative orthogonality to prevent curvature explosion e.g.: -1 <= q@y <= 0
+#                aligned = (abs(direction_similarity) <= orthogonality)
+#TODO: if ortho is 0 unlimited -j axis
+                aligned =  -orthogonality <= direction_similarity <= 0
                 direction_alignment_mask[i] = aligned
                 direction_similarities.append(direction_similarity)  # Store similarity
                 
@@ -1654,6 +1659,8 @@ class FBFGS(Optimizer):
         effective_norm_group = norm_group if norm_group is not None else self.norm_group_s
 #        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+    # gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
+        d = self.gram_schmidt_orthogonalization(d)
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         d = d.to(torch.float16)
@@ -1841,7 +1848,8 @@ class FBFGS(Optimizer):
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
               # Calculate the top k ro threshold if we have history
-              if len(old_dirs) > 0: # and n_iter > 1:
+#TODO: clean this up
+              if len(old_dirs) > 0 : # and n_iter > 1:
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
@@ -2294,6 +2302,7 @@ class FBFGS(Optimizer):
     def _rho_rewind(self, state, old_dirs, old_stps, ro, direction_similarities):
         """Perform Rho Rewind by removing history entries with highest ro values."""
         recycle_bin = state.setdefault("recycle_bin", [])
+#TODO: this actually is a perfect fit for a PID control system instead of a 1/max_iter rewind each time with the setpoint being 1 or whatever the ys threshold is. coefficients might be static for a given architecture, hyperparameter set and dataset.
         
         # Extract just ro magnitudes
         ro_magnitudes = [abs(r.item()) for r in ro]
