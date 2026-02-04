@@ -1280,6 +1280,7 @@ class FBFGS(Optimizer):
             self._add_grad(t, d.to(self.optimizer_device))
             
         try:
+#TODO: can we instruct the data scientist to only generate the loss and zero gradients  and not to backwards the loss?  also can we just zero the grads here instead? essentially the closure just generates the loss with grad/tape?
             # First evaluate original loss to get gradients
             loss = float(closure())
             flat_grad = self._gather_flat_grad()
@@ -1339,7 +1340,7 @@ class FBFGS(Optimizer):
             # Create filtered list of indices where ro[i] >= ro_threshold_val
             valid_indices = []
             for idx in range(num_old):
-                if ro_threshold_val == 0 or ro[idx] < ro_threshold_val:
+                if True:#TODO: remove ro_threshold from the code in favor of new ro rewind algorithm
                     valid_indices.append(idx)
             
             # Backward loop with dynamic prefetching over filtered indices
@@ -1953,40 +1954,40 @@ class FBFGS(Optimizer):
                 old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                 ls_failed = True
                 state["ls_failed"] = True
-                # Calculate product of ro[i] and direction_similarity[i]
-                ro_products = [abs(ro[i].item() * direction_similarities[i]) 
-                               for i in range(len(ro))]
-                
-                # Calculate total history length including recycle bin
-                total_history_len = len(ro) + len(recycle_bin)
-                # Calculate 10% of total history (minimum 1)
-                rewind_amount = max(1, int(0.1 * total_history_len))
-                # Ensure we don't rewind more than available active history
-                rewind_amount = min(rewind_amount, len(ro))
-                
-                if rewind_amount > 0:
-                    # Sort indices by ro*direction_similarity product descending
-                    ro_product_tensor = torch.tensor(ro_products)
-                    sorted_values, sorted_indices = torch.sort(ro_product_tensor, descending=True)
-                    
-                    # Select top rewind_amount largest ro*direction_similarity products
-                    indices_to_remove = sorted_indices[:rewind_amount].tolist()
-                    
-                    # Sort indices in reverse order to safely remove from lists
-                    indices_to_remove.sort(reverse=True)
-                    
-                    for idx in indices_to_remove:
-                        recycle_entry = {
-                            'index': idx,
-                            'dir': old_dirs.pop(idx),
-                            'stp': old_stps.pop(idx),
-                            'ro': ro.pop(idx),
-                        }
-                        if idx < len(state["y_norms"]):
-                            recycle_entry['y_norm'] = state["y_norms"].pop(idx)
-                        recycle_bin.append(recycle_entry)
-                    print(f"Moved {rewind_amount} largest ro*direction_similarity products to recycle_bin (ys threshold)")
-                
+#                # Calculate product of ro[i] and direction_similarity[i]
+#                ro_products = [abs(ro[i].item() * direction_similarities[i]) 
+#                               for i in range(len(ro))]
+#                
+#                # Calculate total history length including recycle bin
+#                total_history_len = len(ro) + len(recycle_bin)
+#                # Calculate 10% of total history (minimum 1)
+#                rewind_amount = max(1, int(0.1 * total_history_len))
+#                # Ensure we don't rewind more than available active history
+#                rewind_amount = min(rewind_amount, len(ro))
+#                
+#                if rewind_amount > 0:
+#                    # Sort indices by ro*direction_similarity product descending
+#                    ro_product_tensor = torch.tensor(ro_products)
+#                    sorted_values, sorted_indices = torch.sort(ro_product_tensor, descending=True)
+#                    
+#                    # Select top rewind_amount largest ro*direction_similarity products
+#                    indices_to_remove = sorted_indices[:rewind_amount].tolist()
+#                    
+#                    # Sort indices in reverse order to safely remove from lists
+#                    indices_to_remove.sort(reverse=True)
+#                    
+#                    for idx in indices_to_remove:
+#                        recycle_entry = {
+#                            'index': idx,
+#                            'dir': old_dirs.pop(idx),
+#                            'stp': old_stps.pop(idx),
+#                            'ro': ro.pop(idx),
+#                        }
+#                        if idx < len(state["y_norms"]):
+#                            recycle_entry['y_norm'] = state["y_norms"].pop(idx)
+#                        recycle_bin.append(recycle_entry)
+#                    print(f"Moved {rewind_amount} largest ro*direction_similarity products to recycle_bin (ys threshold)")
+#                
                 ls_failed = True
                 state["ls_failed"] = True
               # Only add to history if ys meets threshold
@@ -2303,6 +2304,7 @@ class FBFGS(Optimizer):
         rewind_amount = max(1, int(0.1 * total_history_len))
         # Ensure we don't rewind more than available active history
         rewind_amount = min(rewind_amount, len(ro))
+        print("rewinding " + str(rewind_amount) + " which is 10% of " + str(total_history_len))
         
         if rewind_amount > 0:
             # Sort indices by ro value descending
