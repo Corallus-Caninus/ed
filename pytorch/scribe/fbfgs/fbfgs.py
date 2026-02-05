@@ -1024,10 +1024,11 @@ class FBFGS(Optimizer):
                 
                 # 4. Standard orthogonal component remains for learning
                 orthogonal_grad = grad - proj_coeff * param
+#                orthogonal_grad[cancel_proj != 0] = 0
                 
                 # 5. Combined effect: learning + parameter reduction
                 combined = orthogonal_grad + cancel_proj
-#                combined =   cancel_proj
+#                combined =   orthogonal_grad
                 
                 adjusted_chunks.append(combined)
                 # Standard orthogonalization (90°)
@@ -1288,28 +1289,30 @@ class FBFGS(Optimizer):
             flat_grad = self._gather_flat_grad()
             
             # Calculate regularization penalty (0.5 * sum p·g where p·g > 0)
-            penalty = 0.0
-            param_offset = 0
-            for p in self._params:
-                numel = p.numel()
-                if numel == 0:
-                    continue
-                
-                # Extract gradient slice corresponding to parameter
-                p_grad = flat_grad[param_offset:param_offset+numel].view_as(p).to(p.dtype)
-                
-                # Compute dot product
-                dot = (p.detach() * p_grad).sum()
-                if dot > 0:
-                    penalty += 0.5 * dot.item()
-                
-                param_offset += numel
-            
+#            penalty = 0.0
+#            param_offset = 0
+#            for p in self._params:
+#                numel = p.numel()
+#                if numel == 0:
+#                    continue
+#                
+#                # Extract gradient slice corresponding to parameter
+#                p_grad = flat_grad[param_offset:param_offset+numel].view_as(p).to(p.dtype)
+#                
+#                # Compute dot product
+##TODO: just use self._last_penalty since we calculated it in gfg
+#                dot = (p.detach() * p_grad).sum()
+#                if dot > 0:
+#                    penalty += 0.5 * dot.item()
+#                
+#                param_offset += numel
+#            
             # Add regularization to loss
-            total_loss = loss + self.lambda_reg * penalty
+#            total_loss = loss + self.lambda_reg * penalty
+            total_loss = loss + self.lambda_reg * self._last_penalty
             
             # Use already computed penalty (already tracked grad modifications)
-            total_loss_tensor = torch.tensor(loss + self.lambda_reg * penalty, 
+            total_loss_tensor = torch.tensor(loss + self.lambda_reg * self._last_penalty, 
                                             device=self.optimizer_device, 
                                             requires_grad=True)
             
