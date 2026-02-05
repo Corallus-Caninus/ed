@@ -1004,8 +1004,8 @@ class FBFGS(Optimizer):
                 orthogonal_grad = grad - proj_coeff * param
                 
                 # 5. Combined effect: learning #+ parameter reduction
-#                combined = cancel_proj #orthogonal_grad #+ cancel_proj
-                combined =  orthogonal_grad  
+                combined =  orthogonal_grad + cancel_proj
+#                combined =  orthogonal_grad  
                 
                 adjusted_chunks.append(combined)
 #                print(f"Layer {i} ǁpǁ={param_norm:.12f} │ Ortho: {torch.norm(orthogonal_grad).item():.12f} Cancel: {torch.norm(cancel_proj).item():.12f} ProjCoef: {proj_coeff.item():.12f}")
@@ -1028,15 +1028,15 @@ class FBFGS(Optimizer):
 #                orthogonal_grad[cancel_proj != 0] = 0
                 
                 # 5. Combined effect: learning #+ parameter reduction
-                combined = orthogonal_grad #+ cancel_proj
+                combined = orthogonal_grad + cancel_proj
 #                combined =   orthogonal_grad
                 
                 adjusted_chunks.append(combined)
                 # Standard orthogonalization (90°)
-#                param_sq_norm = torch.dot(param, param)
+#                grad_sq_norm = torch.dot(grad, grad)
 #                if param_sq_norm > 0:
-#                    proj = (torch.dot(grad, param) / param_sq_norm) * param
-#                    adj_grad = grad - proj
+#                    proj = (torch.dot(param, grad) / grad_sq_norm) * grad
+#                    adj_grad = param - proj
 #                    adjusted_chunks.append(adj_grad)
 #                else:
 #                    adjusted_chunks.append(grad)
@@ -1190,6 +1190,7 @@ class FBFGS(Optimizer):
     def _gather_flat_grad(self):
         views = []
         self._last_penalty = 0.0  # Reset for each grad gather
+#        print("gfg: ", end='')
         
         for p in self._params:
             if p.grad is not None and not p.grad.is_sparse:
@@ -1199,17 +1200,21 @@ class FBFGS(Optimizer):
                 
                 if p_flat.numel() > 0 and g_flat.numel() > 0:
                     dot = torch.dot(p_flat, g_flat)
+#                    print(" " + str(dot.item()) + " ", end='')
                 
 #TODO: can we also put tearing/selection here to force the gradients to be more fragmented? essentially penalize the loss if the selectedgradient cant reduce loss?
 #TODO: can we prevent overshooting such that we destroy the logits? essentially dot > 0 and p - g > 0?can this allow us to not rely on the unit ball for s?
                     mag_diff =  torch.sqrt(torch.dot(p_flat, p_flat))/ self.radius_ball_s
+                    self._last_penalty += mag_diff**2
                     if mag_diff > 1:
-                        self._last_penalty +=  mag_diff**2
+#                        self._last_penalty +=  mag_diff**2
                         print("mag diff: " + str(mag_diff))
-                    if dot**2 > 0:
+#                    else:
+#                        self._last_penalty +=  mag_diff* self.radius_ball_s
+                    if dot > 0:
                         # Accumulate penalty for loss (0.5 * p·g)
 #                        self._last_penalty += 0.5 * dot.item()
-                        self._last_penalty += 0.5 * dot.item()**2
+                        self._last_penalty +=  dot.item()**2
                     
                         # Scale gradients where p·g > 0 (g' = g * (1 + p·g)) - COMMENTED OUT
                         # with torch.no_grad():
@@ -1486,10 +1491,10 @@ class FBFGS(Optimizer):
                     alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
                     al[i] = alpha * ro[i].item()
 #NOTE: ensure reduction in q so we dont blow up curvature.(prevent resonance cascade)
-#                    if al[i] * direction_similarity < 0:
-#                        direction_alignment_mask[i] = False
-#                        continue
-#                    
+                    if al[i] * direction_similarity < 0:
+                        direction_alignment_mask[i] = False
+                        continue
+                    
                     # Use original direction for the update
                     sparse_old_dir_scaled = SparseFlatTensor(
                         sparse_dir_i.starts, sparse_dir_i.ends, 
@@ -1674,8 +1679,10 @@ class FBFGS(Optimizer):
 #        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
     # gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
-        d = self.gram_schmidt_orthogonalization(d)
+#        d = self.gram_schmidt_orthogonalization(d)
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
+        d = self.gram_schmidt_orthogonalization(d)
+#        d = self.gram_schmidt_orthogonalization(d)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         d = d.to(torch.float16)
         return d, direction_alignment_mask, direction_similarities
