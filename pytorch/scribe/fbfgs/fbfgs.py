@@ -1027,7 +1027,7 @@ class FBFGS(Optimizer):
                 
                 # 5. Combined effect: learning + parameter reduction
                 combined = orthogonal_grad + cancel_proj
-#                combined =   orthogonal_grad
+#                combined =   cancel_proj
                 
                 adjusted_chunks.append(combined)
                 # Standard orthogonalization (90°)
@@ -1435,7 +1435,7 @@ class FBFGS(Optimizer):
 #TODO: try only the negative orthogonality to prevent curvature explosion e.g.: -1 <= q@y <= 0
 #                aligned = (abs(direction_similarity) <= orthogonality)
 #TODO: if ortho is 0 unlimited -j axis
-                aligned =  -orthogonality <= direction_similarity <= 0
+                aligned =  -orthogonality <= direction_similarity <= orthogonality
                 direction_alignment_mask[i] = aligned
                 direction_similarities.append(direction_similarity)  # Store similarity
                 
@@ -1474,6 +1474,10 @@ class FBFGS(Optimizer):
                     # Calculate alpha using original direction
                     alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
                     al[i] = alpha * ro[i].item()
+#NOTE: ensure reduction in q so we dont blow up curvature.(prevent resonance cascade)
+                    if al[i] * direction_similarity < 0:
+                        direction_alignment_mask[i] = False
+                        continue
                     
                     # Use original direction for the update
                     sparse_old_dir_scaled = SparseFlatTensor(
@@ -2310,10 +2314,10 @@ class FBFGS(Optimizer):
         # Calculate total history length including recycle bin
         total_history_len = len(ro) + len(recycle_bin)
         # Calculate 10% of total history (minimum 1)
-        rewind_amount = max(1, int(0.1 * total_history_len))
+        rewind_amount = max(1, int(0.25 * total_history_len))
         # Ensure we don't rewind more than available active history
         rewind_amount = min(rewind_amount, len(ro))
-        print("rewinding " + str(rewind_amount) + " which is 10% of " + str(total_history_len))
+        print("rewinding " + str(rewind_amount) + " which is 25% of " + str(total_history_len))
         
         if rewind_amount > 0:
             # Sort indices by ro value descending
