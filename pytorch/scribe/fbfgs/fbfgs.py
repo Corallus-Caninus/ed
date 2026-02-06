@@ -1163,7 +1163,7 @@ class FBFGS(Optimizer):
 #                         Accumulate penalty for loss (0.5 * p·g)
 ##                        self._last_penalty += 0.5 * dot.item()
 #TODO: p@g/|p@p| **2
-                        self._last_penalty +=  0.5*abs(dot.item())**2
+                        self._last_penalty +=  0.5*abs(dot.item()/mag_diff)**2
                     
                         # Scale gradients where p·g > 0 (g' = g * (1 + p·g)) - COMMENTED OUT
                         # with torch.no_grad():
@@ -1246,7 +1246,7 @@ class FBFGS(Optimizer):
             
 #TODO: can we instruct the data scientist to only generate the loss and zero gradients  and not to backwards the loss?  also can we just zero the grads here instead? essentially the closure just generates the loss with grad/tape?
         # First evaluate original loss to get gradients
-        loss = float(closure())
+        loss = float(closure())**2
         flat_grad = self._gather_flat_grad()
         
         # Calculate regularization penalty (0.5 * sum p·g where p·g > 0)
@@ -1723,7 +1723,7 @@ class FBFGS(Optimizer):
       # evaluate initial f(x) and df/dx
       state = self.state[self._params[0]]
       # For first iteration, get regularized gradient via _directional_evaluate
-      orig_loss = closure()
+      orig_loss = closure()**2
       # Add regularization to the loss since _gather_flat_grad applies it to gradients
       flat_grad = self._gather_flat_grad()
       # Use already computed penalty (already tracked grad modifications)
