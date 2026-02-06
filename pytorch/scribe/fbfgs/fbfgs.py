@@ -525,7 +525,6 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 #TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down #TODO: cleanup all the AI device mess
 def _strong_wolfe(
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100, optimizer_device: str = 'cuda'):
-#TODO: we really do need a c3 for assisting prevention of early convergence. We need to rework cubic interpolation to search the notch instead of the min. Anything else is a workaround
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
     g = g.clone(memory_format=torch.contiguous_format)
     # evaluate objective and gradient using initial step
@@ -779,10 +778,10 @@ def _strong_wolfe(
         else:
             if abs(gtd_new) <= abs(-c2 * gtd) and f_new < f_best : #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
                 # Wolfe conditions satisfied
+#TODO: check if this is better than best loss. Sometimes the best loss isnt the most converged.
                 print("STRONG WOLFE")
                 success = True
                 done = True
-#TODO: clean up the line search a bit we have a lot of redundancies now and artifacts from deprecated features
                 t_best = t
                 f_best = torch.tensor(f_new, device=device)
                 g_best = g_new.clone(memory_format=torch.contiguous_format).to(direction_device)
@@ -1727,9 +1726,8 @@ class FBFGS(Optimizer):
       orig_loss = closure()
       # Add regularization to the loss since _gather_flat_grad applies it to gradients
       flat_grad = self._gather_flat_grad()
-      loss = float(orig_loss) + self.lambda_reg * self._last_penalty
       # Use already computed penalty (already tracked grad modifications)
-      loss = torch.tensor(loss + self.lambda_reg * self._last_penalty, 
+      loss = torch.tensor(orig_loss + self.lambda_reg * self._last_penalty, 
                                       device=self.optimizer_device, 
                                       requires_grad=True)
       
@@ -1812,8 +1810,8 @@ class FBFGS(Optimizer):
           if  n_iter== 1 or prev_flat_grad is None:
 #          if prev_flat_grad is None:
               restart = False # Flag for restart
-#TODO: use the proper flat_grad (the l1 instead of l2) here since we don't calculate direction first
               print("RESET (n_iter=1 or prev_flat_grad is None)")
+#TODO: this is wrong since it uses the grad from failed linesearch but it manages to wiggle the gradient out of being unstuck a lot. We should either analyze why this tends to work or remove it but if we remove it we need to return if we are on the gradient descent since it will fail deterministically
               flat_grad = self._gather_flat_grad().to(self.optimizer_device)
 #TODO: clip_grad_norm by the l1 norm for a max norm of 1e9 (if needed)
 #              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
