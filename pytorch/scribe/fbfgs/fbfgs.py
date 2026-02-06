@@ -608,6 +608,7 @@ def _strong_wolfe(
             print("NOT DESCENDING")
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
+#TODO: does this need to be cloned?
             bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
             bracket_g = [g_prev, g_new]
             bracket_gtd = [gtd_prev, gtd_new]
@@ -989,6 +990,7 @@ class FBFGS(Optimizer):
             param_sq_norm = torch.dot(param, param)
             param_norm = torch.sqrt(param_sq_norm) if param_sq_norm > 0 else 0.0
             
+#TODO: DELETE ME: we always take the -j +/-i components since the decay factor does this.
             if param_norm > l2_threshold and l2_threshold > 0 and param_sq_norm > 0:
                 # Gram-Schmidt inspired parameter reduction
                 # 1. Compute standard projection coefficient
@@ -1204,17 +1206,17 @@ class FBFGS(Optimizer):
                 
 #TODO: can we also put tearing/selection here to force the gradients to be more fragmented? essentially penalize the loss if the selectedgradient cant reduce loss?
 #TODO: can we prevent overshooting such that we destroy the logits? essentially dot > 0 and p - g > 0?can this allow us to not rely on the unit ball for s?
-                    mag_diff =  torch.sqrt(torch.dot(p_flat, p_flat))/ self.radius_ball_s
-                    self._last_penalty += mag_diff**2
-                    if mag_diff > 1:
-#                        self._last_penalty +=  mag_diff**2
-                        print("mag diff: " + str(mag_diff))
+                    mag_diff =  torch.dot(p_flat, p_flat)/ self.radius_ball_s
+                    self._last_penalty += 0.5*mag_diff
+#                    if mag_diff > 1:
+##                        self._last_penalty +=  mag_diff**2
+#                        print("mag diff: " + str(mag_diff))
 #                    else:
 #                        self._last_penalty +=  mag_diff* self.radius_ball_s
                     if dot > 0:
-                        # Accumulate penalty for loss (0.5 * p·g)
-#                        self._last_penalty += 0.5 * dot.item()
-                        self._last_penalty +=  dot.item()**2
+#                         Accumulate penalty for loss (0.5 * p·g)
+##                        self._last_penalty += 0.5 * dot.item()
+                        self._last_penalty +=  0.5*abs(dot.item())**2
                     
                         # Scale gradients where p·g > 0 (g' = g * (1 + p·g)) - COMMENTED OUT
                         # with torch.no_grad():
@@ -1680,8 +1682,8 @@ class FBFGS(Optimizer):
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
     # gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
 #        d = self.gram_schmidt_orthogonalization(d)
-        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
         d = self.gram_schmidt_orthogonalization(d)
+        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
 #        d = self.gram_schmidt_orthogonalization(d)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         d = d.to(torch.float16)
@@ -1780,6 +1782,15 @@ class FBFGS(Optimizer):
       # Add regularization to the loss since _gather_flat_grad applies it to gradients
       flat_grad = self._gather_flat_grad()
       loss = float(orig_loss) + self.lambda_reg * self._last_penalty
+      # Use already computed penalty (already tracked grad modifications)
+      loss = torch.tensor(loss + self.lambda_reg * self._last_penalty, 
+                                      device=self.optimizer_device, 
+                                      requires_grad=True)
+      
+      # Single backward pass through the loss (accumulate gradients)
+      loss.backward()
+#TODO: does this need to be cloned? also in direction evaluate
+      flat_grad = self._gather_flat_grad().clone()  # Capture gradients before zeroing
       current_evals = 1
 #      state["func_evals"] += 1
       al = []
@@ -1870,7 +1881,7 @@ class FBFGS(Optimizer):
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
               # Calculate the top k ro threshold if we have history
 #TODO: clean this up
-              if len(old_dirs) > 0 : # and n_iter > 1:
+              if len(old_dirs) == 0  or n_iter != 1 :
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
@@ -2331,10 +2342,10 @@ class FBFGS(Optimizer):
         # Calculate total history length including recycle bin
         total_history_len = len(ro) + len(recycle_bin)
         # Calculate 10% of total history (minimum 1)
-        rewind_amount = max(1, int(0.25 * total_history_len))
+        rewind_amount = max(1, int(1/self.max_iter * total_history_len))
         # Ensure we don't rewind more than available active history
         rewind_amount = min(rewind_amount, len(ro))
-        print("rewinding " + str(rewind_amount) + " which is 25% of " + str(total_history_len))
+        print("rewinding " + str(rewind_amount) + " of history: " + str(total_history_len))
         
         if rewind_amount > 0:
             # Sort indices by ro value descending
