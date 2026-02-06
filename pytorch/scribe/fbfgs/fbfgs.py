@@ -968,81 +968,28 @@ class FBFGS(Optimizer):
             offset += size
         return chunks
     def gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 500.0) -> Tensor:
-        """Adjust flat_grad to enforce L2 norm constraints on parameters.
-        
-        For layers above threshold: amplify natural antiparallel gradient components (270°) 
-        to reduce parameter norms to threshold. For others: apply standard orthogonalization.
-        
-        Args:
-            l2_threshold: Maximum allowed L2 norm for parameter layers
-        """
-        device = flat_grad.device
+        """Decompose gradients into orthogonal and natural opposition components."""
         flat_grad = flat_grad.to(torch.float64).clone()
         param_chunks = self._split_direction_to_layers(flat_grad)
         
         adjusted_chunks = []
-        for i, (p, grad_chunk) in enumerate(zip(self._params, param_chunks)):
+        for p, grad_chunk in zip(self._params, param_chunks):
             param = p.detach().view(-1).to(torch.float64)
-            param_norm = torch.norm(param, p=2)
             grad = grad_chunk.to(torch.float64)
             
-            # Compute square norm and check threshold with safeguards
+            # Compute projection coefficient (grad · p) / (p · p)
             param_sq_norm = torch.dot(param, param)
-            param_norm = torch.sqrt(param_sq_norm) if param_sq_norm > 0 else 0.0
+            proj_coeff = torch.dot(grad, param) / param_sq_norm
             
-#TODO: DELETE ME: we always take the -j +/-i components since the decay factor does this.
-            if param_norm > l2_threshold and l2_threshold > 0 and param_sq_norm > 0:
-                # Gram-Schmidt inspired parameter reduction
-                # 1. Compute standard projection coefficient
-                proj_coeff = torch.dot(grad, param) / param_sq_norm
-                
-                # 2. Calculate the canceling projection coefficient
-                cancel_coeff = -proj_coeff
-                
-                # 3. Create canceling projection vector
-                cancel_proj = cancel_coeff * param
-                
-                # 4. Standard orthogonal component remains for learning
-                orthogonal_grad = grad - proj_coeff * param
-                
-                # 5. Combined effect: learning #+ parameter reduction
-                combined =  orthogonal_grad + cancel_proj
-#                combined =  orthogonal_grad  
-                
-                adjusted_chunks.append(combined)
-#                print(f"Layer {i} ǁpǁ={param_norm:.12f} │ Ortho: {torch.norm(orthogonal_grad).item():.12f} Cancel: {torch.norm(cancel_proj).item():.12f} ProjCoef: {proj_coeff.item():.12f}")
-                print(f"Layer {i} ǁpǁ={param_norm:.12f} │ Ortho: {torch.norm(orthogonal_grad).item():.12f} Cancel: {torch.norm(cancel_proj).item():.12f} ProjCoef: {proj_coeff.item():.12f}")
-#TODO: also include the orthogonal components and maybe always include the subtractive (kind of like how weight-decay always bleeds the parameters to 0 like a leaky integrator)
-                
-            else:
-                # Gram-Schmidt inspired parameter reduction
-                # 1. Compute standard projection coefficient
-                proj_coeff = torch.dot(grad, param) / param_sq_norm
-                
-                # 2. Calculate the canceling projection coefficient
-                cancel_coeff = -proj_coeff
-                
-                # 3. Create canceling projection vector
-                cancel_proj = cancel_coeff * param
-                
-                # 4. Standard orthogonal component remains for learning
-                orthogonal_grad = grad - proj_coeff * param
-#                orthogonal_grad[cancel_proj != 0] = 0
-                
-                # 5. Combined effect: learning #+ parameter reduction
-                combined = orthogonal_grad + cancel_proj
-#                combined =   orthogonal_grad
-                
-                adjusted_chunks.append(combined)
-                # Standard orthogonalization (90°)
-#                grad_sq_norm = torch.dot(grad, grad)
-#                if param_sq_norm > 0:
-#                    proj = (torch.dot(param, grad) / grad_sq_norm) * grad
-#                    adj_grad = param - proj
-#                    adjusted_chunks.append(adj_grad)
-#                else:
-#                    adjusted_chunks.append(grad)
-                
+            # Compute orthogonal component (removes projection)
+            ortho_component = grad - proj_coeff * param
+            
+            # Compute natural opposition component (only negative projections)
+            oppose_component = min(proj_coeff, 0.0) * param
+            
+            combined = ortho_component + oppose_component
+            adjusted_chunks.append(combined)
+            
         return torch.cat(adjusted_chunks).to(dtype=flat_grad.dtype).contiguous()
     def _split_direction_to_groups(self, flat_tensor, norm_group=None):
         """Split flat tensor into groups based on norm_group parameter.
