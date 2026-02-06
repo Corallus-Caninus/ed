@@ -553,7 +553,7 @@ def _strong_wolfe(
     g_best = g
     gtd_best = gtd
 #Relaxed Wolfe initialization
-    if f_new < f_best  and done != True and f_new == f_new and f_new <= (f - abs(c1 * t * gtd)):
+    if f_new < f_best  and done != True  and f_new == f_new and f_new <= (f - abs(c1 * t * gtd)):
 #        if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
 #NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
       success = True
@@ -785,6 +785,7 @@ def _strong_wolfe(
                 t_best = t
                 f_best = torch.tensor(f_new, device=device)
                 g_best = g_new.clone(memory_format=torch.contiguous_format).to(direction_device)
+                break
             elif gtd_new * (bracket[high_pos] - bracket[low_pos])>= 0:
                 # old high becomes new low
                 bracket[high_pos] = bracket[low_pos]
@@ -799,8 +800,6 @@ def _strong_wolfe(
 #TODO redundant NaN check
 #TODO: we have a problem with ys here +gtd - -gtd_new == ys < 0
             if f_new < f_best and f_new == f_new:
-##            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
-#    #          print("---GOT NEW WOLFE PACK---")
               success = True
               stall_wolfe = 0
               t_best = t
@@ -821,9 +820,11 @@ def _strong_wolfe(
           print("WOLFE PACK MAX LS")
           return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
     # return stuff
-    t = bracket[low_pos]  # type: ignore[possibly-undefined]
-    f_new = bracket_f[low_pos]
-    g_new = bracket_g[low_pos]  # type: ignore[possibly-undefined]
+#TODO: TESTING
+#    t = bracket[low_pos]  # type: ignore[possibly-undefined]
+#    f_new = bracket_f[low_pos]
+#    g_new = bracket_g[low_pos]  # type: ignore[possibly-undefined]
+#TODO: EOT
 #    return success, f_new, g_new.to(optimizer_device), t, ls_func_evals
     return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
 class FBFGS(Optimizer):
@@ -886,7 +887,7 @@ class FBFGS(Optimizer):
         norm_group_s: Optional[Union[int, float]] = None,  # New parameter
         norm_group_y: Optional[Union[int, float]] = None,  # New parameter
         ro_threshold_rate: float = 1,  # New parameter
-        lambda_reg: float = 0.1,  # Regularization strength
+        lambda_reg: float = 0.00001,  # Regularization strength
     ):
         self.lambda_reg = lambda_reg  # Regularization strength hyperparameter
         self._last_penalty = 0.0  # Track regularization penalty
@@ -1153,34 +1154,34 @@ class FBFGS(Optimizer):
 #TODO: can we also put tearing/selection here to force the gradients to be more fragmented? essentially penalize the loss if the selectedgradient cant reduce loss?
 #TODO: can we prevent overshooting such that we destroy the logits? essentially dot > 0 and p - g > 0?can this allow us to not rely on the unit ball for s?
                     mag_diff =  torch.dot(p_flat, p_flat)#/ self.radius_ball_s
-                    self._last_penalty += 0.5*mag_diff
+                    self._last_penalty += self.lambda_reg * 0.5*mag_diff
 #                    if mag_diff > 1:
 ##                        self._last_penalty +=  mag_diff**2
 #                        print("mag diff: " + str(mag_diff))
 #                    else:
 #                        self._last_penalty +=  mag_diff* self.radius_ball_s
+                    dot_reg = 0
                     if dot > 0:
-#                         Accumulate penalty for loss (0.5 * p·g)
-##                        self._last_penalty += 0.5 * dot.item()
-#TODO: p@g/|p@p| **2
-                        self._last_penalty +=  0.5*abs(dot.item()/mag_diff)**2
+                        dot_reg +=0.5*(dot.item()/mag_diff)**2
+                        self._last_penalty +=   0.5*(dot.item()/mag_diff)**2
                     
                         # Scale gradients where p·g > 0 (g' = g * (1 + p·g)) - COMMENTED OUT
                         # with torch.no_grad():
                         #    p.grad.mul_(1 + dot.item())
             
             # Standard gradient collection unchanged
-            if p.grad is None:
-                view = p.new_zeros(p.numel())
-            elif p.grad.is_sparse:
-                view = p.grad.view(-1)
-            else:
-                view = p.grad.view(-1)
+#            if p.grad is None:
+#                view = p.new_zeros(p.numel())
+#            elif p.grad.is_sparse:
+#                view = p.grad.view(-1)
+#            else:
+            view = p.grad.view(-1)
                 
             if torch.is_complex(view):
                 view = torch.view_as_real(view).view(-1)
             views.append(view.to(self.optimizer_device))
             
+        print(" dot reg: " + str(dot_reg))
         grad = torch.cat(views, 0)
         return torch.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0)
     def gather_norm_flat_grad(self, norm=2, radius_ball=1.0):
@@ -1216,6 +1217,7 @@ class FBFGS(Optimizer):
             for p in self._params:
                 numel = p.numel()
                 p_view = p.view(-1)
+#TODO: possibly a bug here. We get loss spikes sometimes.
                 SparseFlatTensor._add_sparse_dense_alpha(update, p_view, alpha=step_size, offset=offset)
                 offset += numel
         else:
@@ -1246,40 +1248,24 @@ class FBFGS(Optimizer):
             
 #TODO: can we instruct the data scientist to only generate the loss and zero gradients  and not to backwards the loss?  also can we just zero the grads here instead? essentially the closure just generates the loss with grad/tape?
         # First evaluate original loss to get gradients
-        loss = float(closure())**2
+        loss = float(closure())
         flat_grad = self._gather_flat_grad()
         
-        # Calculate regularization penalty (0.5 * sum p·g where p·g > 0)
-#            penalty = 0.0
-#            param_offset = 0
-#            for p in self._params:
-#                numel = p.numel()
-#                if numel == 0:
-#                    continue
-#                
-#                # Extract gradient slice corresponding to parameter
-#                p_grad = flat_grad[param_offset:param_offset+numel].view_as(p).to(p.dtype)
-#                
-#                # Compute dot product
-##TODO: just use self._last_penalty since we calculated it in gfg
-#                dot = (p.detach() * p_grad).sum()
-#                if dot > 0:
-#                    penalty += 0.5 * dot.item()
-#                
-#                param_offset += numel
-#            
         # Add regularization to loss
 #            total_loss = loss + self.lambda_reg * penalty
-        total_loss = loss + self.lambda_reg * self._last_penalty
+#        total_loss = loss + self.lambda_reg * self._last_penalty
+        total_loss = loss +  self._last_penalty
+        print("component losses   Loss: " + str(loss) + " Loss_Reg: " + str(self._last_penalty) +" alpha * Loss_Reg " + str(self.lambda_reg * self._last_penalty))
         
         # Use already computed penalty (already tracked grad modifications)
-        total_loss_tensor = torch.tensor(loss + self.lambda_reg * self._last_penalty, 
+#        total_loss_tensor = torch.tensor(loss + self.lambda_reg * self._last_penalty, 
+        total_loss_tensor = torch.tensor(loss +  self._last_penalty, 
                                         device=self.optimizer_device, 
                                         requires_grad=True)
         
         # Single backward pass through the loss (accumulate gradients)
         total_loss_tensor.backward()
-        reg_flat_grad = self._gather_flat_grad().clone()  # Capture gradients before zeroing
+        reg_flat_grad = self._gather_flat_grad()  # Capture gradients before zeroing
         # Restore parameters regardless of exceptions
         for p, p_saved in zip(self._params, saved_params, strict=True):
             p.copy_(p_saved)
@@ -1721,13 +1707,13 @@ class FBFGS(Optimizer):
       if "y_norms" not in state:
           state["y_norms"] = []  # Precomputed L2 norms of y vectors
       # evaluate initial f(x) and df/dx
-      state = self.state[self._params[0]]
       # For first iteration, get regularized gradient via _directional_evaluate
-      orig_loss = closure()**2
+      orig_loss = closure()
       # Add regularization to the loss since _gather_flat_grad applies it to gradients
       flat_grad = self._gather_flat_grad()
+      orig_loss = orig_loss+ self._last_penalty
       # Use already computed penalty (already tracked grad modifications)
-      loss = torch.tensor(orig_loss + self.lambda_reg * self._last_penalty, 
+      loss = torch.tensor(orig_loss ,
                                       device=self.optimizer_device, 
                                       requires_grad=True)
       
@@ -2073,7 +2059,7 @@ class FBFGS(Optimizer):
 #TODO: this or the above should be redundant trace and remove redundancy
 #          if n_iter >= max_iter or loss == 0:
 #            break
-          prev_flat_grad = flat_grad.cpu()
+          prev_flat_grad = flat_grad.cpu().clone()
           prev_loss = loss
           # The direction d is already normalized by sparse_direction_approximate
           ############################################################
@@ -2128,7 +2114,7 @@ class FBFGS(Optimizer):
                       state["old_dirs"] = old_dirs
                       return orig_loss
                   # Mark failure and reset step size to 1
-                  any_line_search_failed = True
+                  loss = prev_loss
                   t = torch.tensor(1.)
                   self.t = t.item()  # Also reset class-level step size
                   flat_grad = prev_flat_grad
