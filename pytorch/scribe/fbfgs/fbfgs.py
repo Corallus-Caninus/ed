@@ -967,22 +967,31 @@ class FBFGS(Optimizer):
             chunks.append(flat_tensor[offset:offset+size])
             offset += size
         return chunks
-    def gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 500.0) -> Tensor:
+    def gram_schmidt_orthogonalization(self, flat_grad: Tensor, ball_radius: float = 500) -> Tensor:
         """Decompose gradients into orthogonal and natural opposition components."""
         flat_grad = flat_grad.to(torch.float64).clone()
         param_chunks = self._split_direction_to_layers(flat_grad)
         
         adjusted_chunks = []
+        i = 0
+        frozen_layers = 0
         for p, grad_chunk in zip(self._params, param_chunks):
+            i += 1
             param = p.detach().view(-1).to(torch.float64)
             grad = grad_chunk.to(torch.float64)
             
             # Compute projection coefficient (grad · p) / (p · p)
             param_sq_norm = torch.dot(param, param)
+#TODO: TEST ME (without the weight decay, the projection becomes the decay via component freezing)
+            l2_alpha = min(1, torch.sqrt(param_sq_norm)/ ball_radius)
+            if l2_alpha == 1:
+              frozen_layers += 1
             proj_coeff = torch.dot(grad, param) / param_sq_norm
             
             # Compute orthogonal component (removes projection)
             ortho_component = grad - proj_coeff * param
+            # Force ball max radius
+            ortho_component = ortho_component - l2_alpha*ortho_component
             
             # Compute natural opposition component (only negative projections)
             oppose_component = min(proj_coeff, 0.0) * param
@@ -990,6 +999,7 @@ class FBFGS(Optimizer):
             combined = ortho_component + oppose_component
             adjusted_chunks.append(combined)
             
+        print("froze " + str(frozen_layers/i * 100) + "% layers in GSO subroutine")
         return torch.cat(adjusted_chunks).to(dtype=flat_grad.dtype).contiguous()
     def _split_direction_to_groups(self, flat_tensor, norm_group=None):
         """Split flat tensor into groups based on norm_group parameter.
@@ -1141,6 +1151,7 @@ class FBFGS(Optimizer):
         self._last_penalty = 0.0  # Reset for each grad gather
 #        print("gfg: ", end='')
         
+        dot_reg = 0
         for p in self._params:
             if p.grad is not None and not p.grad.is_sparse:
                 # Compute gradient-parameter dot product
@@ -1154,16 +1165,13 @@ class FBFGS(Optimizer):
 #TODO: can we also put tearing/selection here to force the gradients to be more fragmented? essentially penalize the loss if the selectedgradient cant reduce loss?
 #TODO: can we prevent overshooting such that we destroy the logits? essentially dot > 0 and p - g > 0?can this allow us to not rely on the unit ball for s?
                     mag_diff =  torch.dot(p_flat, p_flat)#/ self.radius_ball_s
-                    self._last_penalty += self.lambda_reg * 0.5*mag_diff
-#                    if mag_diff > 1:
-##                        self._last_penalty +=  mag_diff**2
-#                        print("mag diff: " + str(mag_diff))
-#                    else:
-#                        self._last_penalty +=  mag_diff* self.radius_ball_s
-                    dot_reg = 0
+#                    self._last_penalty += self.lambda_reg * 0.5*mag_diff
+#                    dot_reg = 0
                     if dot > 0:
-                        dot_reg +=0.5*(dot.item()/mag_diff)**2
-                        self._last_penalty +=   0.5*(dot.item()/mag_diff)**2
+#                        dot_reg +=0.5*(dot.item()/mag_diff)**2
+#                        self._last_penalty +=   0.5*(dot.item()/mag_diff)**2
+                        dot_reg +=0.5*(dot.item()/torch.sqrt(mag_diff))**2
+                        self._last_penalty +=   0.5*(dot.item()/torch.sqrt(mag_diff))**2
                     
                         # Scale gradients where p·g > 0 (g' = g * (1 + p·g)) - COMMENTED OUT
                         # with torch.no_grad():
