@@ -887,7 +887,7 @@ class FBFGS(Optimizer):
         norm_group_s: Optional[Union[int, float]] = None,  # New parameter
         norm_group_y: Optional[Union[int, float]] = None,  # New parameter
         ro_threshold_rate: float = 1,  # New parameter
-        lambda_reg: float = 0.00001,  # Regularization strength
+        lambda_reg: float = 0.001,  # Regularization strength
     ):
         self.lambda_reg = lambda_reg  # Regularization strength hyperparameter
         self._last_penalty = 0.0  # Track regularization penalty
@@ -969,6 +969,7 @@ class FBFGS(Optimizer):
         return chunks
     def gram_schmidt_orthogonalization(self, flat_grad: Tensor, ball_radius: float = 500) -> Tensor:
         """Decompose gradients into orthogonal and natural opposition components."""
+        ball_radius = 50
         flat_grad = flat_grad.to(torch.float64).clone()
         param_chunks = self._split_direction_to_layers(flat_grad)
         
@@ -991,10 +992,20 @@ class FBFGS(Optimizer):
             # Compute orthogonal component (removes projection)
             ortho_component = grad - proj_coeff * param
             # Force ball max radius
-            ortho_component = ortho_component - l2_alpha*ortho_component
+#            ortho_component = ortho_component - l2_alpha*ortho_component
             
             # Compute natural opposition component (only negative projections)
             oppose_component = min(proj_coeff, 0.0) * param
+            ortho_mag = torch.sqrt(torch.dot(ortho_component, ortho_component))
+            oppose_mag = torch.sqrt(torch.dot(oppose_component, oppose_component))
+            if oppose_mag < ortho_mag and proj_coeff < 0:
+#              print("scaling: " + str(ortho_mag) + " to " + str(oppose_mag))
+              ratio = ortho_mag/oppose_mag
+              oppose_component = oppose_component * ratio
+            else:
+              ortho_component = ortho_component * 0.5
+#            if proj_coeff < 0.0 :
+#              print("non orthogonal at layer: " + str(i))
             
             combined = ortho_component + oppose_component
             adjusted_chunks.append(combined)
@@ -1164,18 +1175,28 @@ class FBFGS(Optimizer):
                 
 #TODO: can we also put tearing/selection here to force the gradients to be more fragmented? essentially penalize the loss if the selectedgradient cant reduce loss?
 #TODO: can we prevent overshooting such that we destroy the logits? essentially dot > 0 and p - g > 0?can this allow us to not rely on the unit ball for s?
-                    mag_diff =  torch.dot(p_flat, p_flat)#/ self.radius_ball_s
+#                    mag_diff =  torch.dot(p_flat, p_flat)#/ self.radius_ball_s
+#                    mag_diff =  torch.sqrt(torch.dot(p_flat, p_flat))/self.radius_ball_s#/ self.radius_ball_s
+                    mag_diff =  (torch.dot(p_flat, p_flat))
 #                    self._last_penalty += self.lambda_reg * 0.5*mag_diff
+#                    self._last_penalty += self.lambda_reg * (dot.item()/torch.sqrt(mag_diff))
 #                    dot_reg = 0
-                    if dot > 0:
-#                        dot_reg +=0.5*(dot.item()/mag_diff)**2
-#                        self._last_penalty +=   0.5*(dot.item()/mag_diff)**2
-                        dot_reg +=0.5*(dot.item()/torch.sqrt(mag_diff))**2
-                        self._last_penalty +=   0.5*(dot.item()/torch.sqrt(mag_diff))**2
+                    if dot > 0:#TODO: positive orthogonality is not considered for the reduction garuntees
+##                        dot_reg +=0.5*(dot.item()/mag_diff)**2
+#                        self._last_penalty +=   dot.item()/mag_diff
+                        projection_reg= ((dot.item()/mag_diff)* p_flat) 
+                        projection_reg= torch.dot(projection_reg, projection_reg)
+                        dot_reg += projection_reg
+#                        self._last_penalty += ((dot.item()/mag_diff)* p_flat) 
+                        self._last_penalty+= projection_reg
+#                        self._last_penalty +=    ((dot.item()))
                     
                         # Scale gradients where p·g > 0 (g' = g * (1 + p·g)) - COMMENTED OUT
                         # with torch.no_grad():
                         #    p.grad.mul_(1 + dot.item())
+                    mag_diff =  torch.sqrt(torch.dot(p_flat, p_flat))/50#/ 50
+                    if mag_diff > 1:
+                        self._last_penalty +=   torch.dot(p_flat, p_flat)
             
             # Standard gradient collection unchanged
 #            if p.grad is None:
@@ -1621,7 +1642,7 @@ class FBFGS(Optimizer):
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
     # gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
 #        d = self.gram_schmidt_orthogonalization(d)
-        d = self.gram_schmidt_orthogonalization(d)
+        d = self.gram_schmidt_orthogonalization(d, self.radius_ball_s)
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
 #        d = self.gram_schmidt_orthogonalization(d)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
