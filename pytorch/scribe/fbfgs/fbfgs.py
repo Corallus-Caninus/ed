@@ -1155,15 +1155,16 @@ class FBFGS(Optimizer):
                     dot = torch.dot(p_flat, g_flat)
                 
                     # Regularize the gradient for the event horizon reduction (negative alignment)
-                    mag_diff =  (torch.dot(p_flat, p_flat))
+                    p_mag_sq =  (torch.dot(p_flat, p_flat))
+                    p_mag =  torch.sqrt(torch.dot(p_flat, p_flat))
                     p_norm =  torch.sqrt(torch.dot(p_flat, p_flat))/50#/ 50
 # TODO: we can just subtract the positive projection here? essentially remove it completely and adjust the loss by its magnitude?
                     if dot > 0 and p_norm > 1:
-                        projection_reg= ((dot/mag_diff)* p_flat) 
+                        projection_reg= ((dot/p_mag_sq)* p_flat) *p_mag
 #                        projection_reg= torch.dot(projection_reg, projection_reg)
-                        dot_reg += torch.sqrt(torch.dot(projection_reg, projection_reg))
+                        dot_reg += torch.sqrt(torch.dot(projection_reg, projection_reg))#*p_mag
 # TODO: ensure the loss is correct. We have the square here for the grad mag
-                        self._last_penalty= self._last_penalty + torch.sqrt(torch.dot(projection_reg, projection_reg))
+                        self._last_penalty= self._last_penalty + torch.sqrt(torch.dot(projection_reg, projection_reg))#*p_mag
                         print("grad mag before: " + str(torch.dot(g_flat, g_flat)))
 # TODO: this doesnt preserve the direction angle? need to travel along the vector
                         p.grad.view(-1).sub_(projection_reg )# TODO: projection_reg */ p_flat?
@@ -1171,9 +1172,9 @@ class FBFGS(Optimizer):
                     if dot == 0 and p_norm > 1:# TODO: negative orthogonality is retarded here whereas it would be boosted by gso.
 # TODO: this is more aggresive than the positive projection? balance/tune this.
 #                        ortho_limiter = torch.dot(g_flat, g_flat) * p_norm
-                        ortho_limiter = g_flat * p_norm
-                        self._last_penalty= self._last_penalty + torch.sqrt(torch.dot(ortho_limiter, ortho_limiter))
-                        dot_reg += torch.sqrt(torch.dot(ortho_limiter, ortho_limiter))
+                        ortho_limiter = g_flat * p_norm*p_mag
+                        self._last_penalty= self._last_penalty + torch.sqrt(torch.dot(ortho_limiter, ortho_limiter))#*p_mag
+                        dot_reg += torch.sqrt(torch.dot(ortho_limiter, ortho_limiter))#*p_mag
                         p.grad.view(-1).sub_(ortho_limiter)
                     
             
