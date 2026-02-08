@@ -983,34 +983,30 @@ class FBFGS(Optimizer):
             
             # Compute projection coefficient (grad · p) / (p · p)
             param_sq_norm = torch.dot(param, param)
-#TODO: TEST ME (without the weight decay, the projection becomes the decay via component freezing)
-            l2_alpha = min(1, torch.sqrt(param_sq_norm)/ ball_radius)
-            if l2_alpha == 1:
-              frozen_layers += 1
             proj_coeff = torch.dot(grad, param) / param_sq_norm
             
             # Compute orthogonal component (removes projection)
             ortho_component = grad - proj_coeff * param
             # Force ball max radius
-#            ortho_component = ortho_component - l2_alpha*ortho_component
             
             # Compute natural opposition component (only negative projections)
             oppose_component = min(proj_coeff, 0.0) * param
+
+            # Apply component based gradient guided weight decay
             ortho_mag = torch.sqrt(torch.dot(ortho_component, ortho_component))
             oppose_mag = torch.sqrt(torch.dot(oppose_component, oppose_component))
-            if oppose_mag < ortho_mag and proj_coeff < 0:
-#              print("scaling: " + str(ortho_mag) + " to " + str(oppose_mag))
+            # TODO: TEST ME (only apply reduction scaling when @ ball, otherwise only the perfectly orthogonal direction or fighting the alignment regularizer can increase param magnitude
+            # TODO: could we also just remove the regularizer so we allow alignment to cast orthogonality and simply increase the rate of the reduction with this method along with decay-boundary?
+            if oppose_mag < ortho_mag and proj_coeff < 0 and torch.sqrt(param_sq_norm) > ball_radius:
               ratio = ortho_mag/oppose_mag
               oppose_component = oppose_component * ratio
             else:
               ortho_component = ortho_component * 0.5
-#            if proj_coeff < 0.0 :
-#              print("non orthogonal at layer: " + str(i))
             
             combined = ortho_component + oppose_component
             adjusted_chunks.append(combined)
             
-        print("froze " + str(frozen_layers/i * 100) + "% layers in GSO subroutine")
+#        print("froze " + str(frozen_layers/i * 100) + "% layers in GSO subroutine")
         return torch.cat(adjusted_chunks).to(dtype=flat_grad.dtype).contiguous()
     def _split_direction_to_groups(self, flat_tensor, norm_group=None):
         """Split flat tensor into groups based on norm_group parameter.
@@ -1180,8 +1176,9 @@ class FBFGS(Optimizer):
                     mag_diff =  (torch.dot(p_flat, p_flat))
 #                    self._last_penalty += self.lambda_reg * 0.5*mag_diff
 #                    self._last_penalty += self.lambda_reg * (dot.item()/torch.sqrt(mag_diff))
-#                    dot_reg = 0
-                    if dot > 0:#TODO: positive orthogonality is not considered for the reduction garuntees
+                    p_norm =  torch.sqrt(torch.dot(p_flat, p_flat))/50#/ 50
+# TODO: add this to the event horizon instead of always TEST ME
+                    if dot > 0 and p_norm > 1:#TODO: positive orthogonality is not considered for the reduction garuntees
 ##                        dot_reg +=0.5*(dot.item()/mag_diff)**2
 #                        self._last_penalty +=   dot.item()/mag_diff
                         projection_reg= ((dot.item()/mag_diff)* p_flat) 
@@ -1189,14 +1186,12 @@ class FBFGS(Optimizer):
                         dot_reg += projection_reg
 #                        self._last_penalty += ((dot.item()/mag_diff)* p_flat) 
                         self._last_penalty+= projection_reg
-#                        self._last_penalty +=    ((dot.item()))
                     
                         # Scale gradients where p·g > 0 (g' = g * (1 + p·g)) - COMMENTED OUT
                         # with torch.no_grad():
                         #    p.grad.mul_(1 + dot.item())
-                    mag_diff =  torch.sqrt(torch.dot(p_flat, p_flat))/50#/ 50
-                    if mag_diff > 1:
-                        self._last_penalty +=   torch.dot(p_flat, p_flat)
+#                    if p_norm > 1:
+#                        self._last_penalty +=   torch.dot(p_flat, p_flat)
             
             # Standard gradient collection unchanged
 #            if p.grad is None:
@@ -1278,7 +1273,7 @@ class FBFGS(Optimizer):
 #TODO: can we instruct the data scientist to only generate the loss and zero gradients  and not to backwards the loss?  also can we just zero the grads here instead? essentially the closure just generates the loss with grad/tape?
         # First evaluate original loss to get gradients
         loss = float(closure())
-        flat_grad = self._gather_flat_grad()
+        flat_grad = torch.enable_grad(self._gather_flat_grad)()
         
         # Add regularization to loss
 #            total_loss = loss + self.lambda_reg * penalty
@@ -1295,6 +1290,7 @@ class FBFGS(Optimizer):
         # Single backward pass through the loss (accumulate gradients)
         total_loss_tensor.backward()
         reg_flat_grad = self._gather_flat_grad()  # Capture gradients before zeroing
+        total_loss = loss +  self._last_penalty
         # Restore parameters regardless of exceptions
         for p, p_saved in zip(self._params, saved_params, strict=True):
             p.copy_(p_saved)
@@ -1740,9 +1736,9 @@ class FBFGS(Optimizer):
       orig_loss = closure()
       # Add regularization to the loss since _gather_flat_grad applies it to gradients
       flat_grad = self._gather_flat_grad()
-      orig_loss = orig_loss+ self._last_penalty
+      loss = orig_loss+ self._last_penalty
       # Use already computed penalty (already tracked grad modifications)
-      loss = torch.tensor(orig_loss ,
+      loss = torch.tensor(loss ,
                                       device=self.optimizer_device, 
                                       requires_grad=True)
       
@@ -1750,6 +1746,9 @@ class FBFGS(Optimizer):
       loss.backward()
 #TODO: does this need to be cloned? also in direction evaluate
       flat_grad = self._gather_flat_grad().clone()  # Capture gradients before zeroing
+# TODO: wat
+      loss = orig_loss+ self._last_penalty
+      orig_loss = orig_loss+ self._last_penalty
       current_evals = 1
 #      state["func_evals"] += 1
       al = []
@@ -1761,7 +1760,7 @@ class FBFGS(Optimizer):
       d = state.get("d", None) # d can be None initially
       # Initialize prev_flat_grad, flat_grad, and H_diag
       prev_flat_grad = state.get("prev_flat_grad", None)
-      flat_grad = state.get("flat_grad", None)
+#      flat_grad = state.get("flat_grad", None)
       if "H_diag" in state:
         H_diag = state.get("H_diag")
       else:
@@ -1827,7 +1826,7 @@ class FBFGS(Optimizer):
               restart = False # Flag for restart
               print("RESET (n_iter=1 or prev_flat_grad is None)")
 #TODO: this is wrong since it uses the grad from failed linesearch but it manages to wiggle the gradient out of being unstuck a lot. We should either analyze why this tends to work or remove it but if we remove it we need to return if we are on the gradient descent since it will fail deterministically
-              flat_grad = self._gather_flat_grad().to(self.optimizer_device)
+#              flat_grad = self._gather_flat_grad().to(self.optimizer_device)
 #TODO: clip_grad_norm by the l1 norm for a max norm of 1e9 (if needed)
 #              torch.nn.utils.clip_grad_norm_(flat_grad, max_norm=1e9)
               q = flat_grad.neg()
@@ -2129,9 +2128,12 @@ class FBFGS(Optimizer):
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
                       obj_func, self.direction_device, t, d, loss, flat_grad, gtd, c2=c2, c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step, optimizer_device=self.optimizer_device , max_ls = self.max_ls
                   )
+                  for p, p_saved in zip(self._params, saved_params):
+                      p.copy_(p_saved)
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
                   # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
               if not success:
+#TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
 #                  for p, p_saved in zip(self._params, saved_params):
 #                      p.copy_(p_saved)
@@ -2189,7 +2191,6 @@ class FBFGS(Optimizer):
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
                   # Continue to next iteration to retry
-                  continue
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
                   state["ls_failed"] = False # Store ls_failed state
