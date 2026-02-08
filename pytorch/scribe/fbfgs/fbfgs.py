@@ -1167,6 +1167,7 @@ class FBFGS(Optimizer):
                         print("grad mag after: " + str(torch.dot(g_flat, g_flat)))
                     if dot == 0 and p_norm > 1:
                         ortho_limiter = torch.dot(g_flat, g_flat) * p_norm
+                        self._last_penalty= self._last_penalty + ortho_limiter
                         dot_reg += ortho_limiter
                         p.grad.view(-1).add_(ortho_limiter)
                     
