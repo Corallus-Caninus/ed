@@ -1151,25 +1151,26 @@ class FBFGS(Optimizer):
                 p_flat = p.view(-1).to(p.grad.dtype).requires_grad_(True)
                 g_flat = p.grad.view(-1).requires_grad_(True)
                 
-                if p_flat.numel() > 0 and g_flat.numel() > 0 and p_flat.grad_fn is not None and g_flat.grad_fn is not None:
+                if p_flat.numel() > 0 and g_flat.numel() > 0 :
                     dot = torch.dot(p_flat, g_flat)
                 
                     # Regularize the gradient for the event horizon reduction (negative alignment)
                     mag_diff =  (torch.dot(p_flat, p_flat))
                     p_norm =  torch.sqrt(torch.dot(p_flat, p_flat))/50#/ 50
+# TODO: we can just subtract the positive projection here? essentially remove it completely and adjust the loss by its magnitude?
                     if dot > 0 and p_norm > 1:
                         projection_reg= ((dot/mag_diff)* p_flat) 
                         projection_reg= torch.dot(projection_reg, projection_reg)
                         dot_reg += projection_reg
                         self._last_penalty= self._last_penalty + projection_reg
                         print("grad mag before: " + str(torch.dot(g_flat, g_flat)))
-                        p.grad.view(-1).add_(projection_reg)
+                        p.grad.view(-1).sub_(projection_reg)
                         print("grad mag after: " + str(torch.dot(g_flat, g_flat)))
-                    if dot == 0 and p_norm > 1:
+                    if dot == 0 and p_norm > 1:# TODO: negative orthogonality is retarded here whereas it would be boosted by gso.
                         ortho_limiter = torch.dot(g_flat, g_flat) * p_norm
                         self._last_penalty= self._last_penalty + ortho_limiter
                         dot_reg += ortho_limiter
-                        p.grad.view(-1).add_(ortho_limiter)
+                        p.grad.view(-1).sub_(ortho_limiter)
                     
             
             view = p.grad.view(-1)
