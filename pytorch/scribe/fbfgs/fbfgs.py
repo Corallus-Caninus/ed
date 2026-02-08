@@ -891,7 +891,7 @@ class FBFGS(Optimizer):
     ):
         self.lambda_reg = lambda_reg  # Regularization strength hyperparameter
 #        self._last_penalty = torch.tensor(0.0, requires_grad=True)  # Track regularization penalty
-        self._last_penalty = torch.zeros(1).to(optimizer_device).requires_grad_(True)
+        self._last_penalty = torch.zeros(1).to(optimizer_device)
         defaults = dict(
             max_iter=max_iter,
             tolerance_grad=tolerance_grad,
@@ -1143,13 +1143,13 @@ class FBFGS(Optimizer):
 #TODO: allow this to be distributive, such that we can have multiple nodes generate grads and keep them on their respective devices for all of fbfgs.
     def _gather_flat_grad(self):
         views = []
-        self._last_penalty = torch.zeros(1).to(self.optimizer_device).requires_grad_(True)
+        self._last_penalty = torch.zeros(1).to(self.optimizer_device)
         
         dot_reg = 0
         for p in self._params:
             if p.grad is not None and not p.grad.is_sparse:
-                p_flat = p.view(-1).to(p.grad.dtype).requires_grad_(True)
-                g_flat = p.grad.view(-1).requires_grad_(True)
+                p_flat = p.view(-1).to(p.grad.dtype)
+                g_flat = p.grad.view(-1)
                 
                 if p_flat.numel() > 0 and g_flat.numel() > 0 :
                     dot = torch.dot(p_flat, g_flat)
@@ -1160,16 +1160,20 @@ class FBFGS(Optimizer):
 # TODO: we can just subtract the positive projection here? essentially remove it completely and adjust the loss by its magnitude?
                     if dot > 0 and p_norm > 1:
                         projection_reg= ((dot/mag_diff)* p_flat) 
-                        projection_reg= torch.dot(projection_reg, projection_reg)
-                        dot_reg += projection_reg
-                        self._last_penalty= self._last_penalty + projection_reg
+#                        projection_reg= torch.dot(projection_reg, projection_reg)
+                        dot_reg += torch.sqrt(torch.dot(projection_reg, projection_reg))
+# TODO: ensure the loss is correct. We have the square here for the grad mag
+                        self._last_penalty= self._last_penalty + torch.sqrt(torch.dot(projection_reg, projection_reg))
                         print("grad mag before: " + str(torch.dot(g_flat, g_flat)))
-                        p.grad.view(-1).sub_(projection_reg)
+# TODO: this doesnt preserve the direction angle? need to travel along the vector
+                        p.grad.view(-1).sub_(projection_reg )# TODO: projection_reg */ p_flat?
                         print("grad mag after: " + str(torch.dot(g_flat, g_flat)))
                     if dot == 0 and p_norm > 1:# TODO: negative orthogonality is retarded here whereas it would be boosted by gso.
-                        ortho_limiter = torch.dot(g_flat, g_flat) * p_norm
-                        self._last_penalty= self._last_penalty + ortho_limiter
-                        dot_reg += ortho_limiter
+# TODO: this is more aggresive than the positive projection? balance/tune this.
+#                        ortho_limiter = torch.dot(g_flat, g_flat) * p_norm
+                        ortho_limiter = g_flat * p_norm
+                        self._last_penalty= self._last_penalty + torch.sqrt(torch.dot(ortho_limiter, ortho_limiter))
+                        dot_reg += torch.sqrt(torch.dot(ortho_limiter, ortho_limiter))
                         p.grad.view(-1).sub_(ortho_limiter)
                     
             
@@ -1244,7 +1248,7 @@ class FBFGS(Optimizer):
             self._add_grad(t, d.to(self.optimizer_device))
             
         loss = closure()
-        flat_grad = torch.enable_grad()(self._gather_flat_grad)()
+        flat_grad = self._gather_flat_grad()
         
         print("component losses   Loss: " + str(loss) + " Loss_Reg: " + str(self._last_penalty) +" alpha * Loss_Reg " + str(self.lambda_reg * self._last_penalty))
         
@@ -1693,18 +1697,18 @@ class FBFGS(Optimizer):
       # For first iteration, get regularized gradient via _directional_evaluate
       orig_loss = closure()
       # Add regularization to the loss since _gather_flat_grad applies it to gradients
-      flat_grad = torch.enable_grad()(self._gather_flat_grad)()
+      flat_grad = self._gather_flat_grad()
       loss = orig_loss+ self._last_penalty
       # Use already computed penalty (already tracked grad modifications)
-      loss = torch.tensor(loss ,
-                                      device=self.optimizer_device, 
-                                      requires_grad=True)
-      
-      # Single backward(retain_graph=True, create_graph=True)ass through the loss (accumulate gradients)
-      loss.backward()
+#      loss = torch.tensor(loss ,
+#                                      device=self.optimizer_device, 
+#                                      requires_grad=True)
+#      
+#      # Single backward(retain_graph=True, create_graph=True)ass through the loss (accumulate gradients)
+#      loss.backward()
 #TODO: does this need to be cloned? also in direction evaluate
 #      flat_grad = self._gather_flat_grad().clone()  # Capture gradients before zeroing
-      flat_grad = torch.enable_grad()(self._gather_flat_grad)()
+#      flat_grad = self._gather_flat_grad()
 # TODO: wat
       loss = orig_loss+ self._last_penalty
       orig_loss = orig_loss+ self._last_penalty
