@@ -116,7 +116,7 @@ batch_train = None
 # Initialize FBFGS optimizer
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=1e-4, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.2, radius_y=5e4, radius_ball=500, radius_ball_s=1, radius_s=1e5, c1=1e-7, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e4, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=1e-7, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
@@ -314,7 +314,23 @@ def closure():
     print(f"Averaged loss: {total_loss:.16f}")
     # Convert back to tensor for return (the caller expects a tensor with gradients)
     total_loss_tensor = torch.tensor(total_loss, requires_grad=True).to(batch_input_ids_list[0].device)
-    return total_loss_tensor
+    # Add regularization term as dot product of gradients and parameters
+    reg_term = 0.0
+    for name, param in model.named_parameters():
+        if param.grad is not None and torch.sqrt(torch.dot(param.view(-1), param.view(-1))) > 50:
+#            reg_term += torch.sum(param.grad * param.data).item()
+            if torch.dot(param.grad.view(-1), param.view(-1)).item() > 0:
+              reg_term += torch.dot(param.grad.view(-1), param.view(-1)).item()
+# TODO: orthogonal addition after event horizon regularizer
+    # Create composite loss
+# NOTE: we already have the loss on the gradients so we scale this down so it doesnt overtake and overfit but we are loss + reg in total gradient backprops
+    composite_loss = torch.sqrt(total_loss_tensor * torch.tensor(reg_term, device=total_loss_tensor.device))
+    # Clear gradients before second backward pass
+#    optimizer.zero_grad()
+    # Perform second backward pass on composite loss
+    composite_loss.backward()
+    print(f"Composite loss: {composite_loss:.16f}")
+    return composite_loss+ total_loss_tensor
 # Main training loop
 while True:
     cache = None
