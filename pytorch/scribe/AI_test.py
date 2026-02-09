@@ -135,6 +135,7 @@ if os.path.exists(history_filename):
     except Exception as e:
         print(f"Error loading FBFGS history: {e}. Starting from scratch.")
 step_count = 0
+loss_without_regularizer = 0.0  # Track pure loss for graphing
 step_data = []
 losses_before = []
 losses_deltas = []
@@ -171,7 +172,6 @@ def closure():
         dummy_loss = torch.tensor(0.0, requires_grad=True).to(device)
         dummy_loss.backward()
         print(f"Averaged loss: {dummy_loss.item():.16f}")
-        return dummy_loss
     
     grad_vector_size = 2
     chunk_size = 10000
@@ -312,25 +312,33 @@ def closure():
         total_loss = dummy_loss.item()
     
     print(f"Averaged loss: {total_loss:.16f}")
-    # Convert back to tensor for return (the caller expects a tensor with gradients)
     total_loss_tensor = torch.tensor(total_loss, requires_grad=True).to(batch_input_ids_list[0].device)
+    global loss_without_regularizer
+    loss_without_regularizer = total_loss  # Store pure loss for logging
     # Add regularization term as dot product of gradients and parameters
     reg_term = 0.0
+    reg_term = torch.zeros(1, requires_grad=True).to(batch_input_ids_list[0].device)
     for name, param in model.named_parameters():
-        if param.grad is not None and torch.sqrt(torch.dot(param.view(-1), param.view(-1))) > 50:
+        if param is not None  and torch.sqrt(torch.dot(param.view(-1), param.view(-1))) > 50:
 #            reg_term += torch.sum(param.grad * param.data).item()
             if torch.dot(param.grad.view(-1), param.view(-1)).item() > 0:
-              reg_term += torch.dot(param.grad.view(-1), param.view(-1)).item()
+                reg_term = reg_term + torch.dot(param.grad.view(-1), param.view(-1)).item()
+# TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
+            if torch.dot(param.grad.view(-1), param.view(-1)).item() == 0:
+                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
 # TODO: orthogonal addition after event horizon regularizer
     # Create composite loss
 # NOTE: we already have the loss on the gradients so we scale this down so it doesnt overtake and overfit but we are loss + reg in total gradient backprops
-    composite_loss = torch.sqrt(total_loss_tensor * torch.tensor(reg_term, device=total_loss_tensor.device))
+#    composite_loss =  1/50 * torch.tensor(reg_term, device=total_loss_tensor.device)# * total_loss_tensor
+    composite_loss =   reg_term* total_loss_tensor
+#    composite_loss =  torch.tensor(composite_loss, device=total_loss_tensor.device) / total_loss_tensor
     # Clear gradients before second backward pass
 #    optimizer.zero_grad()
     # Perform second backward pass on composite loss
     composite_loss.backward()
-    print(f"Composite loss: {composite_loss:.16f}")
-    return composite_loss+ total_loss_tensor
+    print(f"Composite loss: " + str(composite_loss))
+#TODO: only graph the loss function not the regularizer too
+    return composite_loss.item()+ total_loss_tensor.item()
 # Main training loop
 while True:
     cache = None
@@ -397,22 +405,24 @@ while True:
             attention_mask = truncated_tokens.attention_mask[:, start_idx : start_idx + max_len_global]
             current_num_tokens = input_ids.size(1)
         
-        max_warmup_length = 200
-        if len(seen_indices) < 0 and current_num_tokens > max_warmup_length:
-            start_idx = random.randint(0, current_num_tokens - max_warmup_length)
-            # Tokenize again with truncation
-            truncated_tokens = tokenizer(
-                batch_train,
-                truncation=False,
-                max_length=1000000000,
-                padding=False,
-                return_tensors='pt'
-            ).to(device)
-            input_ids = truncated_tokens.input_ids[:, start_idx : start_idx + max_warmup_length]
-            attention_mask = truncated_tokens.attention_mask[:, start_idx : start_idx + max_warmup_length]
-            current_num_tokens = input_ids.size(1)
+#        max_warmup_length = 200
+#        if len(seen_indices) < 0 and current_num_tokens > max_warmup_length:
+#            start_idx = random.randint(0, current_num_tokens - max_warmup_length)
+#            # Tokenize again with truncation
+#            truncated_tokens = tokenizer(
+#                batch_train,
+#                truncation=False,
+#                max_length=1000000000,
+#                padding=False,
+#                return_tensors='pt'
+#            ).to(device)
+#            input_ids = truncated_tokens.input_ids[:, start_idx : start_idx + max_warmup_length]
+#            attention_mask = truncated_tokens.attention_mask[:, start_idx : start_idx + max_warmup_length]
+#            current_num_tokens = input_ids.size(1)
         
-        if current_num_tokens < max_warmup_length:
+# TODO: we do this for testing but on a production train we want all the tokens
+#        if  current_num_tokens > max_warmup_length:
+        if  current_num_tokens > 10000:
             continue
         
         # Add the processed code to batch samples
@@ -498,7 +508,7 @@ while True:
             generated_text = "Generation failed"
         model.train()
     loss_before = closure()
-    print(f"Loss before step: {loss_before:.16f}")
+    print(f"Loss before step: {loss_without_regularizer:.16f}")
     optimizer.step(closure)
     step_text = f" STEP {step_count} "
     color_cycle = ["\033[38;2;255;0;0m", "\033[38;2;0;255;0m", "\033[38;2;0;0;255m"]
@@ -515,12 +525,12 @@ while True:
     
     loss_after = closure()
     
-    loss_delta = loss_before - loss_after
+    loss_delta = loss_without_regularizer - total_loss  # Use pure loss before - pure loss after
     print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
     
     step_data.append(step_count)
-    losses_before.append(loss_before.item())
-    losses_deltas.append(loss_delta.item())
+    losses_before.append(loss_before)
+    losses_deltas.append(loss_delta)
     
     ax1.cla()
     ax2.cla()
@@ -542,7 +552,7 @@ while True:
         writer = csv.writer(csvfile)
         if not file_exists:
             writer.writerow(['step', 'loss_before', 'loss_delta'])
-        writer.writerow([step_count, loss_before.item(), loss_delta.item()])
+        writer.writerow([step_count, loss_before, loss_delta])
     step_count += 1
     gc.collect()
     
