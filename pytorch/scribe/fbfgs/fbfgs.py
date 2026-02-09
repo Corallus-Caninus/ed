@@ -988,7 +988,9 @@ class FBFGS(Optimizer):
             oppose_component = min(proj_coeff, 0.0) * param
             ortho_mag = torch.sqrt(torch.dot(ortho_component, ortho_component))
             oppose_mag = torch.sqrt(torch.dot(oppose_component, oppose_component))
-            if oppose_mag < ortho_mag and proj_coeff < 0 and torch.sqrt(param_sq_norm) > ball_radius:
+#            if oppose_mag < ortho_mag and proj_coeff < 0 and torch.sqrt(param_sq_norm) > ball_radius:
+# Bleed the freak
+            if oppose_mag < ortho_mag and proj_coeff < 0 :
               ratio = ortho_mag/oppose_mag
               oppose_component = oppose_component * ratio
             
@@ -1252,9 +1254,9 @@ class FBFGS(Optimizer):
         loss = closure()
         flat_grad = self._gather_flat_grad()
         
-        print("component losses   Loss: " + str(loss) + " Loss_Reg: " + str(self._last_penalty) +" alpha * Loss_Reg " + str(self.lambda_reg * self._last_penalty))
+#        print("component losses   Loss: " + str(loss) + " Loss_Reg: " + str(self._last_penalty) +" alpha * Loss_Reg " + str(self.lambda_reg * self._last_penalty))
         
-        loss =  loss + self._last_penalty.to(self.optimizer_device)
+#        loss =  loss + self._last_penalty.to(self.optimizer_device)
         
         for p, p_saved in zip(self._params, saved_params, strict=True):
             p.copy_(p_saved)
@@ -2095,8 +2097,9 @@ class FBFGS(Optimizer):
                   )
                   for p, p_saved in zip(self._params, saved_params):
                       p.copy_(p_saved)
+                  del saved_params
+                  gc.collect()
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
-                  # TODO: fix the needle. Currently this should work since we skip on last iteration anyways but we should be able to take needle on first iter.
               if not success:
 #TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
