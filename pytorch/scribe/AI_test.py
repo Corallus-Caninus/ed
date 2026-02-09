@@ -508,6 +508,7 @@ while True:
             generated_text = "Generation failed"
         model.train()
     loss_before = closure()
+    loss_before = loss_without_regularizer
     print(f"Loss before step: {loss_without_regularizer:.16f}")
     optimizer.step(closure)
     step_text = f" STEP {step_count} "
@@ -524,8 +525,9 @@ while True:
     print(f"\n{line}\n")
     
     loss_after = closure()
+    loss_after = loss_without_regularizer
     
-    loss_delta = loss_without_regularizer - total_loss  # Use pure loss before - pure loss after
+    loss_delta = loss_before - loss_after  # Use pure loss before - pure loss after
     print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
     
     step_data.append(step_count)
