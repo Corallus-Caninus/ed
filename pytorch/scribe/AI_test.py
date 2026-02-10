@@ -325,7 +325,7 @@ def closure():
 # TODO: sqrt?It's probably better this way since > 0 is more incorrect than == 0)
 #                reg_term = reg_term + torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
                 cosine_similarity = torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-                reg_term = reg_term + min(0.5, cosine_similarity)
+                reg_term = reg_term + max(0.5, cosine_similarity)
                 reg_count += 1
 # TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
             if torch.dot(param.grad.view(-1), param.view(-1)).item() == 0:
@@ -336,13 +336,15 @@ def closure():
     # Create composite loss
 # NOTE: We perform the product here to resist the strong regularizer from overtaking the objective function
     reg_term = reg_term / reg_count
-    composite_loss =   reg_term* (total_loss_tensor**2)
-#    composite_loss =  1/50 * torch.tensor(reg_term, device=total_loss_tensor.device)# * total_loss_tensor
-#    composite_loss =  torch.tensor(composite_loss, device=total_loss_tensor.device) / total_loss_tensor
-    # Clear gradients before second backward pass
-#    optimizer.zero_grad()
-    # Perform second backward pass on composite loss
-    composite_loss.backward()
+    print("reg term: " + str(reg_term))
+    if reg_term > 0:
+        composite_loss =   reg_term* (total_loss_tensor**2)
+    #    composite_loss =  1/50 * torch.tensor(reg_term, device=total_loss_tensor.device)# * total_loss_tensor
+    #    composite_loss =  torch.tensor(composite_loss, device=total_loss_tensor.device) / total_loss_tensor
+        # Clear gradients before second backward pass
+    #    optimizer.zero_grad()
+        # Perform second backward pass on composite loss
+        composite_loss.backward()
     print(f"Composite loss: " + str(composite_loss))
 #TODO: only graph the loss function not the regularizer too
     return composite_loss.item()+ total_loss_tensor.item()
