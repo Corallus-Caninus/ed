@@ -325,13 +325,19 @@ def closure():
 # TODO: sqrt?It's probably better this way since > 0 is more incorrect than == 0)
 #                reg_term = reg_term + torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
                 cosine_similarity = torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-                reg_term = reg_term + max(0.5, cosine_similarity)
-                reg_count += 1
+                reg_delta =  cosine_similarity
+# TODO always True
+                if reg_delta > 0:
+                    reg_term = reg_term + reg_delta
+                    reg_count += 1
 # TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
             if torch.dot(param.grad.view(-1), param.view(-1)).item() == 0:
 # TODO: this is a constant. 
-                reg_term = reg_term + min(0.5, 1/(1+e^-(torch.dot(param.grad.view(-1), param.grad.view(-1)))))
-                reg_count += 1
+# TODO: is zero okay here? it still has the gradient we want for sigmoid pointing down
+                reg_delta =  1/(1+e^-(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+                if reg_delta > 0:
+                    reg_term = reg_term + reg_delta
+                    reg_count += 1
                 print("hit ortho")
 #                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
 # TODO: orthogonal addition after event horizon regularizer
