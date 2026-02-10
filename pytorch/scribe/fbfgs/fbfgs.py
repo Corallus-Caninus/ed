@@ -526,7 +526,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100, optimizer_device: str = 'cuda'):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
-    g = g.clone(memory_format=torch.contiguous_format)
+    g = g
     # evaluate objective and gradient using initial step
 #    g_best g.to(direction_device)
     f_new, g_new = obj_func(t, d)
@@ -561,7 +561,7 @@ def _strong_wolfe(
       t_best = t
       f_best = torch.tensor(f_new, device=device)
 #TODO this should be a non-blocking offload
-      g_best = g_new.clone(memory_format=torch.contiguous_format)
+      g_best = g_new
       gtd_best = gtd_new
 #    g = g.to(direction_device)
     gc.collect()
@@ -585,7 +585,7 @@ def _strong_wolfe(
 ##            else:
 #              bracket = [t_prev, t]
 #              bracket_f = [f_prev, f_new]
-#  #            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+#  #            bracket_g = [g_prev, g_new]
 #              bracket_g = [g_prev, g_new]
 #              bracket_gtd = [gtd_prev, gtd_new]
 #              break
@@ -593,12 +593,12 @@ def _strong_wolfe(
         if (abs(gtd_new) <= abs(-c2 * gtd) and f_new < f) or (f_new < (f + c1 * t * gtd)):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
-            bracket_g = [g_new.clone(memory_format=torch.contiguous_format)]
+            bracket_g = [g_new]
             done = True
             success = True
             t_best = t
             f_best = torch.tensor(f_new, device=device)
-            g_best = g_new.clone(memory_format=torch.contiguous_format)
+            g_best = g_new
 #TODO: we got NaN on a fast wolf here (not instant)on ys (loss was good but ys returned a NaN
             print("FAST WOLFE")
             break
@@ -608,8 +608,8 @@ def _strong_wolfe(
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
 #TODO: does this need to be cloned?
-            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
-            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+            bracket_g = [g_prev, g_new]
+            bracket_g = [g_prev, g_new]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 #TODO: since we reuse the last step size, we should bracket in the direction of the first interpolation direction, and change the corresponding zoom break condition if bracketing down instead of up
@@ -636,8 +636,8 @@ def _strong_wolfe(
         # next step
         t_prev = tmp
         f_prev = f_new
-#        g_prev = g_new.clone(memory_format=torch.contiguous_format)
-        g_prev = g_new.clone(memory_format=torch.contiguous_format).to(direction_device)
+#        g_prev = g_new
+        g_prev = g_new.to(direction_device)
         gtd_prev = gtd_new # type: ignore[assignment] # type: ignore[assignment]
         f_new, g_new = obj_func(t, d)
         ls_func_evals += 1 # Increment func evals after new evaluation
@@ -655,7 +655,7 @@ def _strong_wolfe(
           t_best = t
           f_best = torch.tensor(f_new, device=device)
 #TODO this should be a non-blocking offload
-          g_best = g_new.clone(memory_format=torch.contiguous_format)
+          g_best = g_new
           gtd_best = gtd_new
     # reached max number of iterations?
     if ls_iter == max_ls:
@@ -666,7 +666,7 @@ def _strong_wolfe(
 #        bracket_gtd = [gtd, gtd_new]
         bracket = [t_prev, t]
         bracket_f = [f_prev, f_new]
-        bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+        bracket_g = [g_prev, g_new]
         bracket_gtd = [gtd_prev, gtd_new]
     # zoom phase: we now have a point satisfying the criteria, or
     # a bracket around it. We refine the bracket until we find the # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
@@ -772,7 +772,7 @@ def _strong_wolfe(
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
-            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
+            bracket_g[high_pos] = g_new  # type: ignore[possibly-undefined]
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
@@ -784,7 +784,7 @@ def _strong_wolfe(
                 done = True
                 t_best = t
                 f_best = torch.tensor(f_new, device=device)
-                g_best = g_new.clone(memory_format=torch.contiguous_format).to(direction_device)
+                g_best = g_new.to(direction_device)
                 break
             elif gtd_new * (bracket[high_pos] - bracket[low_pos])>= 0:
                 # old high becomes new low
@@ -804,12 +804,12 @@ def _strong_wolfe(
               stall_wolfe = 0
               t_best = t
               f_best = torch.tensor(f_new, device=device)
-              g_best = g_new.clone(memory_format=torch.contiguous_format)
+              g_best = g_new
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
 #            bracket_g[low_pos] = g_new.clone() # type: ignore[possibly-undefined]
-            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
+            bracket_g[low_pos] = g_new
 # type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
         stall_wolfe += 1
@@ -993,6 +993,8 @@ class FBFGS(Optimizer):
             if oppose_mag < ortho_mag and proj_coeff < 0 :
               ratio = ortho_mag/oppose_mag
               oppose_component = oppose_component * ratio
+            if proj_coeff >= 0:
+              ortho_component = 0.5*ortho_component
             
             combined = ortho_component + oppose_component
             adjusted_chunks.append(combined)
@@ -1359,6 +1361,7 @@ class FBFGS(Optimizer):
                 
                 eps = 0
 #                 Use precomputed inverse L2 norms
+# TODO: remove this bogus else condition and all the AI code that prevents errors that should be errors.
                 inv_dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
 #                inv_q_norm = 1.0 / torch.linalg.vector_norm(q, ord=2)
                 

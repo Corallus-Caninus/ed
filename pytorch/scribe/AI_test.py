@@ -316,21 +316,28 @@ def closure():
     global loss_without_regularizer
     loss_without_regularizer = total_loss  # Store pure loss for logging
     # Add regularization term as dot product of gradients and parameters
-    reg_term = 0.0
     reg_term = torch.zeros(1, requires_grad=True).to(batch_input_ids_list[0].device)
+    reg_count = 0
     for name, param in model.named_parameters():
         if param is not None  and torch.sqrt(torch.dot(param.view(-1), param.view(-1))) > 50:
 #            reg_term += torch.sum(param.grad * param.data).item()
             if torch.dot(param.grad.view(-1), param.view(-1)).item() > 0:
-                reg_term = reg_term + torch.dot(param.grad.view(-1), param.view(-1)).item()
+# TODO: sqrt?It's probably better this way since > 0 is more incorrect than == 0)
+#                reg_term = reg_term + torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+                cosine_similarity = torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+                reg_term = reg_term + min(0.5, cosine_similarity)
+                reg_count += 1
 # TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
             if torch.dot(param.grad.view(-1), param.view(-1)).item() == 0:
-                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
+                reg_term = reg_term + 0.5
+                reg_count += 1
+#                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
 # TODO: orthogonal addition after event horizon regularizer
     # Create composite loss
-# NOTE: we already have the loss on the gradients so we scale this down so it doesnt overtake and overfit but we are loss + reg in total gradient backprops
+# NOTE: We perform the product here to resist the strong regularizer from overtaking the objective function
+    reg_term = reg_term / reg_count
+    composite_loss =   reg_term* (total_loss_tensor**2)
 #    composite_loss =  1/50 * torch.tensor(reg_term, device=total_loss_tensor.device)# * total_loss_tensor
-    composite_loss =   reg_term* total_loss_tensor
 #    composite_loss =  torch.tensor(composite_loss, device=total_loss_tensor.device) / total_loss_tensor
     # Clear gradients before second backward pass
 #    optimizer.zero_grad()
@@ -528,6 +535,7 @@ while True:
     loss_after = loss_without_regularizer
     
     loss_delta = loss_before - loss_after  # Use pure loss before - pure loss after
+#TODO: reset params here if gap is negative as a test
     print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
     
     step_data.append(step_count)
