@@ -329,9 +329,10 @@ def closure():
                 reg_count += 1
 # TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
             if torch.dot(param.grad.view(-1), param.view(-1)).item() == 0:
-# TODO: this is a constant. I dont think this ties it into the gradients right..
-                reg_term = reg_term + 0.5*torch.dot(param.grad.view(-1), param.grad.view(-1))/ torth.dot(param.grad.view(-1), param.grad.view(-1))
+# TODO: this is a constant. 
+                reg_term = reg_term + min(0.5, 1/(1+e^-(torch.dot(param.grad.view(-1), param.grad.view(-1)))))
                 reg_count += 1
+                print("hit ortho")
 #                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
 # TODO: orthogonal addition after event horizon regularizer
     # Create composite loss
