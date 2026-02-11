@@ -1430,6 +1430,7 @@ class FBFGS(Optimizer):
                     )
                     q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
                     q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#                    inv_q_norm = 1/q_norm
                     normalized_q = q / q_norm
                     
                     q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
@@ -1752,6 +1753,7 @@ class FBFGS(Optimizer):
 #      while n_iter < max_iter:
       any_line_search_failed = False  # Track if any line search failed in this iteration
       while True:
+          saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #          if ro and len(ro) > 0:
 #              # Use current_ro_threshold instead of ro_threshold_rate
 #              print(f"self.current_ro_threshold values count: {self.current_ro_threshold}")
@@ -1806,6 +1808,7 @@ class FBFGS(Optimizer):
                 return orig_loss
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
+              torch.cuda.empty_cache() # Clear cache before history update
               # Calculate the top k ro threshold if we have history
 #TODO: clean this up
               if len(old_dirs) == 0  or n_iter != 1 :
@@ -2082,7 +2085,7 @@ class FBFGS(Optimizer):
           if line_search_fn is not None:
               # Save parameters before line search
 #TODO: instead of saving all the params, save the SparseFlatTensor of params masked by indices of d. Write save and restore dense methods for SparseFlatTensor.
-              saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+#              saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
               
               # perform line search, using user function
               if line_search_fn != "strong_wolfe":
@@ -2105,8 +2108,8 @@ class FBFGS(Optimizer):
               if not success:
 #TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
-#                  for p, p_saved in zip(self._params, saved_params):
-#                      p.copy_(p_saved)
+                  for p, p_saved in zip(self._params, saved_params):
+                      p.copy_(p_saved)
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
                   # If last iteration, return early
                   if n_iter >= max_iter:
