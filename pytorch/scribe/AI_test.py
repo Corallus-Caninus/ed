@@ -325,7 +325,7 @@ def closure():
             if pdg.item() > 0:
 # TODO: params magnitude arent in this equation, ensure we dont blow up the logits
 # TODO: after this blows up, try increasing the regularizer aggressively since it seems we blow up the logits first then overfit the regularizer. If we never blow up the logits we fix the source of the problem.
-                reg_term = reg_term + sqrt(pdg)
+                reg_term = reg_term + torch.sqrt(pdg)
 #                pdp = torch.dot(param.view(-1), param.view(-1))
 #                l2_decay = torch.sqrt(pdp)
 #                reg_term = reg_term + pdp*(2/(1+2.7**(-2.7*l2_decay)/500) - 1)
