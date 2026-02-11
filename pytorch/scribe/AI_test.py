@@ -326,7 +326,7 @@ def closure():
 #Lambda set to the cosine_similarity of grad on param to prevent gradient from being dominated by the param decay while maximizing decay
 #If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
             if pdg > 0:
-                lam = pdg/ (pdp * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+                lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
                 param.grad += param*lam
                 print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
             if pdg == 0:
