@@ -993,8 +993,8 @@ class FBFGS(Optimizer):
             if oppose_mag < ortho_mag and proj_coeff < 0 :
               ratio = ortho_mag/oppose_mag
               oppose_component = oppose_component * ratio
-            if proj_coeff >= 0:
-              ortho_component = 0.5*ortho_component
+#            if proj_coeff >= 0:
+#              ortho_component = 0.5*ortho_component
             
             combined = ortho_component + oppose_component
             adjusted_chunks.append(combined)
@@ -1189,7 +1189,6 @@ class FBFGS(Optimizer):
                 view = torch.view_as_real(view).view(-1)
             views.append(view.to(self.optimizer_device))
             
-        print(" dot reg: " + str(dot_reg))
         grad = torch.cat(views, 0)
         return torch.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0)
     def gather_norm_flat_grad(self, norm=2, radius_ball=1.0):

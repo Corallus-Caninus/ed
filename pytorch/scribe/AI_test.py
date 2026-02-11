@@ -116,7 +116,7 @@ batch_train = None
 # Initialize FBFGS optimizer
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e4, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=1e-7, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e4, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
@@ -319,44 +319,53 @@ def closure():
     reg_term = torch.zeros(1, requires_grad=True).to(batch_input_ids_list[0].device)
     reg_count = 0
     for name, param in model.named_parameters():
-        if param is not None   and torch.sqrt(torch.dot(param.view(-1), param.view(-1)))> 50:
-#            reg_term += torch.sum(param.grad * param.data).item()
-            pdg = torch.dot(param.grad.view(-1), param.view(-1))
-            if pdg.item() > 0:
-# TODO: params magnitude arent in this equation, ensure we dont blow up the logits
-# TODO: after this blows up, try increasing the regularizer aggressively since it seems we blow up the logits first then overfit the regularizer. If we never blow up the logits we fix the source of the problem.
-                reg_term = reg_term + torch.sqrt(pdg)
-#                pdp = torch.dot(param.view(-1), param.view(-1))
-#                l2_decay = torch.sqrt(pdp)
-#                reg_term = reg_term + pdp*(2/(1+2.7**(-2.7*l2_decay)/500) - 1)
-##                cosine_similarity = pdg/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-##                reg_delta =  cosine_similarity
-### TODO always True
-##                if reg_delta > 0:
-##                    composite_loss = reg_term + reg_delta
-##                    reg_count += 1
-### TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
-            if pdg.item() == 0:
-## TODO: pytorch sigmoid is surely faster
-## TODO: 0.5?
-#                reg_term = reg_term +  torch.dot(param.grad.view(-1), param.grad.view(-1))**2
-                reg_term = reg_term+ torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)) *  1/(1+e**(-torch.dot(param.grad.view(-1), param.grad.view(-1)))))
-### TODO always True
-##                if reg_delta > 0:
-##                    reg_term = reg_term + reg_delta
-##                    reg_count += 1
-                print("hit ortho")
-##                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
-# TODO: orthogonal addition after event horizon regularizer
-    # Create composite loss
-# NOTE: We perform the product here to resist the strong regularizer from overtaking the objective function
-    print("reg term: " + str(reg_term))
-    # Perform second backward pass on composite loss
-    reg_term = reg_term * (total_loss_tensor**2)
-    reg_term.backward()
-    print(f"Composite loss: " + str(reg_term))
-#TODO: only graph the loss function not the regularizer too
-    return reg_term.item()+ total_loss_tensor.item()
+        pdp = torch.dot(param.view(-1), param.view(-1))
+        if param is not None   and torch.sqrt(pdp) > 50:
+##            reg_term += torch.sum(param.grad * param.data).item()
+            param.grad += param*(torch.sqrt(pdp) - 50)
+            print("Triggered event horizon.."+ str( torch.sqrt(pdp)))
+#            gdg = torch.dot(param.grad.view(-1), param.grad.view(-1))
+#            pdg = torch.dot(param.grad.view(-1), param.view(-1))
+#            if pdg.item() > 0:
+## TODO: params magnitude arent in this equation, ensure we dont blow up the logits
+## TODO: after this blows up, try increasing the regularizer aggressively since it seems we blow up the logits first then overfit the regularizer. If we never blow up the logits we fix the source of the problem.
+##                reg_term = reg_term + (pdg/torch.sqrt(gdg)) * pdp
+#                reg_term = reg_term + pdg
+#                reg_count += 1
+##                pdp = torch.dot(param.view(-1), param.view(-1))
+##                l2_decay = torch.sqrt(pdp)
+##                reg_term = reg_term + pdp*(2/(1+2.7**(-2.7*l2_decay)/500) - 1)
+###                cosine_similarity = pdg/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+###                reg_delta =  cosine_similarity
+#### TODO always True
+###                if reg_delta > 0:
+###                    composite_loss = reg_term + reg_delta
+###                    reg_count += 1
+#### TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
+#            if pdg.item() == 0:
+### TODO: pytorch sigmoid is surely faster
+### TODO: 0.5?
+##                reg_term = reg_term +  torch.dot(param.grad.view(-1), param.grad.view(-1))**2
+#                reg_term = reg_term+ torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)) *  1/(1+e**(-torch.dot(param.grad.view(-1), param.grad.view(-1)))))
+#                reg_count += 1
+#### TODO always True
+###                if reg_delta > 0:
+###                    reg_term = reg_term + reg_delta
+###                    reg_count += 1
+#                print("hit ortho")
+###                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
+## TODO: orthogonal addition after event horizon regularizer
+#    # Create composite loss
+## NOTE: We perform the product here to resist the strong regularizer from overtaking the objective function
+#    print("reg term: " + str(reg_term))
+#    # Perform second backward pass on composite loss
+#    if reg_term > 0:
+#        reg_term =  min(total_loss_tensor, reg_term)
+#        reg_term.backward()
+##    reg_term.backward()
+#    print(f"Composite loss: " + str(reg_term))
+##TODO: only graph the loss function not the regularizer too
+    return total_loss_tensor.item() #reg_term.item()+ total_loss_tensor.item()
 # Main training loop
 while True:
     cache = None
