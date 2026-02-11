@@ -321,25 +321,26 @@ def closure():
     for name, param in model.named_parameters():
         if param is not None   and torch.sqrt(torch.dot(param.view(-1), param.view(-1)))> 50:
 #            reg_term += torch.sum(param.grad * param.data).item()
-            if torch.dot(param.grad.view(-1), param.view(-1)).item() > 0:
+            pdg = torch.dot(param.grad.view(-1), param.view(-1))
+            if pdg.item() > 0:
 # TODO: params magnitude arent in this equation, ensure we dont blow up the logits
 # TODO: after this blows up, try increasing the regularizer aggressively since it seems we blow up the logits first then overfit the regularizer. If we never blow up the logits we fix the source of the problem.
-                reg_term = reg_term + torch.dot(param.grad.view(-1), param.view(-1))
+                reg_term = reg_term + sqrt(pdg)
 #                pdp = torch.dot(param.view(-1), param.view(-1))
 #                l2_decay = torch.sqrt(pdp)
 #                reg_term = reg_term + pdp*(2/(1+2.7**(-2.7*l2_decay)/500) - 1)
-##                cosine_similarity = torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+##                cosine_similarity = pdg/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
 ##                reg_delta =  cosine_similarity
 ### TODO always True
 ##                if reg_delta > 0:
 ##                    composite_loss = reg_term + reg_delta
 ##                    reg_count += 1
 ### TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
-            if torch.dot(param.grad.view(-1), param.view(-1)).item() == 0:
+            if pdg.item() == 0:
 ## TODO: pytorch sigmoid is surely faster
 ## TODO: 0.5?
 #                reg_term = reg_term +  torch.dot(param.grad.view(-1), param.grad.view(-1))**2
-                reg_term = reg_term + torch.dot(param.grad.view(-1), param.grad.view(-1)) *  1/(1+e**(-torch.dot(param.grad.view(-1), param.grad.view(-1))))
+                reg_term = reg_term+ torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)) *  1/(1+e**(-torch.dot(param.grad.view(-1), param.grad.view(-1)))))
 ### TODO always True
 ##                if reg_delta > 0:
 ##                    reg_term = reg_term + reg_delta
