@@ -116,7 +116,7 @@ batch_train = None
 # Initialize FBFGS optimizer
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e4, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e3, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
@@ -149,8 +149,8 @@ current_dataset_filename = dataset_filename
 dataset_index = 0
 batch_input_ids_list = []
 batch_attention_mask_list = []
-cache = None
-outputs = None
+#cache = None
+#outputs = None
 # Global list to store random starts for each sequence in the current batch
 random_starts_list = []
 # Global list to store sequence indices for the current batch
@@ -167,11 +167,11 @@ def closure():
     total_loss_sum = 0.0
     loss_count = 0
     
-    if not batch_input_ids_list:
-        # No valid sequences in batch
-        dummy_loss = torch.tensor(0.0, requires_grad=True).to(device)
-        dummy_loss.backward()
-        print(f"Averaged loss: {dummy_loss.item():.16f}")
+#    if not batch_input_ids_list:
+#        # No valid sequences in batch
+#        dummy_loss = torch.tensor(0.0, requires_grad=True).to(device)
+#        dummy_loss.backward()
+#        print(f"Averaged loss: {dummy_loss.item():.16f}")
     
     grad_vector_size = 2
     chunk_size = 10000
@@ -189,20 +189,20 @@ def closure():
         # Use pre-calculated random starts for this sequence
         if seq_idx < len(current_batch_random_starts):
             random_starts = current_batch_random_starts[seq_idx]
-        else:
-            # Fallback if for some reason we don't have pre-calculated starts
-            random_starts = []
-            num_random_positions = 1
-            required_tokens = (num_random_positions + 1) * grad_vector_size
-            
-            if num_tokens >= required_tokens:
-                available_positions = num_tokens - required_tokens + grad_vector_size
-                if available_positions > 0:
-                    potential_starts = list(range(0, available_positions, grad_vector_size))
-                    if len(potential_starts) >= num_random_positions:
-                        random_starts = random.sample(potential_starts, num_random_positions)
-                    else:
-                        random_starts = potential_starts
+#        else:
+#            # Fallback if for some reason we don't have pre-calculated starts
+#            random_starts = []
+#            num_random_positions = 1
+#            required_tokens = (num_random_positions + 1) * grad_vector_size
+#            
+#            if num_tokens >= required_tokens:
+#                available_positions = num_tokens - required_tokens + grad_vector_size
+#                if available_positions > 0:
+#                    potential_starts = list(range(0, available_positions, grad_vector_size))
+#                    if len(potential_starts) >= num_random_positions:
+#                        random_starts = random.sample(potential_starts, num_random_positions)
+#                    else:
+#                        random_starts = potential_starts
         
         # Print the random starts for this sequence
         print(f"  Sequence {seq_idx}: {random_starts} (sequence length: {num_tokens})")
@@ -286,30 +286,10 @@ def closure():
             total_loss_sum += loss_last.item()
             loss_count += 1
             
-        else:
-            # Fallback to old method if chunk_size is 0 or no tokens
-            if cache is not None:
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=input_ids, 
-                              cache_params=cache, use_cache=True, cache_position=torch.tensor([0]))
-            else:
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=input_ids, use_cache=True)
-            loss_random = outputs.loss
-            loss_last = outputs.loss
-            # Call backward immediately for both losses
-            loss_random.backward()
-            loss_last.backward()
-            total_loss_sum += loss_random.item()
-            total_loss_sum += loss_last.item()
-            loss_count += 2
     
     # Calculate total loss as average of all collected losses
     if loss_count > 0:
         total_loss = total_loss_sum / loss_count
-    else:
-        # If we have no losses at all, we need to handle this case
-        dummy_loss = torch.tensor(0.0, requires_grad=True).to(batch_input_ids_list[0].device)
-        dummy_loss.backward()
-        total_loss = dummy_loss.item()
     
     print(f"Averaged loss: {total_loss:.16f}")
     total_loss_tensor = torch.tensor(total_loss, requires_grad=True).to(batch_input_ids_list[0].device)
@@ -326,7 +306,8 @@ def closure():
 #Lambda set to the cosine_similarity of grad on param to prevent gradient from being dominated by the param decay while maximizing decay
 #If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
             if pdg > 0:
-                lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+#                lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+                lam = pdg
                 param.grad += param*lam
                 print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
             if pdg == 0:
@@ -377,7 +358,7 @@ def closure():
 ##    reg_term.backward()
 #    print(f"Composite loss: " + str(reg_term))
 ##TODO: only graph the loss function not the regularizer too
-    return total_loss_tensor.item() #reg_term.item()+ total_loss_tensor.item()
+    return total_loss
 # Main training loop
 while True:
     cache = None
