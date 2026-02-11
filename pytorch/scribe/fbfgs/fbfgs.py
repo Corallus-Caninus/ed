@@ -561,7 +561,7 @@ def _strong_wolfe(
       t_best = t
       f_best = torch.tensor(f_new, device=device)
 #TODO this should be a non-blocking offload
-      g_best = g_new
+      g_best = g_new.clone()
       gtd_best = gtd_new
 #    g = g.to(direction_device)
     gc.collect()
@@ -598,7 +598,7 @@ def _strong_wolfe(
             success = True
             t_best = t
             f_best = torch.tensor(f_new, device=device)
-            g_best = g_new
+            g_best = g_new.clone()
 #TODO: we got NaN on a fast wolf here (not instant)on ys (loss was good but ys returned a NaN
             print("FAST WOLFE")
             break
@@ -655,7 +655,7 @@ def _strong_wolfe(
           t_best = t
           f_best = torch.tensor(f_new, device=device)
 #TODO this should be a non-blocking offload
-          g_best = g_new
+          g_best = g_new.clone()
           gtd_best = gtd_new
     # reached max number of iterations?
     if ls_iter == max_ls:
@@ -764,7 +764,7 @@ def _strong_wolfe(
 #          stall_wolfe = 0
 #          t_best = t
 #          f_best = torch.tensor(f_new, device=device)
-#          g_best = g_new.to(direction_device)
+#          g_best = g_new.clone().to(direction_device)
 #          gtd_best = gtd_new
         print("Ward condition: " + str((gtd_new + gtd_prev)/(f_new - f_prev) ))
 #        if (f_new - f_prev) / (gtd_new + gtd_prev) < c1  and abs(gtd_new - gtd_prev) != 0 or f_new >= bracket_f[low_pos] or f_new != f_new:
@@ -784,7 +784,7 @@ def _strong_wolfe(
                 done = True
                 t_best = t
                 f_best = torch.tensor(f_new, device=device)
-                g_best = g_new.to(direction_device)
+                g_best = g_new.clone().to(direction_device)
                 break
             elif gtd_new * (bracket[high_pos] - bracket[low_pos])>= 0:
                 # old high becomes new low
@@ -804,7 +804,7 @@ def _strong_wolfe(
               stall_wolfe = 0
               t_best = t
               f_best = torch.tensor(f_new, device=device)
-              g_best = g_new
+              g_best = g_new.clone()
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
@@ -1245,6 +1245,8 @@ class FBFGS(Optimizer):
         return self._numel()
     def _directional_evaluate(self, closure, t, d, saved_params):
         """Evaluate with gradient regularization via second backward pass"""
+        for p, p_saved in zip(self._params, saved_params, strict=True):
+            p.copy_(p_saved)
         if isinstance(d, SparseFlatTensor):
             if d.values.device != self.optimizer_device:
                 d = d.to(self.optimizer_device)
@@ -1259,8 +1261,8 @@ class FBFGS(Optimizer):
         
 #        loss =  loss + self._last_penalty.to(self.optimizer_device)
         
-        for p, p_saved in zip(self._params, saved_params, strict=True):
-            p.copy_(p_saved)
+#        for p, p_saved in zip(self._params, saved_params, strict=True):
+#            p.copy_(p_saved)
             
         return loss, flat_grad
     def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> tuple[Tensor, Tensor, list[float]]:
@@ -2100,11 +2102,10 @@ class FBFGS(Optimizer):
                   success, loss, flat_grad, t, ls_func_evals = _strong_wolfe(
                       obj_func, self.direction_device, t, d, loss, flat_grad, gtd, c2=c2, c1=c1, bracket_shift=bracket_shift, bracket_shove=bracket_shove, capture_min_step=capture_min_step, capture_max_step=capture_max_step, optimizer_device=self.optimizer_device , max_ls = self.max_ls
                   )
-                  for p, p_saved in zip(self._params, saved_params):
-                      p.copy_(p_saved)
-                  gc.collect()
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
               if not success:
+                  for p, p_saved in zip(self._params, saved_params):
+                      p.copy_(p_saved)
 #TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
@@ -2195,7 +2196,7 @@ class FBFGS(Optimizer):
 #                          SparseFlatTensor._add_sparse_dense_alpha(d, p_view, alpha=t, offset=offset)
 #                          offset += numel
 #                  else: # d is a dense Tensor
-                  self._add_grad(t, d)
+#                  self._add_grad(t, d)
                   loss_device = self.optimizer_device
                   print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
                   # opt_cond = loss <= 0 # This condition is not used later, can be removed if not needed elsewhere
