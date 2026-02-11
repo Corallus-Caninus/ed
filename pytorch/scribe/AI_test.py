@@ -319,11 +319,20 @@ def closure():
     reg_term = torch.zeros(1, requires_grad=True).to(batch_input_ids_list[0].device)
     reg_count = 0
     for name, param in model.named_parameters():
-        pdp = torch.dot(param.view(-1), param.view(-1))
-        if param is not None   and torch.sqrt(pdp) > 50:
+        pdp = torch.sqrt(torch.dot(param.view(-1), param.view(-1)))
+        pdg = torch.dot(param.grad.view(-1), param.view(-1))
+        if param is not None   and pdp > 50 :
 ##            reg_term += torch.sum(param.grad * param.data).item()
-            param.grad += param*(torch.sqrt(pdp) - 50)
-            print("Triggered event horizon.."+ str( torch.sqrt(pdp)))
+#Lambda set to the cosine_similarity of grad on param to prevent gradient from being dominated by the param decay while maximizing decay
+            if pdg > 0:
+                lam = pdg/ (pdp * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+                param.grad += param*lam
+                print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
+            if pdg == 0:
+                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
+                param.grad += param*lam
+                print("Triggered orthogonal event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
+# TODO: handle orthogonality with magnitude (0.5* grad@grad)
 #            gdg = torch.dot(param.grad.view(-1), param.grad.view(-1))
 #            pdg = torch.dot(param.grad.view(-1), param.view(-1))
 #            if pdg.item() > 0:
