@@ -319,44 +319,43 @@ def closure():
     reg_term = torch.zeros(1, requires_grad=True).to(batch_input_ids_list[0].device)
     reg_count = 0
     for name, param in model.named_parameters():
-        if param is not None  and torch.sqrt(torch.dot(param.view(-1), param.view(-1))) > 50:
+        if param is not None   and torch.sqrt(torch.dot(param.view(-1), param.view(-1)))> 50:
 #            reg_term += torch.sum(param.grad * param.data).item()
             if torch.dot(param.grad.view(-1), param.view(-1)).item() > 0:
-# TODO: sqrt?It's probably better this way since > 0 is more incorrect than == 0)
-#                reg_term = reg_term + torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-                cosine_similarity = torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-                reg_delta =  cosine_similarity
-# TODO always True
-                if reg_delta > 0:
-                    reg_term = reg_term + reg_delta
-                    reg_count += 1
-# TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
+# TODO: params magnitude arent in this equation, ensure we dont blow up the logits
+# TODO: after this blows up, try increasing the regularizer aggressively since it seems we blow up the logits first then overfit the regularizer. If we never blow up the logits we fix the source of the problem.
+                reg_term = reg_term + torch.dot(param.grad.view(-1), param.view(-1))
+#                pdp = torch.dot(param.view(-1), param.view(-1))
+#                l2_decay = torch.sqrt(pdp)
+#                reg_term = reg_term + pdp*(2/(1+2.7**(-2.7*l2_decay)/500) - 1)
+##                cosine_similarity = torch.dot(param.grad.view(-1), param.view(-1))/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+##                reg_delta =  cosine_similarity
+### TODO always True
+##                if reg_delta > 0:
+##                    composite_loss = reg_term + reg_delta
+##                    reg_count += 1
+### TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
             if torch.dot(param.grad.view(-1), param.view(-1)).item() == 0:
-# TODO: this is a constant. 
-# TODO: is zero okay here? it still has the gradient we want for sigmoid pointing down
-                reg_delta =  1/(1+e^-(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-                if reg_delta > 0:
-                    reg_term = reg_term + reg_delta
-                    reg_count += 1
-                print("hit ortho")
-#                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
+## TODO: pytorch sigmoid is surely faster
+## TODO: 0.5?
+#                reg_term = reg_term +  torch.dot(param.grad.view(-1), param.grad.view(-1))**2
+                reg_term = reg_term + torch.dot(param.grad.view(-1), param.grad.view(-1)) *  1/(1+e^-(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+### TODO always True
+##                if reg_delta > 0:
+##                    reg_term = reg_term + reg_delta
+##                    reg_count += 1
+##                print("hit ortho")
+##                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
 # TODO: orthogonal addition after event horizon regularizer
     # Create composite loss
 # NOTE: We perform the product here to resist the strong regularizer from overtaking the objective function
     print("reg term: " + str(reg_term))
-    if reg_count > 0:
-        reg_term = reg_term / reg_count
-        composite_loss =   reg_term* (total_loss_tensor**2)
-    #    composite_loss =  1/50 * torch.tensor(reg_term, device=total_loss_tensor.device)# * total_loss_tensor
-    #    composite_loss =  torch.tensor(composite_loss, device=total_loss_tensor.device) / total_loss_tensor
-        # Clear gradients before second backward pass
-    #    optimizer.zero_grad()
-        # Perform second backward pass on composite loss
-        composite_loss.backward()
-        print(f"Composite loss: " + str(composite_loss))
-    #TODO: only graph the loss function not the regularizer too
-        return composite_loss.item()+ total_loss_tensor.item()
-    return  total_loss_tensor.item()
+    # Perform second backward pass on composite loss
+    reg_term = reg_term * (total_loss_tensor**2)
+    reg_term.backward()
+    print(f"Composite loss: " + str(reg_term))
+#TODO: only graph the loss function not the regularizer too
+    return reg_term.item()+ total_loss_tensor.item()
 # Main training loop
 while True:
     cache = None
