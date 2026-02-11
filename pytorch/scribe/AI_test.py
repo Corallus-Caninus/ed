@@ -339,12 +339,12 @@ def closure():
 ## TODO: pytorch sigmoid is surely faster
 ## TODO: 0.5?
 #                reg_term = reg_term +  torch.dot(param.grad.view(-1), param.grad.view(-1))**2
-                reg_term = reg_term + torch.dot(param.grad.view(-1), param.grad.view(-1)) *  1/(1+e^-(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+                reg_term = reg_term + torch.dot(param.grad.view(-1), param.grad.view(-1)) *  1/(1+e**(-torch.dot(param.grad.view(-1), param.grad.view(-1))))
 ### TODO always True
 ##                if reg_delta > 0:
 ##                    reg_term = reg_term + reg_delta
 ##                    reg_count += 1
-##                print("hit ortho")
+                print("hit ortho")
 ##                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
 # TODO: orthogonal addition after event horizon regularizer
     # Create composite loss
