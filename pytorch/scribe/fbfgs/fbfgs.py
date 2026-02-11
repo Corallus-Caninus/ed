@@ -2102,14 +2102,11 @@ class FBFGS(Optimizer):
                   )
                   for p, p_saved in zip(self._params, saved_params):
                       p.copy_(p_saved)
-                  del saved_params
                   gc.collect()
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
               if not success:
 #TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
-                  for p, p_saved in zip(self._params, saved_params):
-                      p.copy_(p_saved)
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
                   # If last iteration, return early
                   if n_iter >= max_iter:
