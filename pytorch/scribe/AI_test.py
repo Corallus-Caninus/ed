@@ -10,6 +10,8 @@ import csv
 import matplotlib.pyplot as plt
 import torch
 import gc
+import pandas as pd
+import types # Added import # Added import
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Dataset, DataLoader
 from fbfgs import FBFGS
@@ -116,14 +118,28 @@ batch_train = None
 # Initialize FBFGS optimizer
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e3, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e3, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e4)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
     import torch.serialization
     try:
-        from fbfgs.fbfgs import SparseFlatTensor
-        torch.serialization.add_safe_globals([SparseFlatTensor])
+        from fbfgs.sparse_flat_tensor import SparseFlatTensor
+        
+        # Create a temporary module to handle deserialization of old SparseFlatTensor references
+        # This maps the old module path to the new one so torch.load can find the class.
+        
+        # Create a dummy module object for 'fbfgs.fbfgs'
+        # This module will contain the remapped SparseFlatTensor
+        _old_fbfgs_module = types.ModuleType('fbfgs.fbfgs')
+        _old_fbfgs_module.SparseFlatTensor = SparseFlatTensor
+
+        # Temporarily insert this dummy module into sys.modules
+        _original_fbfgs_fbfgs = sys.modules.get('fbfgs.fbfgs')
+        sys.modules['fbfgs.fbfgs'] = _old_fbfgs_module
+
+        
+
     except ImportError:
         # If SparseFlatTensor can't be imported, we'll try loading anyway
         pass
@@ -134,11 +150,104 @@ if os.path.exists(history_filename):
         print(f"Loaded FBFGS history from {history_filename}")
     except Exception as e:
         print(f"Error loading FBFGS history: {e}. Starting from scratch.")
-step_count = 0
+    finally:
+        # Restore the original 'fbfgs.fbfgs' if it existed
+        if _original_fbfgs_fbfgs is not None:
+            sys.modules['fbfgs.fbfgs'] = _original_fbfgs_fbfgs
+        else:
+            # If it didn't exist, remove our dummy entry
+            if 'fbfgs.fbfgs' in sys.modules:
+                del sys.modules['fbfgs.fbfgs']
+def generate_training_graph(log_filepath, output_image_filepath="training_history.png"):
+    if not os.path.exists(log_filepath):
+        print(f"Log file not found: {log_filepath}")
+        return
+
+    try:
+        import pandas as pd
+        df = pd.read_csv(log_filepath)
+    except ImportError:
+        print("Pandas not found. Using csv module for plotting.")
+        import csv
+        steps, losses_before, losses_delta, losses_after = [], [], [], []
+        with open(log_filepath, 'r') as f:
+            reader = csv.reader(f)
+            header = next(reader) # Skip header
+            for row in reader:
+                if len(row) == 4: # Ensure all expected columns are present
+                    steps.append(int(row[0]))
+                    losses_before.append(float(row[1]))
+                    losses_delta.append(float(row[2]))
+                    losses_after.append(float(row[3]))
+        df = pd.DataFrame({'step': steps, 'loss_before': losses_before, 
+                           'loss_delta': losses_delta, 'loss_after': losses_after})
+    
+    if df.empty:
+        print(f"No data in log file: {log_filepath}")
+        return
+
+    # Changed to 2 subplots for (Loss Before/After) and (Loss Delta)
+    fig, axes = plt.subplots(2, 1, figsize=(12, 12)) 
+    plt.tight_layout(pad=5.0)
+
+    # Plot Loss Before and Loss After on the same subplot
+    axes[0].plot(df['step'], df['loss_before'], 'b-', label='Loss Before')
+    axes[0].plot(df['step'], df['loss_after'], 'g-', label='Loss After')
+    axes[0].set_title('Loss Before & After Step vs. Steps')
+    axes[0].set_xlabel('Steps')
+    axes[0].set_ylabel('Loss')
+    axes[0].grid(True)
+    axes[0].legend()
+
+    # Plot Loss Delta on the second subplot
+    axes[1].plot(df['step'], df['loss_delta'], 'r-', label='Loss Delta')
+    axes[1].set_title('Loss Delta (Loss Before - Loss After) vs. Steps')
+    axes[1].set_xlabel('Steps')
+    axes[1].set_ylabel('Loss Delta')
+    axes[1].grid(True)
+    axes[1].legend()
+    
+    plt.savefig(output_image_filepath)
+    plt.close(fig) # Close the figure to free up memory
+
+    print(f"Generated training graph: {output_image_filepath}")
+
+log_filename = "log.csv"
+if os.path.exists(log_filename):
+    try:
+        # Try to read with pandas first
+        df = pd.read_csv(log_filename)
+        if not df.empty:
+            last_step = df['step'].iloc[-1]
+            step_count = int(last_step) + 1
+            print(f"Resuming training from step: {step_count}")
+        else:
+            step_count = 0
+            print("Log file empty, starting from step 0.")
+    except ImportError:
+        # Fallback to csv module if pandas not available
+        with open(log_filename, 'r') as f:
+            reader = csv.reader(f)
+            header = next(reader) # Skip header
+            last_row = None
+            for row in reader:
+                last_row = row
+            if last_row and len(last_row) > 0:
+                last_step = int(last_row[0])
+                step_count = last_step + 1
+                print(f"Resuming training from step: {step_count}")
+            else:
+                step_count = 0
+                print("Log file empty, starting from step 0.")
+    except Exception as e:
+        print(f"Error reading log file for step_count: {e}. Starting from step 0.")
+        step_count = 0
+else:
+    step_count = 0
+    print("Log file not found, starting from step 0.")
+
 loss_without_regularizer = 0.0  # Track pure loss for graphing
-step_data = []
-losses_before = []
-losses_deltas = []
+
 # Initialize single figure with subplots
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 plt.tight_layout(pad=3.0)
@@ -549,41 +658,29 @@ while True:
     loss_after = loss_without_regularizer
     
     loss_delta = loss_before - loss_after  # Use pure loss before - pure loss after
+    # Assert that loss_delta is never negative
+    if loss_delta < -1e-6: # Allow for small floating point inaccuracies
+        raise AssertionError(f"Loss delta is negative ({loss_delta:.16f}), violating Strong Wolfe conditions.")
 #TODO: reset params here if gap is negative as a test
     print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
     
-    step_data.append(step_count)
-    losses_before.append(loss_before)
-    losses_deltas.append(loss_delta)
-    
-    ax1.cla()
-    ax2.cla()
-    
-    ax1.plot(step_data, losses_before, 'b-')
-    ax1.set_title(f"Loss Before vs Steps (Step {step_count})")
-    ax1.set_xlabel("Steps")
-    ax1.set_ylabel("Loss")
-    
-    ax2.plot(step_data, losses_deltas, 'r-')
-    ax2.set_title(f"Loss Delta vs Steps (Step {step_count})")
-    ax2.set_xlabel("Steps")
-    ax2.set_ylabel("Loss Delta")
-    
-    plt.savefig("training.png")
-    csv_filename = "loss_data.csv"
-    file_exists = os.path.exists(csv_filename)
-    with open(csv_filename, 'a', newline='') as csvfile:
+
+    log_filename = "log.csv"
+    file_exists = os.path.exists(log_filename)
+    with open(log_filename, 'a', newline='') as csvfile:
         writer = csv.writer(csvfile)
         if not file_exists:
-            writer.writerow(['step', 'loss_before', 'loss_delta'])
-        writer.writerow([step_count, loss_before, loss_delta])
+            writer.writerow(['step', 'loss_before', 'loss_delta', 'loss_after'])
+        writer.writerow([step_count, loss_before, loss_delta, loss_after])
+    print(f"Logged step {step_count} to {log_filename}")
+    generate_training_graph(log_filename, "training_history.png") # Call every iteration
     step_count += 1
     gc.collect()
     
     # Clear CUDA cache if using GPU
     if device == "cuda":
         torch.cuda.empty_cache()
-    if step_count % 10 == 0:
+    if step_count % 10 == 0: # Only save checkpoint every 10 steps
         current_dataset_filename = dataset_filename
         dataset_indices[current_dataset_filename] = seen_indices
         
