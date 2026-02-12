@@ -520,8 +520,8 @@ def _apply_backward_loop_update(
             sparse_dir_i_recreated.unit_values * (-al[i]) if sparse_dir_i_recreated.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_dir_i_recreated.values.device)
         )
         q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
-        q_norm = torch.linalg.vector_norm(q, ord=2).item()
-        inv_q_norm = 1/q_norm
+#        q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#        inv_q_norm = 1/q_norm
         q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
     return q, direction_alignment_mask, direction_similarities
 @torch.jit.script
