@@ -1114,7 +1114,7 @@ class FBFGS(Optimizer):
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
     # gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
 #        d = self.gram_schmidt_orthogonalization(d)
-        d = self.gram_schmidt_orthogonalization(d, self.radius_ball_s)
+#        d = self.gram_schmidt_orthogonalization(d, self.radius_ball_s)
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
 #        d = self.gram_schmidt_orthogonalization(d)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
@@ -1635,9 +1635,6 @@ class FBFGS(Optimizer):
                   old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
-                  if not old_dirs: # Check if history queue is empty after rewind
-                      print("\033[91mHistory queue is empty after linesearch failure and rewind. Returning early.\033[0m")
-                      return orig_loss # Return early as requested
                   # Continue to next iteration to retry
                   continue
               else: # Strong Wolfe line search succeeded
