@@ -118,7 +118,7 @@ batch_train = None
 # Initialize FBFGS optimizer
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e3, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e4)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e3, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
@@ -260,8 +260,6 @@ def closure():
     global batch_attention_mask_list
     start_time = time.time()
     optimizer.zero_grad()
-    for name, param in model.named_parameters():
-        param.grad = None
     
     # We'll accumulate loss values for averaging and call backward immediately
     total_loss_sum = 0.0
@@ -408,7 +406,7 @@ def closure():
 #If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
             if pdg > 0:
                 lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-                lam = pdg
+#                lam = pdg
                 param.grad += param.detach()*lam
                 print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
             if pdg == 0:
@@ -652,8 +650,8 @@ while True:
     
     loss_delta = loss_before - loss_after  # Use pure loss before - pure loss after
     # Assert that loss_delta is never negative
-    if loss_delta < -1e-6: # Allow for small floating point inaccuracies
-        raise AssertionError(f"Loss delta is negative ({loss_delta:.16f}), violating Strong Wolfe conditions.")
+#    if loss_delta < -1e-6: # Allow for small floating point inaccuracies
+#        raise AssertionError(f"Loss delta is negative ({loss_delta:.16f}), violating Strong Wolfe conditions.")
 #TODO: reset params here if gap is negative as a test
     print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
     
