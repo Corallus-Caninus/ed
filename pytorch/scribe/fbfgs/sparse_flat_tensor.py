@@ -1,6 +1,7 @@
 #In Memory of Oshkosh, my pet Dalmatian.
 import torch
 from typing import Optional, Union
+from torch import Tensor
 
 @torch.jit.script
 class SparseFlatTensor:
@@ -59,7 +60,7 @@ class SparseFlatTensor:
             value_indices = torch.arange(self.values.numel(), device=self.starts.device)
 
             # Calculate which segment each value belongs to
-            segment_ids = torch.searchsorted(segment_lengths.cumsum(0), value_indices, right=False)
+            segment_ids = torch.searchsorted(segment_lengths.cumsum(0), value_indices, right=True)
 
             # Calculate the global index for each value
             global_indices = self.starts[segment_ids] + (value_indices - segment_offsets[segment_ids])
@@ -393,3 +394,5 @@ class SparseFlatTensor:
             dot_product += torch.dot(sparse_values_from_dense, sparse_values)
 
         return dot_product
+
+
