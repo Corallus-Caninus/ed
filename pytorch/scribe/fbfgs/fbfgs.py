@@ -1,7 +1,7 @@
 #In Memory of Oshkosh, my pet Dalmatian.
 import os
 #os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:64'
-from typing import Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 from torch import device
 import torch
 from torch import Tensor
@@ -471,6 +471,85 @@ def _strong_wolfe(
 #TODO: EOT
 #    return success, f_new, g_new.to(optimizer_device), t, ls_func_evals
     return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
+@torch.jit.script
+def _apply_backward_loop_update(
+    q: torch.Tensor,
+    dir_device: SparseFlatTensor,
+    stp_device: SparseFlatTensor,
+    y_norms: List[torch.Tensor],
+    i: int,
+    orthogonality: float,
+    al: torch.Tensor,
+    direction_alignment_mask: torch.Tensor,
+    direction_similarities: List[float],
+    optimizer_device: str,
+    ro_i: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor, List[float]]:
+    sparse_dir_i = SparseFlatTensor(
+        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
+        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
+    )
+    inv_dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
+    normalized_dir = SparseFlatTensor(
+        sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values * inv_dir_norm,
+        sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
+        sparse_dir_i.unit_values * inv_dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
+    )
+    q_norm = torch.linalg.vector_norm(q, ord=2).item()
+    inv_q_norm = 1/q_norm
+    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, q*inv_q_norm).item()
+    aligned =  -orthogonality <= direction_similarity <= orthogonality
+    direction_alignment_mask[i] = aligned
+    direction_similarities.append(direction_similarity)
+    
+    if direction_alignment_mask[i]:
+        sparse_dir_i_recreated = SparseFlatTensor(
+            dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
+            dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
+        )
+        sparse_stp_i = SparseFlatTensor(
+            stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
+            stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
+        )
+        alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
+        al[i] = alpha * ro_i.item() # Changed ro[i].item() to ro_i.item()
+        sparse_old_dir_scaled = SparseFlatTensor(
+            sparse_dir_i_recreated.starts, sparse_dir_i_recreated.ends, 
+            sparse_dir_i_recreated.values * (-al[i]),
+            sparse_dir_i_recreated.total_size, sparse_dir_i_recreated.unit_indices,
+            sparse_dir_i_recreated.unit_values * (-al[i]) if sparse_dir_i_recreated.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_dir_i_recreated.values.device)
+        )
+        q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
+        q_norm = torch.linalg.vector_norm(q, ord=2).item()
+        inv_q_norm = 1/q_norm
+        q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
+    return q, direction_alignment_mask, direction_similarities
+@torch.jit.script
+def _apply_forward_loop_update(
+    d: torch.Tensor,
+    stp_device: SparseFlatTensor,
+    dir_device: SparseFlatTensor,
+    al: torch.Tensor,
+    idx: int,
+    ro_idx: torch.Tensor # Changed from List[Tensor] to torch.Tensor
+) -> torch.Tensor:
+    old_dir_for_dense = SparseFlatTensor(
+        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
+        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
+    )
+    dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
+    alpha_val = al[idx] - dot_product_val * ro_idx.item() # Changed ro[idx].item() to ro_idx.item()
+    sparse_stp_i = SparseFlatTensor(
+        stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
+        stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
+    )
+    sparse_old_stp_scaled = SparseFlatTensor(
+        sparse_stp_i.starts, sparse_stp_i.ends, sparse_stp_i.values * (alpha_val),
+        sparse_stp_i.total_size, sparse_stp_i.unit_indices,
+        sparse_stp_i.unit_values * (alpha_val) if sparse_stp_i.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_stp_i.values.device)
+    )
+    d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
+    return d
 class FBFGS(Optimizer):
     """Implements L-BFGS algorithm.
     # Memory allocation strategies:
@@ -595,6 +674,7 @@ class FBFGS(Optimizer):
         self.norm_group_y = norm_group_y if norm_group_y is not None else 1  # Default to matrix norm (1)
         self.ro_threshold_rate = ro_threshold_rate
         self.current_ro_threshold = 0  # Start at threshold of 0
+        self.y_norms = [] # Initialize y_norms as a direct attribute
     def _numel(self):
         if self._numel_cache is None:
             self._numel_cache = sum(
@@ -998,90 +1078,12 @@ class FBFGS(Optimizer):
                     event.wait()
                     wait_end = time.time()
                 
-                # Early check for rho threshold
-                # Process current entry
-                sparse_dir_i = SparseFlatTensor(
-                    dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
-                    dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
+#EXTRACT ME GEMINI
+                q, direction_alignment_mask, direction_similarities = _apply_backward_loop_update(
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i]
                 )
-                
-                eps = 0
-#                 Use precomputed inverse L2 norms
-# TODO: remove this bogus else condition and all the AI code that prevents errors that should be errors.
-                inv_dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
-#                inv_q_norm = 1.0 / torch.linalg.vector_norm(q, ord=2)
-                
-                normalized_dir = SparseFlatTensor(
-                    sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values * inv_dir_norm,
-                    sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
-                    sparse_dir_i.unit_values * inv_dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
-                )
-#                normalized_q = q * inv_q_norm
-                direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, q*inv_q_norm).item()
-                
-                # Similarity calculated above
-#                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-#TODO: try only the negative orthogonality to prevent curvature explosion e.g.: -1 <= q@y <= 0
-#                aligned = (abs(direction_similarity) <= orthogonality)
-#TODO: if ortho is 0 unlimited -j axis
-                aligned =  -orthogonality <= direction_similarity <= orthogonality
-                direction_alignment_mask[i] = aligned
-                direction_similarities.append(direction_similarity)  # Store similarity
-                
-                if direction_alignment_mask[i]:
-#                    orthogonality = orthogonality - 0.1*orthogonality
-                    # Create sparse_dir_i for use in orthogonalization
-                    sparse_dir_i = SparseFlatTensor(
-                        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
-                        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
-                    )
-                    
-                    # GRAM-SCHMIDT ORTHOGONALIZATION - COMMENTED OUT
-                    # # Compute orthogonal component of dir_i with respect to q
-                    # # First compute projection: proj = (dir_i · q) / (dir_i · dir_i) * dir_i
-                    # dir_i_dot_q = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
-                    # 
-                    # # Compute norm of dir_i (avoid division by zero)
-                    # dir_i_dot_dir_i = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, sparse_dir_i).item()
-                    # projection_coefficient = dir_i_dot_q / dir_i_dot_dir_i
-                    # # Create orthogonalized direction: dir_orth = dir_i - proj
-                    # # We'll compute this by subtracting the projection from dir_i
-                    # sparse_dir_orth = SparseFlatTensor(
-                    #     dir_device.starts, dir_device.ends, 
-                    #     dir_device.values.to(dtype=torch.float32) - projection_coefficient * dir_device.values.to(dtype=torch.float32),
-                    #     dir_device.total_size, dir_device.unit_indices, 
-                    #     (dir_device.unit_values.to(dtype=torch.float32) - projection_coefficient * dir_device.unit_values.to(dtype=torch.float32)) 
-                    #     if dir_device.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=dir_device.values.device)
-                    # )
-                    
-                    # Use original direction instead of orthogonalized direction
-                    # Create sparse_stp_i (needed for second loop)
-                    sparse_stp_i = SparseFlatTensor(
-                        stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
-                        stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
-                    )
-                    # Calculate alpha using original direction
-                    alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
-                    al[i] = alpha * ro[i].item()
-#NOTE: ensure reduction in q so we dont blow up curvature.(prevent resonance cascade)
-#                    if al[i] * direction_similarity < 0:
-#                        direction_alignment_mask[i] = False
-#                        continue
-#                    
-                    # Use original direction for the update
-                    sparse_old_dir_scaled = SparseFlatTensor(
-                        sparse_dir_i.starts, sparse_dir_i.ends, 
-                        sparse_dir_i.values * (-al[i]),
-                        sparse_dir_i.total_size, sparse_dir_i.unit_indices,
-                        sparse_dir_i.unit_values * (-al[i]) if sparse_dir_i.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_dir_i.values.device)
-                    )
-                    q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
-                    q_norm = torch.linalg.vector_norm(q, ord=2).item()
-                    inv_q_norm = 1/q_norm
-#                    normalized_q = q / q_norm
-                    
-                    q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
-                    torch.cuda.empty_cache()
+#END OF EXTRACT ME GEMINI q
+                torch.cuda.empty_cache()
                 
                 # Cleanup and prefetch next
                 del backward_buffer_dict[i]
@@ -1181,6 +1183,7 @@ class FBFGS(Optimizer):
                         event.wait()
                         wait_end = time.time()
                     
+#EXTRACT ME GEMINI
                     # Process current aligned index
                     old_dir_for_dense = SparseFlatTensor(
                         dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
@@ -1215,7 +1218,8 @@ class FBFGS(Optimizer):
                         sparse_stp_i.total_size, sparse_stp_i.unit_indices,
                         sparse_stp_i.unit_values * (alpha_val) if sparse_stp_i.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_stp_i.values.device)
                     )
-                    d = SparseFlatTensor._add_sparse_dense(sparse_old_stp_scaled, d)
+#END OF EXTRACT ME GEMINI d
+                    d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
                     
                     # Cleanup
                     del forward_buffer_dict[idx]
@@ -1346,8 +1350,6 @@ class FBFGS(Optimizer):
       # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
       state = self.state[self._params[0]]
-      if "y_norms" not in state:
-          state["y_norms"] = []  # Precomputed L2 norms of y vectors
       # evaluate initial f(x) and df/dx
       # For first iteration, get regularized gradient via _directional_evaluate
       orig_loss = closure()
@@ -1409,7 +1411,7 @@ class FBFGS(Optimizer):
               old_stps.insert(idx, entry['stp'])
               ro.insert(idx, entry['ro'])
               if 'y_norm' in entry:
-                  state["y_norms"].insert(idx, entry['y_norm'])
+                  self.y_norms.insert(idx, entry['y_norm'])
       
       any_line_search_failed = False  # Track if any line search failed in this iteration
       while n_iter < max_iter: # Enforce max_iter
@@ -1473,14 +1475,14 @@ class FBFGS(Optimizer):
 #TODO: clean this up
               if len(old_dirs) == 0  or n_iter != 1 :
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
-                    old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
+                    old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, 
                     norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val
                 )
               else:
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
-                    [], [], [], flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, 
+                    [], [], [], flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, 
                     n_iter=n_iter, norm_group=self.norm_group_s, ro_threshold_val=0
@@ -1559,7 +1561,7 @@ class FBFGS(Optimizer):
 #                  ss = (s_sparse.values**2).sum() + (s_sparse.unit_values**2).sum()
 #                  if ss > 1e-10:   #avoid division by zero
 #                      theta = (delta - ys) / ss
-#                      SparseFlatTensor._add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
+#                      _add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
 #                      ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
 #                      print(f"\033[94mApplied Powell dampening. New ys: {ys}\033[0m")
 #                  else:
@@ -1613,8 +1615,8 @@ class FBFGS(Optimizer):
 #                            'stp': old_stps.pop(idx),
 #                            'ro': ro.pop(idx),
 #                        }
-#                        if idx < len(state["y_norms"]):
-#                            recycle_entry['y_norm'] = state["y_norms"].pop(idx)
+#                        if idx < len(self.y_norms):
+#                            recycle_entry['y_norm'] = self.y_norms.pop(idx)
 #                        recycle_bin.append(recycle_entry)
 #                    print(f"Moved {rewind_amount} largest ro*direction_similarity products to recycle_bin (ys threshold)")
 #                
@@ -1666,7 +1668,7 @@ class FBFGS(Optimizer):
                 ro.append(torch.tensor([(1. / ys)]))
                 # Convert dense y to compute norm
                 y_dense = y_to_store.to_dense().float()
-                state["y_norms"].append(1/torch.sqrt(torch.sum(y_dense**2)))
+                self.y_norms.append(1/torch.sqrt(torch.sum(y_dense**2)))
                 new_ys_x = new_ys_x + 1
               if n_iter > max_iter or loss == 0:
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
@@ -1711,7 +1713,7 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, state["y_norms"], optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
+              d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
               state["direction_alignment_mask"] = direction_alignment_mask
               # sparse_direction_approximate already applies norm_select
               del H_diag
@@ -1811,7 +1813,7 @@ class FBFGS(Optimizer):
 #                          # Apply the scaled sparse direction to the dense parameter
 #                          # using the new function.
 #                          # --- Key Change: Pass the current offset ---
-#                          SparseFlatTensor._add_sparse_dense_alpha(d, p_view, alpha=t, offset=offset)
+#                          _add_sparse_dense_alpha(d, p_view, alpha=t, offset=offset)
 #                          offset += numel
 #                  else: # d is a dense Tensor
 #                  self._add_grad(t, d)
@@ -1865,7 +1867,7 @@ class FBFGS(Optimizer):
             "ls_failed": state_dict.get("ls_failed", False), # Save ls_failed state
             "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
             "current_ro_threshold": self.current_ro_threshold, # Save current_ro_threshold
-            "y_norms": state_dict.get("y_norms", []), # Save y_norms
+            "y_norms": self.y_norms, # Save y_norms
         }
         torch.save(history, filename)
     def _rho_rewind(self, state, old_dirs, old_stps, ro, direction_similarities):
@@ -1902,8 +1904,8 @@ class FBFGS(Optimizer):
                     'stp': old_stps.pop(idx),
                     'ro': ro.pop(idx),
                 }
-                if idx < len(state["y_norms"]):
-                    recycle_entry['y_norm'] = state["y_norms"].pop(idx)
+                if idx < len(self.y_norms):
+                    recycle_entry['y_norm'] = self.y_norms.pop(idx)
                 recycle_bin.append(recycle_entry)
             print(f"Moved {rewind_amount} largest ro entries to recycle_bin")
         
@@ -1944,8 +1946,11 @@ class FBFGS(Optimizer):
                 self.t = t_val
             state["n_iter"] = history.get("n_iter", 0) # Load iteration count n_iter, default to 0 if not found
             state["ls_failed"] = history.get("ls_failed", False) # Load ls_failed state
-            state["y_norms"] = [self._move_item_to_device(item, device_obj, non_blocking=False) 
-                                for item in history.get("y_norms", [])]
+            y_norms_from_history = history.get("y_norms", [])
+            if isinstance(y_norms_from_history, dict): # Ensure it's a list for JIT
+                y_norms_from_history = []
+            self.y_norms = [self._move_item_to_device(item, device_obj, non_blocking=False) 
+                                for item in y_norms_from_history]
             self.current_ro_threshold = history.get("current_ro_threshold", 0) # Load current_ro_threshold
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
