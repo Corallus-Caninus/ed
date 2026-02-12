@@ -1635,6 +1635,9 @@ class FBFGS(Optimizer):
                   old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
+                  if not old_dirs: # Check if history queue is empty after rewind
+                      print("\033[91mHistory queue is empty after linesearch failure and rewind. Returning early.\033[0m")
+                      return orig_loss # Return early as requested
                   # Continue to next iteration to retry
                   continue
               else: # Strong Wolfe line search succeeded
