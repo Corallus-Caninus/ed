@@ -302,12 +302,13 @@ def closure():
         pdp = torch.sqrt(torch.dot(param.view(-1), param.view(-1)))
         pdg = torch.dot(param.grad.view(-1), param.view(-1))
         if param is not None   and pdp > 50 :
+            print("PDP: " + str(pdp))
 ##            reg_term += torch.sum(param.grad * param.data).item()
 #Lambda set to the cosine_similarity of grad on param to prevent gradient from being dominated by the param decay while maximizing decay
 #If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
             if pdg > 0:
-#                lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-                lam = pdg
+                lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+#                lam = pdg
                 param.grad += param*lam
                 print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
             if pdg == 0:
