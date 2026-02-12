@@ -1183,43 +1183,7 @@ class FBFGS(Optimizer):
                         event.wait()
                         wait_end = time.time()
                     
-#EXTRACT ME GEMINI
-                    # Process current aligned index
-                    old_dir_for_dense = SparseFlatTensor(
-                        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
-                        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
-                    )
-                    dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
-                    alpha_val = al[idx] - dot_product_val * ro[idx].item()
-                    
-                    # Create sparse_stp_i for orthogonalization
-                    sparse_stp_i = SparseFlatTensor(
-                        stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
-                        stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
-                    )
-                    
-                    # Gram-Schmidt orthogonalization - COMMENTED OUT
-                    # # Gram-Schmidt orthogonalization for stp with respect to q_for_orthogonalization
-                    # stp_i_dot_q = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q_for_orthogonalization).item()
-                    # stp_i_dot_stp_i = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, sparse_stp_i).item()
-                    # projection_coefficient_stp = stp_i_dot_q / stp_i_dot_stp_i
-                    # sparse_stp_orth = SparseFlatTensor(
-                    #     stp_device.starts, stp_device.ends,
-                    #     stp_device.values.to(dtype=torch.float32) - projection_coefficient_stp * stp_device.values.to(dtype=torch.float32),
-                    #     stp_device.total_size, stp_device.unit_indices,
-                    #     (stp_device.unit_values.to(dtype=torch.float32) - projection_coefficient_stp * stp_device.unit_values.to(dtype=torch.float32))
-                    #     if stp_device.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=stp_device.values.device)
-                    # )
-                    
-                    # Use original step tensor instead of orthogonalized one
-                    # Scale the original stp by alpha_val and add to d
-                    sparse_old_stp_scaled = SparseFlatTensor(
-                        sparse_stp_i.starts, sparse_stp_i.ends, sparse_stp_i.values * (alpha_val),
-                        sparse_stp_i.total_size, sparse_stp_i.unit_indices,
-                        sparse_stp_i.unit_values * (alpha_val) if sparse_stp_i.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_stp_i.values.device)
-                    )
-#END OF EXTRACT ME GEMINI d
-                    d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx])
                     
                     # Cleanup
                     del forward_buffer_dict[idx]
