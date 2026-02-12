@@ -278,86 +278,6 @@ class SparseFlatTensor:
         return dense_tensor_arg
 
     @staticmethod
-    def _add_sparse_dense(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor, offset: int = 0) -> Tensor:
-        """
-        Adds a SparseFlatTensor to a dense tensor in-place.
-        Indices are adjusted by the given offset.
-
-        Args:
-            sparse_tensor (SparseFlatTensor): The sparse tensor to add.
-            dense_tensor_arg (Tensor): The dense tensor to add to. This tensor will be modified.
-            offset (int, optional): The starting index within the sparse tensor's global representation
-                                   that corresponds to the start of dense_tensor_arg. Defaults to 0.
-
-        Returns:
-            Tensor: The modified dense tensor (dense_tensor_arg).
-        """
-        assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
-
-        # Process segments
-        if sparse_tensor.starts.numel() > 0:
-            # --- Key Change: Adjust indices relative to the offset ---
-            # Filter segments that potentially overlap with the current dense_tensor region
-            region_start = offset
-            region_end = offset + dense_tensor_arg.numel()
-            potential_overlap_mask = (sparse_tensor.starts < region_end) & (sparse_tensor.ends > region_start)
-
-            if potential_overlap_mask.any():
-                filtered_starts = sparse_tensor.starts[potential_overlap_mask]
-                filtered_ends = sparse_tensor.ends[potential_overlap_mask]
-                original_segment_lengths = sparse_tensor.ends - sparse_tensor.starts
-                original_value_starts = torch.cat([torch.tensor([0], device=original_segment_lengths.device), original_segment_lengths.cumsum(0)[:-1]])
-
-                # Vectorized segment processing
-                seg_start_global = filtered_starts
-                seg_end_global = filtered_ends
-                seg_len = seg_end_global - seg_start_global
-
-                # Generate all global indices for segments in a vectorized manner
-                global_indices_for_segments = torch.repeat_interleave(seg_start_global, seg_len) + torch.arange(seg_len.sum(), device=sparse_tensor.values.device) - torch.repeat_interleave(torch.arange(seg_len.numel(), device=sparse_tensor.values.device) * seg_len, seg_len)
-
-                # Adjust to local indices relative to the dense_tensor_arg's view
-                local_indices_for_segments = global_indices_for_segments - offset
-
-                # Check which of these local indices are valid (within dense_tensor_arg bounds)
-                valid_mask_local = (local_indices_for_segments >= 0) & (local_indices_for_segments < dense_tensor_arg.numel())
-                valid_local_indices = local_indices_for_segments[valid_mask_local]
-
-                if valid_local_indices.numel() > 0:
-                    # Get the original indices of the filtered segments
-                    original_indices = torch.nonzero(potential_overlap_mask).squeeze(1)
-
-                    # Get the corresponding values from the original values tensor in a vectorized manner
-                    original_value_starts_filtered = original_value_starts[original_indices]
-                    # Calculate indices for values, ensuring they stay within bounds
-                    value_indices = original_value_starts_filtered.repeat_interleave(seg_len) + torch.arange(seg_len.sum(), device=sparse_tensor.values.device) - torch.repeat_interleave(torch.arange(seg_len.numel(), device=sparse_tensor.values.device) * seg_len, seg_len)
-
-                    # Clip indices to stay within bounds of sparse_tensor.values
-                    value_indices = torch.clamp(value_indices, 0, sparse_tensor.values.numel() - 1)
-
-                    # Select only the values corresponding to valid indices
-                    valid_values_for_segments = sparse_tensor.values[value_indices][valid_mask_local]
-
-                    # Perform the in-place addition
-                    dense_tensor_arg.view(-1)[valid_local_indices] += valid_values_for_segments
-
-        # Process unit indices
-        if sparse_tensor.unit_indices.numel() > 0:
-            # --- Key Change: Adjust unit indices relative to the offset ---
-            global_unit_indices = sparse_tensor.unit_indices
-            local_unit_indices = global_unit_indices - offset
-
-            # --- Key Change: Bounds check for local unit indices ---
-            valid_unit_mask = (local_unit_indices >= 0) & (local_unit_indices < dense_tensor_arg.numel())
-            if valid_unit_mask.any():
-                final_local_unit_indices = local_unit_indices[valid_unit_mask]
-                # No alpha scaling here, direct addition
-                dense_tensor_arg.view(-1)[final_local_unit_indices] += sparse_tensor.unit_values[valid_unit_mask]
-
-        # Return the modified tensor (in-place modification)
-        return dense_tensor_arg
-
-    @staticmethod
     def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
         """
         Computes the dot product of a SparseFlatTensor with a dense tensor, optimized for sparsity and unit indices.
@@ -395,4 +315,112 @@ class SparseFlatTensor:
 
         return dot_product
 
-
+def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
+    """
+    Converts a dense tensor to SparseFlatTensor representation.
+    """
+    device = dense_tensor.device
+    dtype = dense_tensor.dtype
+    total_size = dense_tensor.numel()
+    # Find indices of non-zero elements
+    non_zero_indices = torch.nonzero(dense_tensor.view(-1)).squeeze()
+    # Skip sparsification if tensor is already dense (all elements are non-zero)
+    if non_zero_indices.numel() == total_size:
+        # Return a "sparse" representation that's actually dense
+        return SparseFlatTensor(
+            torch.tensor([0], dtype=torch.int64, device=device),
+            torch.tensor([total_size], dtype=torch.int64, device=device),
+            dense_tensor.view(-1),
+            total_size,
+            torch.empty(0, dtype=torch.long, device=device),
+            torch.empty(0, dtype=dtype, device=device)
+        )
+    if non_zero_indices.numel() == 0:  # Handle completely sparse tensor
+        starts_local = torch.empty(0, dtype=torch.int64, device=device)
+        ends_local = torch.empty(0, dtype=torch.int64, device=device)
+        values_local = torch.empty(0, dtype=dtype, device=device) # Ensure dtype matches dense_tensor
+        unit_indices_local = torch.empty(0, dtype=torch.long, device=device)
+        unit_values_local = torch.empty(0, dtype=dtype, device=device)
+        total_size_local = torch.tensor(total_size)
+    else:
+        # Find start and end indices of contiguous segments
+        diff = non_zero_indices[1:] - non_zero_indices[:-1]
+        segment_ends_indices = torch.nonzero(diff > 1).squeeze() + 1
+        # Ensure segment_ends_indices is 1D for concatenation
+        if segment_ends_indices.ndim == 0 and segment_ends_indices.numel() > 0:
+            segment_ends_indices = segment_ends_indices.unsqueeze(0)
+        elif segment_ends_indices.numel() == 0:
+            segment_ends_indices = torch.empty(0, dtype=torch.long, device=device)
+        # Correctly identify start and end indices in the non_zero_indices tensor
+        # Indices in non_zero_indices for the start of each segment
+        start_indices_in_non_zero = torch.cat([torch.tensor([0], dtype=torch.long, device=device), segment_ends_indices])
+        # Indices in non_zero_indices for the end of each segment
+        end_indices_in_non_zero = torch.cat([segment_ends_indices - 1, torch.tensor([len(non_zero_indices) - 1], dtype=torch.long, device=device)])
+        # Actual start and end indices in the original flattened tensor
+        starts_local_segments = non_zero_indices[start_indices_in_non_zero]
+        # The end index should be the index *after* the last element of the segment.
+        ends_local_segments = non_zero_indices[end_indices_in_non_zero] + 1
+        segment_lengths = ends_local_segments - starts_local_segments
+        # Identify unit-length segments
+        is_unit_segment = (segment_lengths == 1)
+        # Identify unit-length segments
+        is_unit_segment = (segment_lengths == 1)
+        # Indices in starts_local_segments/ends_local_segments that correspond to unit segments
+        unit_segment_mask = is_unit_segment
+        # Extract unit indices and values
+        # The index of a unit segment is simply its start index
+        unit_indices_local = starts_local_segments[unit_segment_mask]
+        unit_values_local = dense_tensor.view(-1)[unit_indices_local]
+        # Filter out unit segments to get actual segments
+        segment_mask = ~is_unit_segment
+        starts_local = starts_local_segments[segment_mask]
+        ends_local = ends_local_segments[segment_mask]
+        segment_lengths = segment_lengths[segment_mask] # Update segment_lengths for non-unit segments
+        avg_segment_length = segment_lengths.float().mean() if segment_lengths.numel() > 0 else torch.tensor(0.0)
+        max_segment_length = segment_lengths.max() if segment_lengths.numel() > 0 else torch.tensor(0)
+        min_segment_length = segment_lengths.min() if segment_lengths.numel() > 0 else torch.tensor(0)
+        print(f"Average segment length: {avg_segment_length:.4f}, Max segment length: {max_segment_length}, Min segment length: {min_segment_length}, Unit indices count: {unit_indices_local.numel()}, Segments count: {starts_local.numel()}")
+        # Use direct indexing for better numerical stability
+        # Get all non-zero indices for segments (excluding unit segments)
+        if segment_mask.any():
+            # Get segment ranges
+            seg_starts = start_indices_in_non_zero[segment_mask]
+            seg_ends = end_indices_in_non_zero[segment_mask]
+                
+            # Vectorized segment index calculation without large intermediates
+            segment_lengths_vals = seg_ends - seg_starts + 1
+            total_segment_elements = segment_lengths_vals.sum()
+                
+            # Global indices = segment_starts + intra-segment offsets
+            segment_start_repeated = torch.repeat_interleave(seg_starts, segment_lengths_vals)
+            intra_offsets = torch.arange(total_segment_elements, device=device) - torch.repeat_interleave(
+                torch.cat([torch.tensor([0], device=device), segment_lengths_vals.cumsum(0)[:-1]]), 
+                segment_lengths_vals
+            )
+                
+            segment_indices = non_zero_indices[segment_start_repeated + intra_offsets]
+            values_local = dense_tensor.view(-1)[segment_indices]
+                
+            # Clean up intermediates
+            del segment_start_repeated, intra_offsets
+        else:
+            values_local = torch.empty(0, dtype=dtype, device=device)
+        total_size_local = torch.tensor(total_size)
+    # Create the sparse tensor
+    sparse_result = SparseFlatTensor(starts_local, ends_local, values_local, total_size_local, unit_indices_local, unit_values_local)
+# TODO: debug this. There are discrepencies that dont seem to be from precision. Extract SparseFlatTensor and do some ATTD
+#    # Verify the sparse tensor matches the dense tensor
+#    dense_reconstruction = sparse_result.to_dense()
+#    diff = dense_tensor.view(-1) - dense_reconstruction
+#    max_diff = diff.abs().max().item()
+#    mean_diff = diff.abs().mean().item()
+#    non_zero_dense = (dense_tensor.view(-1) != 0).sum().item()
+#    non_zero_sparse = (dense_reconstruction != 0).sum().item()
+#    print(f"Sparse tensor verification:")
+#    print(f"  Max absolute difference: {max_diff}")
+#    print(f"  Mean absolute difference: {mean_diff}")
+#    print(f"  Non-zero in dense: {non_zero_dense}")
+#    print(f"  Non-zero in sparse reconstruction: {non_zero_sparse}")
+#    if max_diff > 1e-6:
+#        print(f"WARNING: Significant difference detected in sparse tensor conversion!")
+    return sparse_result
