@@ -162,7 +162,7 @@ class SparseFlatTensor:
         """
         dense_tensor = dense_tensor_arg # Explicitly use dense_tensor_arg
         assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
-        result_dense_tensor = dense_tensor # Removed .clone() to make it in-place
+        result_dense_tensor = dense_tensor 
         # Process segments
         if sparse_tensor.starts.numel() > 0:
             segment_lengths = sparse_tensor.ends - sparse_tensor.starts
@@ -477,13 +477,14 @@ def dense_to_sparse_flat_tensor(dense_tensor: Tensor):
         total_size_local = torch.tensor(total_size)
     # Create the sparse tensor
     sparse_result = SparseFlatTensor(starts_local, ends_local, values_local, total_size_local, unit_indices_local, unit_values_local)
-    # Verify the sparse tensor matches the dense tensor
-    dense_reconstruction = sparse_result.to_dense()
-    diff = dense_tensor.view(-1) - dense_reconstruction
-    max_diff = diff.abs().max().item()
-    mean_diff = diff.abs().mean().item()
-    non_zero_dense = (dense_tensor.view(-1) != 0).sum().item()
-    non_zero_sparse = (dense_reconstruction != 0).sum().item()
+# TODO: debug this. There are discrepencies that dont seem to be from precision. Extract SparseFlatTensor and do some ATTD
+#    # Verify the sparse tensor matches the dense tensor
+#    dense_reconstruction = sparse_result.to_dense()
+#    diff = dense_tensor.view(-1) - dense_reconstruction
+#    max_diff = diff.abs().max().item()
+#    mean_diff = diff.abs().mean().item()
+#    non_zero_dense = (dense_tensor.view(-1) != 0).sum().item()
+#    non_zero_sparse = (dense_reconstruction != 0).sum().item()
 #    print(f"Sparse tensor verification:")
 #    print(f"  Max absolute difference: {max_diff}")
 #    print(f"  Mean absolute difference: {mean_diff}")
@@ -561,7 +562,7 @@ def _strong_wolfe(
       t_best = t
       f_best = torch.tensor(f_new, device=device)
 #TODO this should be a non-blocking offload
-      g_best = g_new.clone()
+      g_best = g_new
       gtd_best = gtd_new
 #    g = g.to(direction_device)
     gc.collect()
@@ -598,7 +599,7 @@ def _strong_wolfe(
             success = True
             t_best = t
             f_best = torch.tensor(f_new, device=device)
-            g_best = g_new.clone()
+            g_best = g_new
 #TODO: we got NaN on a fast wolf here (not instant)on ys (loss was good but ys returned a NaN
             print("FAST WOLFE")
             break
@@ -655,7 +656,7 @@ def _strong_wolfe(
           t_best = t
           f_best = torch.tensor(f_new, device=device)
 #TODO this should be a non-blocking offload
-          g_best = g_new.clone()
+          g_best = g_new
           gtd_best = gtd_new
     # reached max number of iterations?
     if ls_iter == max_ls:
@@ -764,7 +765,7 @@ def _strong_wolfe(
 #          stall_wolfe = 0
 #          t_best = t
 #          f_best = torch.tensor(f_new, device=device)
-#          g_best = g_new.clone().to(direction_device)
+#          g_best = g_new.to(direction_device)
 #          gtd_best = gtd_new
         print("Ward condition: " + str((gtd_new + gtd_prev)/(f_new - f_prev) ))
 #        if (f_new - f_prev) / (gtd_new + gtd_prev) < c1  and abs(gtd_new - gtd_prev) != 0 or f_new >= bracket_f[low_pos] or f_new != f_new:
@@ -784,7 +785,7 @@ def _strong_wolfe(
                 done = True
                 t_best = t
                 f_best = torch.tensor(f_new, device=device)
-                g_best = g_new.clone().to(direction_device)
+                g_best = g_new.to(direction_device)
                 break
             elif gtd_new * (bracket[high_pos] - bracket[low_pos])>= 0:
                 # old high becomes new low
@@ -804,7 +805,7 @@ def _strong_wolfe(
               stall_wolfe = 0
               t_best = t
               f_best = torch.tensor(f_new, device=device)
-              g_best = g_new.clone()
+              g_best = g_new
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
@@ -971,7 +972,7 @@ class FBFGS(Optimizer):
     def gram_schmidt_orthogonalization(self, flat_grad: Tensor, ball_radius: float = 500) -> Tensor:
         """Decompose gradients into orthogonal and natural opposition components."""
         ball_radius = 50
-        flat_grad = flat_grad.to(torch.float64).clone()
+        flat_grad = flat_grad.to(torch.float64)
         param_chunks = self._split_direction_to_layers(flat_grad)
         
         adjusted_chunks = []
@@ -1322,7 +1323,8 @@ class FBFGS(Optimizer):
             # Process valid indices in reverse order
             q_norm = torch.linalg.vector_norm(q, ord=2).item()
 #            inv_q_norm = 1.0 / torch.linalg.vector_norm(q, ord=2)
-            normalized_q = q / q_norm
+#            normalized_q = q / q_norm
+            inv_q_norm = 1/q_norm
             for idx_pos in range(len(valid_indices)-1, -1, -1):
                 i = valid_indices[idx_pos]
                 start_time = time.time()
@@ -1372,7 +1374,7 @@ class FBFGS(Optimizer):
                     sparse_dir_i.unit_values * inv_dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
                 )
 #                normalized_q = q * inv_q_norm
-                direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, normalized_q).item()
+                direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, q*inv_q_norm).item()
                 
                 # Similarity calculated above
 #                direction_similarity = SparseFlatTensor.sparse_dot_dense(sparse_dir_i, q).item()
@@ -1432,10 +1434,11 @@ class FBFGS(Optimizer):
                     )
                     q = SparseFlatTensor._add_sparse_dense(sparse_old_dir_scaled, q)
                     q_norm = torch.linalg.vector_norm(q, ord=2).item()
-#                    inv_q_norm = 1/q_norm
-                    normalized_q = q / q_norm
+                    inv_q_norm = 1/q_norm
+#                    normalized_q = q / q_norm
                     
                     q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
+                    torch.cuda.empty_cache()
                 
                 # Cleanup and prefetch next
                 del backward_buffer_dict[i]
@@ -1755,7 +1758,7 @@ class FBFGS(Optimizer):
 #      while n_iter < max_iter:
       any_line_search_failed = False  # Track if any line search failed in this iteration
       while True:
-          saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+#          saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #          if ro and len(ro) > 0:
 #              # Use current_ro_threshold instead of ro_threshold_rate
 #              print(f"self.current_ro_threshold values count: {self.current_ro_threshold}")
@@ -2061,7 +2064,7 @@ class FBFGS(Optimizer):
 #TODO: this or the above should be redundant trace and remove redundancy
 #          if n_iter >= max_iter or loss == 0:
 #            break
-          prev_flat_grad = flat_grad.cpu().clone()
+          prev_flat_grad = flat_grad.cpu().clone()# TODO: this may be redundant, to should be clone not copy
           prev_loss = loss
           # The direction d is already normalized by sparse_direction_approximate
           ############################################################
@@ -2087,7 +2090,7 @@ class FBFGS(Optimizer):
           if line_search_fn is not None:
               # Save parameters before line search
 #TODO: instead of saving all the params, save the SparseFlatTensor of params masked by indices of d. Write save and restore dense methods for SparseFlatTensor.
-#              saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+              saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
               
               # perform line search, using user function
               if line_search_fn != "strong_wolfe":
@@ -2109,12 +2112,14 @@ class FBFGS(Optimizer):
 #TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
+                  break
                   # If last iteration, return early
                   if n_iter >= max_iter:
-                      state["old_stps"] = old_stps
-                      state["ro"] = ro
-                      state["old_dirs"] = old_dirs
-                      return orig_loss
+                      break
+#                      state["old_stps"] = old_stps
+#                      state["ro"] = ro
+#                      state["old_dirs"] = old_dirs
+#                      return orig_loss
                   # Mark failure and reset step size to 1
                   loss = prev_loss
                   t = torch.tensor(1.)
