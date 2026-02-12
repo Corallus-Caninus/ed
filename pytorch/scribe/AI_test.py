@@ -122,27 +122,24 @@ optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, ma
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
-    import torch.serialization
-    try:
-        from fbfgs.sparse_flat_tensor import SparseFlatTensor
-        
-        # Create a temporary module to handle deserialization of old SparseFlatTensor references
-        # This maps the old module path to the new one so torch.load can find the class.
-        
-        # Create a dummy module object for 'fbfgs.fbfgs'
-        # This module will contain the remapped SparseFlatTensor
-        _old_fbfgs_module = types.ModuleType('fbfgs.fbfgs')
-        _old_fbfgs_module.SparseFlatTensor = SparseFlatTensor
-
-        # Temporarily insert this dummy module into sys.modules
-        _original_fbfgs_fbfgs = sys.modules.get('fbfgs.fbfgs')
-        sys.modules['fbfgs.fbfgs'] = _old_fbfgs_module
-
-        
-
-    except ImportError:
-        # If SparseFlatTensor can't be imported, we'll try loading anyway
-        pass
+#    import torch.serialization
+#    try:
+#        from fbfgs.sparse_flat_tensor import SparseFlatTensor
+#        
+#        # Create a temporary module to handle deserialization of old SparseFlatTensor references
+#        # This maps the old module path to the new one so torch.load can find the class.
+#        
+#        # Create a dummy module object for 'fbfgs.fbfgs'
+#        # This module will contain the remapped SparseFlatTensor
+#        _old_fbfgs_module = types.ModuleType('fbfgs.fbfgs')
+#        _old_fbfgs_module.SparseFlatTensor = SparseFlatTensor
+#        # Temporarily insert this dummy module into sys.modules
+#        _original_fbfgs_fbfgs = sys.modules.get('fbfgs.fbfgs')
+#        sys.modules['fbfgs.fbfgs'] = _old_fbfgs_module
+#        
+#    except ImportError:
+#        # If SparseFlatTensor can't be imported, we'll try loading anyway
+#        pass
     
     # Try to load with weights_only=False to handle custom classes
     try:
@@ -150,19 +147,18 @@ if os.path.exists(history_filename):
         print(f"Loaded FBFGS history from {history_filename}")
     except Exception as e:
         print(f"Error loading FBFGS history: {e}. Starting from scratch.")
-    finally:
-        # Restore the original 'fbfgs.fbfgs' if it existed
-        if _original_fbfgs_fbfgs is not None:
-            sys.modules['fbfgs.fbfgs'] = _original_fbfgs_fbfgs
-        else:
-            # If it didn't exist, remove our dummy entry
-            if 'fbfgs.fbfgs' in sys.modules:
-                del sys.modules['fbfgs.fbfgs']
+#    finally:
+#        # Restore the original 'fbfgs.fbfgs' if it existed
+#        if _original_fbfgs_fbfgs is not None:
+#            sys.modules['fbfgs.fbfgs'] = _original_fbfgs_fbfgs
+#        else:
+#            # If it didn't exist, remove our dummy entry
+#            if 'fbfgs.fbfgs' in sys.modules:
+#                del sys.modules['fbfgs.fbfgs']
 def generate_training_graph(log_filepath, output_image_filepath="training_history.png"):
     if not os.path.exists(log_filepath):
         print(f"Log file not found: {log_filepath}")
         return
-
     try:
         import pandas as pd
         df = pd.read_csv(log_filepath)
@@ -185,11 +181,9 @@ def generate_training_graph(log_filepath, output_image_filepath="training_histor
     if df.empty:
         print(f"No data in log file: {log_filepath}")
         return
-
     # Changed to 2 subplots for (Loss Before/After) and (Loss Delta)
     fig, axes = plt.subplots(2, 1, figsize=(12, 12)) 
     plt.tight_layout(pad=5.0)
-
     # Plot Loss Before and Loss After on the same subplot
     axes[0].plot(df['step'], df['loss_before'], 'b-', label='Loss Before')
     axes[0].plot(df['step'], df['loss_after'], 'g-', label='Loss After')
@@ -198,7 +192,6 @@ def generate_training_graph(log_filepath, output_image_filepath="training_histor
     axes[0].set_ylabel('Loss')
     axes[0].grid(True)
     axes[0].legend()
-
     # Plot Loss Delta on the second subplot
     axes[1].plot(df['step'], df['loss_delta'], 'r-', label='Loss Delta')
     axes[1].set_title('Loss Delta (Loss Before - Loss After) vs. Steps')
@@ -209,9 +202,7 @@ def generate_training_graph(log_filepath, output_image_filepath="training_histor
     
     plt.savefig(output_image_filepath)
     plt.close(fig) # Close the figure to free up memory
-
     print(f"Generated training graph: {output_image_filepath}")
-
 log_filename = "log.csv"
 if os.path.exists(log_filename):
     try:
@@ -245,9 +236,7 @@ if os.path.exists(log_filename):
 else:
     step_count = 0
     print("Log file not found, starting from step 0.")
-
 loss_without_regularizer = 0.0  # Track pure loss for graphing
-
 # Initialize single figure with subplots
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 plt.tight_layout(pad=3.0)
@@ -271,6 +260,8 @@ def closure():
     global batch_attention_mask_list
     start_time = time.time()
     optimizer.zero_grad()
+    for name, param in model.named_parameters():
+        param.grad = None
     
     # We'll accumulate loss values for averaging and call backward immediately
     total_loss_sum = 0.0
@@ -405,27 +396,29 @@ def closure():
     global loss_without_regularizer
     loss_without_regularizer = total_loss  # Store pure loss for logging
     # Add regularization term as dot product of gradients and parameters
-    reg_term = torch.zeros(1, requires_grad=True).to(batch_input_ids_list[0].device)
-    reg_count = 0
+#START OF REGULARIZER
+#    reg_term = torch.zeros(1, requires_grad=True).to(batch_input_ids_list[0].device)
+#    reg_count = 0
     for name, param in model.named_parameters():
-        pdp = torch.sqrt(torch.dot(param.view(-1), param.view(-1)))
-        pdg = torch.dot(param.grad.view(-1), param.view(-1))
+        pdp = torch.sqrt(torch.dot(param.detach().view(-1), param.detach().view(-1)))
+        pdg = torch.dot(param.grad.view(-1), param.detach().view(-1))
         if param is not None   and pdp > 50 :
             print("PDP: " + str(pdp))
-##            reg_term += torch.sum(param.grad * param.data).item()
-#Lambda set to the cosine_similarity of grad on param to prevent gradient from being dominated by the param decay while maximizing decay
+#            reg_term += torch.sum(param.grad * param.data).item()
 #If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
             if pdg > 0:
                 lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-#                lam = pdg
-                param.grad += param*lam
+                lam = pdg
+                param.grad += param.detach()*lam
                 print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
             if pdg == 0:
                 lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
-                param.grad += param*lam
+                param.grad += param.detach()*lam
                 print("Triggered orthogonal event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
             if torch.dot(param.grad.view(-1), param.grad.view(-1)) == 0:
-                param.grad += param*pdp - 50
+                print("Triggered zero event horizon..")
+                param.grad += param.detach()*pdp - 50
+#EOR
 # TODO: handle orthogonality with magnitude (0.5* grad@grad)
 #            gdg = torch.dot(param.grad.view(-1), param.grad.view(-1))
 #            pdg = torch.dot(param.grad.view(-1), param.view(-1))
@@ -664,7 +657,6 @@ while True:
 #TODO: reset params here if gap is negative as a test
     print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
     
-
     log_filename = "log.csv"
     file_exists = os.path.exists(log_filename)
     with open(log_filename, 'a', newline='') as csvfile:
