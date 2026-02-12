@@ -1411,16 +1411,8 @@ class FBFGS(Optimizer):
               if 'y_norm' in entry:
                   state["y_norms"].insert(idx, entry['y_norm'])
       
-      # Clear threshold logic since we're removing entries directly
-      state["old_dirs"] = old_dirs
-      state["d"] = d
-      state["old_stps"] = old_stps
-      state["ro"] = ro
-      state["recycle_bin"] = []  # Reset recycle_bin
-      state["prev_flat_grad"] = prev_flat_grad
-      state["ls_failed"] = ls_failed # Store ls_failed state
       any_line_search_failed = False  # Track if any line search failed in this iteration
-      while True:
+      while n_iter < max_iter: # Enforce max_iter
 #          saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #          if ro and len(ro) > 0:
 #              # Use current_ro_threshold instead of ro_threshold_rate
@@ -1775,14 +1767,6 @@ class FBFGS(Optimizer):
 #TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
-                  break
-                  # If last iteration, return early
-                  if n_iter >= max_iter:
-                      break
-#                      state["old_stps"] = old_stps
-#                      state["ro"] = ro
-#                      state["old_dirs"] = old_dirs
-#                      return orig_loss
                   # Mark failure and reset step size to 1
                   loss = prev_loss
                   t = torch.tensor(1.)
@@ -1792,44 +1776,10 @@ class FBFGS(Optimizer):
 #Ro Rewind
                   # Perform Rho Rewind on linesearch failure
                   old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
-#                  
-#                  if len(ro) >= 10:
-#                      # Get indices where alignment mask is True
-#                      alignment_mask = state.get("direction_alignment_mask")
-#                      if alignment_mask is None:
-#                          aligned_indices = []
-#                      else:
-#                          aligned_indices = torch.nonzero(alignment_mask).squeeze(1).tolist()
-#                      
-#                      if aligned_indices:
-#                          # Only process indices that exist in ro list
-#                          aligned_ro_pairs = []
-#                          valid_indices = [i for i in aligned_indices if i < len(ro)]
-#                          for i in valid_indices:
-#                              aligned_ro_pairs.append((i, ro[i].item()))
-#                          # Sort by ro value descending
-#                          sorted_aligned_ro = sorted(aligned_ro_pairs, key=lambda x: x[1], reverse=True)
-#                          indices_to_remove = [i for i, _ in sorted_aligned_ro[:min(10, len(sorted_aligned_ro))]]
-#                          
-#                          # Store entries and their original indices in recycle_bin
-#                          for idx in sorted(indices_to_remove, reverse=True):
-#                              idx = int(idx)
-#                              recycle_entry = {
-#                                  'index': idx,
-#                                  'dir': old_dirs.pop(idx),
-#                                  'stp': old_stps.pop(idx),
-#                                  'ro': ro.pop(idx),
-#                              }
-#                              if idx < len(state["y_norms"]):
-#                                  recycle_entry['y_norm'] = state["y_norms"].pop(idx)
-#                              recycle_bin.append(recycle_entry)
-#                          print(f"Moved {len(indices_to_remove)} largest ALIGNED ro entries to recycle_bin")
-#                      else:
-#                          print("No aligned ro entries to move")
-                  
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
                   # Continue to next iteration to retry
+                  continue
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
                   state["ls_failed"] = False # Store ls_failed state
@@ -1890,6 +1840,15 @@ class FBFGS(Optimizer):
 #              break
 #      state["d"] = d
 #      state["t"] = t
+      # Update optimizer state with current history
+      state["old_dirs"] = old_dirs
+      state["d"] = d
+      state["old_stps"] = old_stps
+      state["ro"] = ro
+      state["recycle_bin"] = []  # Reset recycle_bin
+      state["prev_flat_grad"] = prev_flat_grad
+      state["ls_failed"] = ls_failed # Store ls_failed state
+      return orig_loss
     def save_history(self, filename):
         """Save FBFGS history to a file."""
         state = self.state[self._params[0]]
