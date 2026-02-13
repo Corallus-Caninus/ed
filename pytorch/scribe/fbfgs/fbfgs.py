@@ -1536,7 +1536,7 @@ class FBFGS(Optimizer):
                 y_dense = torch.nan_to_num(y_dense, nan=0.0, posinf=0.0, neginf=0.0)
                 print("Max: " + str(abs(y_dense).max()))
 #                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=float("inf"))
-                y_dense = y_dense/abs(y_dense).max()
+#                y_dense = y_dense/abs(y_dense).max()
                 y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=2.)
 #                self.y_norms.append(1/torch.sqrt(torch.sum(y_dense**2)))
                 self.y_norms.append(1/y_norm_l2)
