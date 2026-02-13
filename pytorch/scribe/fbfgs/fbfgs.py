@@ -362,7 +362,7 @@ def _strong_wolfe(
 #TODO: EOT
 #    return success, f_new, g_new.to(optimizer_device), t, ls_func_evals
     return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
-#@torch.jit.script
+@torch.jit.script
 def _apply_backward_loop_update(
     q: torch.Tensor,
     dir_device: SparseFlatTensor,
@@ -381,18 +381,19 @@ def _apply_backward_loop_update(
         dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
     )
     inv_dir_norm = y_norms[i].item() 
-    print("inv_dir_norm: " + str(inv_dir_norm))
+    #print("inv_dir_norm: " + str(inv_dir_norm))
     normalized_dir = SparseFlatTensor(
         sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values * inv_dir_norm,
         sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
-        sparse_dir_i.unit_values * inv_dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
+        sparse_dir_i.unit_values * inv_dir_norm 
     )
     q_norm = torch.linalg.vector_norm(q, ord=2).item()
-    print("q_norm: " + str(q_norm))
+    #print("q_norm: " + str(q_norm))
     inv_q_norm = 1/q_norm
     inv_q = q*inv_q_norm
     direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, inv_q).item()
-    print("dir sim: " + str(direction_similarity))
+#    direction_similarity = torch.dot(normalized_dir.to_dense(), inv_q).item()
+    #print("dir sim: " + str(direction_similarity))
     aligned =  -orthogonality <= direction_similarity <= orthogonality
     direction_alignment_mask[i] = aligned
     direction_similarities.append(direction_similarity)
@@ -412,13 +413,13 @@ def _apply_backward_loop_update(
             sparse_dir_i_recreated.starts, sparse_dir_i_recreated.ends, 
             sparse_dir_i_recreated.values * (-al[i]),
             sparse_dir_i_recreated.total_size, sparse_dir_i_recreated.unit_indices,
-            sparse_dir_i_recreated.unit_values * (-al[i]) if sparse_dir_i_recreated.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_dir_i_recreated.values.device)
+            sparse_dir_i_recreated.unit_values * (-al[i]) 
         )
         q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
-#        print("HIT IN BL")
+#        #print("HIT IN BL")
         q_norm = torch.linalg.vector_norm(q, ord=2).item()
-        inv_q_norm = 1/q_norm
-        q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
+#        inv_q_norm = 1/q_norm
+#        q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
     return q, direction_alignment_mask, direction_similarities
 @torch.jit.script
 def _apply_forward_loop_update(
@@ -1017,7 +1018,7 @@ class FBFGS(Optimizer):
                         cumulative_values += num_values_next
                     next_filtered_idx -= 1
                 end_time = time.time()
-                symbol = "|" if direction_alignment_mask[-1].item() else "_"
+                symbol = "|" if direction_alignment_mask[i].item() else "_"
                 print(f"{symbol}", end='', flush=True)
         print("Q max after first loop: " + str(q.max()))
         # q_for_orthogonalization is no longer needed since we're not doing orthogonalization
