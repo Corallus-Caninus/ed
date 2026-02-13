@@ -870,8 +870,8 @@ class FBFGS(Optimizer):
         return self._numel()
     def _directional_evaluate(self, closure, t, d, saved_params):
         """Evaluate with gradient regularization via second backward pass"""
-        for p, p_saved in zip(self._params, saved_params, strict=True):
-            p.copy_(p_saved)
+#        for p, p_saved in zip(self._params, saved_params, strict=True):
+#            p.copy_(p_saved)
         if isinstance(d, SparseFlatTensor):
             if d.values.device != self.optimizer_device:
                 d = d.to(self.optimizer_device)
@@ -886,8 +886,8 @@ class FBFGS(Optimizer):
         
 #        loss =  loss + self._last_penalty.to(self.optimizer_device)
         
-#        for p, p_saved in zip(self._params, saved_params, strict=True):
-#            p.copy_(p_saved)
+        for p, p_saved in zip(self._params, saved_params, strict=True):
+            p.copy_(p_saved)
             
         return loss, flat_grad
     def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> tuple[Tensor, Tensor, list[float]]:
@@ -1690,7 +1690,7 @@ class FBFGS(Optimizer):
 #                          _add_sparse_dense_alpha(d, p_view, alpha=t, offset=offset)
 #                          offset += numel
 #                  else: # d is a dense Tensor
-#                  self._add_grad(t, d)
+                  self._add_grad(t, d)
                   loss_device = self.optimizer_device
                   print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
                   # opt_cond = loss <= 0 # This condition is not used later, can be removed if not needed elsewhere
