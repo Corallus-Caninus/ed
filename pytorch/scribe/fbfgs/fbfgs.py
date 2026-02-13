@@ -844,29 +844,29 @@ class FBFGS(Optimizer):
             step_size = step_size.item()
         if isinstance(update, SparseFlatTensor):
             update = update.to_dense()
-#            device = torch.device(self.optimizer_device)
-#            if update.values.device != device:
-#                update = update.to(device)
-#            
-#            offset = 0
-#            for p in self._params:
-#                numel = p.numel()
-#                p_view = p.view(-1)
-##TODO: possibly a bug here. We get loss spikes sometimes.
-#                SparseFlatTensor._add_sparse_dense_alpha(update, p_view, alpha=step_size, offset=offset)
-#                offset += numel
-#        else:
-        # Handle dense tensor updates
-        device = torch.device(self.optimizer_device)
-        if update.device != device:
-            update = update.to(device)
-        offset = 0
-        for p in self._params:
-            numel = p.numel()
-            param_update = update[offset:offset+numel]
-            p_view = p.view(-1)
-            p_view.add_(param_update, alpha=step_size)
-            offset += numel
+            device = torch.device(self.optimizer_device)
+            if update.values.device != device:
+                update = update.to(device)
+            
+            offset = 0
+            for p in self._params:
+                numel = p.numel()
+                p_view = p.view(-1)
+#TODO: possibly a bug here. We get loss spikes sometimes.
+                SparseFlatTensor._add_sparse_dense_alpha(update, p_view, alpha=step_size, offset=offset)
+                offset += numel
+        else:
+            # Handle dense tensor updates
+            device = torch.device(self.optimizer_device)
+            if update.device != device:
+                update = update.to(device)
+            offset = 0
+            for p in self._params:
+                numel = p.numel()
+                param_update = update[offset:offset+numel]
+                p_view = p.view(-1)
+                p_view.add_(param_update, alpha=step_size)
+                offset += numel
         # NaN guard - apply to each parameter
         for p in self._params:
             p.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
