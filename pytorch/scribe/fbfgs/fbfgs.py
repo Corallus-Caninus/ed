@@ -380,7 +380,8 @@ def _apply_backward_loop_update(
         dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
         dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
     )
-    inv_dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
+#@    inv_dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
+    inv_dir_norm = y_norms[i].item() 
     normalized_dir = SparseFlatTensor(
         sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values * inv_dir_norm,
         sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
@@ -585,6 +586,7 @@ class FBFGS(Optimizer):
         return chunks
     def gram_schmidt_orthogonalization(self, flat_grad: Tensor, ball_radius: float = 500) -> Tensor:
         """Decompose gradients into orthogonal and natural opposition components."""
+# TODO: detach params
         ball_radius = 50
         flat_grad = flat_grad.to(torch.float64)
         param_chunks = self._split_direction_to_layers(flat_grad)
@@ -605,14 +607,17 @@ class FBFGS(Optimizer):
             oppose_mag = torch.sqrt(torch.dot(oppose_component, oppose_component))
 #            if oppose_mag < ortho_mag and proj_coeff < 0 and torch.sqrt(param_sq_norm) > ball_radius:
 # Bleed the freak
-            if oppose_mag < ortho_mag and proj_coeff < 0 :
+            if oppose_mag < ortho_mag and proj_coeff < 0 and torch.sqrt(param_sq_norm) > ball_radius:
               ratio = ortho_mag/oppose_mag
               oppose_component = oppose_component * ratio
 #            if proj_coeff >= 0:
 #              ortho_component = 0.5*ortho_component
             
-            combined = ortho_component + oppose_component
-            adjusted_chunks.append(combined)
+#              combined = ortho_component + oppose_component
+#              combined =  oppose_component
+              adjusted_chunks.append(combined)
+            else:
+              adjusted_chunks.append(grad_chunk)
             
         return torch.cat(adjusted_chunks).to(dtype=flat_grad.dtype).contiguous()
     def _split_direction_to_groups(self, flat_tensor, norm_group=None):
@@ -1114,7 +1119,6 @@ class FBFGS(Optimizer):
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
     # gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
 #        d = self.gram_schmidt_orthogonalization(d)
-#        d = self.gram_schmidt_orthogonalization(d, self.radius_ball_s)
         d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
 #        d = self.gram_schmidt_orthogonalization(d)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
@@ -1635,6 +1639,8 @@ class FBFGS(Optimizer):
                   old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
+                  if not old_dirs:
+                    return orig_loss
                   # Continue to next iteration to retry
                   continue
               else: # Strong Wolfe line search succeeded
