@@ -362,7 +362,7 @@ def _strong_wolfe(
 #TODO: EOT
 #    return success, f_new, g_new.to(optimizer_device), t, ls_func_evals
     return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
-@torch.jit.script
+#@torch.jit.script
 def _apply_backward_loop_update(
     q: torch.Tensor,
     dir_device: SparseFlatTensor,
@@ -380,20 +380,19 @@ def _apply_backward_loop_update(
         dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
         dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
     )
-#@    inv_dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
     inv_dir_norm = y_norms[i].item() 
-#    print("inv_dir_norm: " + str(inv_dir_norm))
+    print("inv_dir_norm: " + str(inv_dir_norm))
     normalized_dir = SparseFlatTensor(
         sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values * inv_dir_norm,
         sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
         sparse_dir_i.unit_values * inv_dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
     )
     q_norm = torch.linalg.vector_norm(q, ord=2).item()
-#    print("q_norm: " + str(q_norm))
+    print("q_norm: " + str(q_norm))
     inv_q_norm = 1/q_norm
     inv_q = q*inv_q_norm
     direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, inv_q).item()
-#    print("dir sim: " + str(direction_similarity))
+    print("dir sim: " + str(direction_similarity))
     aligned =  -orthogonality <= direction_similarity <= orthogonality
     direction_alignment_mask[i] = aligned
     direction_similarities.append(direction_similarity)
@@ -416,9 +415,9 @@ def _apply_backward_loop_update(
             sparse_dir_i_recreated.unit_values * (-al[i]) if sparse_dir_i_recreated.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_dir_i_recreated.values.device)
         )
         q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
-##        print("HIT IN BL")
-#        q_norm = torch.linalg.vector_norm(q, ord=2).item()
-#        inv_q_norm = 1/q_norm
+#        print("HIT IN BL")
+        q_norm = torch.linalg.vector_norm(q, ord=2).item()
+        inv_q_norm = 1/q_norm
         q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
     return q, direction_alignment_mask, direction_similarities
 @torch.jit.script
@@ -1433,6 +1432,7 @@ class FBFGS(Optimizer):
 #                      print("Skipped Powell dampening due to small ||s||^2")
 #              if self.radius_alpha != 0:
               y_dense = torch.nan_to_num(y_dense, nan=0.0, posinf=0.0, neginf=0.0)
+              y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=2.)
               y = SparseFlatTensor.dense_to_sparse_flat_tensor(y_dense.to(torch.float16))
 #              s = dense_to_sparse_flat_tensor(s_dense.to(torch.float32))
 #              s = dense_to_sparse_flat_tensor(s_sparse)
@@ -1534,10 +1534,10 @@ class FBFGS(Optimizer):
                 ro.append(torch.tensor([(1. / ys)]))
                 # Convert dense y to compute norm
 # TODO: calculate this in selection before we sparsify
-                y_dense = y.to_dense()
-#                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=float("inf"))
-#                y_dense = y_dense/abs(y_dense).max()
-                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=2.)
+#                y_dense = y.to_dense()
+##                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=float("inf"))
+##                y_dense = y_dense/abs(y_dense).max()
+#                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=2.)
 #                self.y_norms.append(1/torch.sqrt(torch.sum(y_dense**2)))
                 self.y_norms.append(1/y_norm_l2)
                 new_ys_x = new_ys_x + 1
