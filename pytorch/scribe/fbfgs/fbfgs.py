@@ -1432,7 +1432,7 @@ class FBFGS(Optimizer):
 #                  else:
 #                      print("Skipped Powell dampening due to small ||s||^2")
 #              if self.radius_alpha != 0:
-              y = torch.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+              y_dense = torch.nan_to_num(y_dense, nan=0.0, posinf=0.0, neginf=0.0)
               y = SparseFlatTensor.dense_to_sparse_flat_tensor(y_dense.to(torch.float16))
 #              s = dense_to_sparse_flat_tensor(s_dense.to(torch.float32))
 #              s = dense_to_sparse_flat_tensor(s_sparse)
