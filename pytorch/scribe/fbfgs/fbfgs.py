@@ -382,14 +382,18 @@ def _apply_backward_loop_update(
     )
 #@    inv_dir_norm = y_norms[i].item() if i < len(y_norms) else 1.0
     inv_dir_norm = y_norms[i].item() 
+#    print("inv_dir_norm: " + str(inv_dir_norm))
     normalized_dir = SparseFlatTensor(
         sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values * inv_dir_norm,
         sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
         sparse_dir_i.unit_values * inv_dir_norm if sparse_dir_i.unit_values.numel() > 0 else torch.empty_like(sparse_dir_i.unit_values)
     )
     q_norm = torch.linalg.vector_norm(q, ord=2).item()
+#    print("q_norm: " + str(q_norm))
     inv_q_norm = 1/q_norm
-    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, q*inv_q_norm).item()
+    inv_q = q*inv_q_norm
+    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, inv_q).item()
+#    print("dir sim: " + str(direction_similarity))
     aligned =  -orthogonality <= direction_similarity <= orthogonality
     direction_alignment_mask[i] = aligned
     direction_similarities.append(direction_similarity)
@@ -412,6 +416,7 @@ def _apply_backward_loop_update(
             sparse_dir_i_recreated.unit_values * (-al[i]) if sparse_dir_i_recreated.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_dir_i_recreated.values.device)
         )
         q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
+##        print("HIT IN BL")
 #        q_norm = torch.linalg.vector_norm(q, ord=2).item()
 #        inv_q_norm = 1/q_norm
         q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
@@ -979,6 +984,7 @@ class FBFGS(Optimizer):
                     q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i]
                 )
 #END OF EXTRACT ME GEMINI q
+#                print("dir align: " + str(direction_alignment_mask))
                 torch.cuda.empty_cache()
                 
                 # Cleanup and prefetch next
@@ -1012,7 +1018,7 @@ class FBFGS(Optimizer):
                         cumulative_values += num_values_next
                     next_filtered_idx -= 1
                 end_time = time.time()
-                symbol = "|" if direction_alignment_mask[i] else "_"
+                symbol = "|" if direction_alignment_mask[-1].item() else "_"
                 print(f"{symbol}", end='', flush=True)
         print("Q max after first loop: " + str(q.max()))
         # q_for_orthogonalization is no longer needed since we're not doing orthogonalization
@@ -1269,8 +1275,8 @@ class FBFGS(Optimizer):
               old_dirs.insert(idx, entry['dir'])
               old_stps.insert(idx, entry['stp'])
               ro.insert(idx, entry['ro'])
-              if 'y_norm' in entry:
-                  self.y_norms.insert(idx, entry['y_norm'])
+#              if 'y_norm' in entry:
+#                  self.y_norms.insert(idx, entry['y_norm'])
       
       any_line_search_failed = False  # Track if any line search failed in this iteration
       while n_iter < max_iter: # Enforce max_iter
@@ -1526,8 +1532,14 @@ class FBFGS(Optimizer):
                 old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True))
                 ro.append(torch.tensor([(1. / ys)]))
                 # Convert dense y to compute norm
-                y_dense = y_to_store.to_dense().float()
-                self.y_norms.append(1/torch.sqrt(torch.sum(y_dense**2)))
+                y_dense = y.to_dense()
+                y_dense = torch.nan_to_num(y_dense, nan=0.0, posinf=0.0, neginf=0.0)
+                print("Max: " + str(abs(y_dense).max()))
+#                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=float("inf"))
+                y_dense = y_dense/abs(y_dense).max()
+                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=2.)
+#                self.y_norms.append(1/torch.sqrt(torch.sum(y_dense**2)))
+                self.y_norms.append(1/y_norm_l2)
                 new_ys_x = new_ys_x + 1
               if n_iter > max_iter or loss == 0:
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
@@ -1708,7 +1720,6 @@ class FBFGS(Optimizer):
       state["d"] = d
       state["old_stps"] = old_stps
       state["ro"] = ro
-      state["recycle_bin"] = []  # Reset recycle_bin
       state["prev_flat_grad"] = prev_flat_grad
       state["ls_failed"] = ls_failed # Store ls_failed state
       return orig_loss
@@ -1729,6 +1740,7 @@ class FBFGS(Optimizer):
             "n_iter": state_dict.get("n_iter", 0), # Save iteration count n_iter
             "current_ro_threshold": self.current_ro_threshold, # Save current_ro_threshold
             "y_norms": self.y_norms, # Save y_norms
+            "recycle_bin": state.get("recycle_bin", []), # Save recycle_bin
         }
         torch.save(history, filename)
     def _rho_rewind(self, state, old_dirs, old_stps, ro, direction_similarities):
@@ -1765,8 +1777,8 @@ class FBFGS(Optimizer):
                     'stp': old_stps.pop(idx),
                     'ro': ro.pop(idx),
                 }
-                if idx < len(self.y_norms):
-                    recycle_entry['y_norm'] = self.y_norms.pop(idx)
+#                if idx < len(self.y_norms):
+#                    recycle_entry['y_norm'] = self.y_norms.pop(idx)
                 recycle_bin.append(recycle_entry)
             print(f"Moved {rewind_amount} largest ro entries to recycle_bin")
         
@@ -1813,6 +1825,8 @@ class FBFGS(Optimizer):
             self.y_norms = [self._move_item_to_device(item, device_obj, non_blocking=False) 
                                 for item in y_norms_from_history]
             self.current_ro_threshold = history.get("current_ro_threshold", 0) # Load current_ro_threshold
+#            state["recycle_bin"] = [self._move_item_to_device(item, device_obj, non_blocking=False)
+#                                    for item in history.get("recycle_bin", [])]
             print(f"FBFGS history loaded from {filename}")
         except FileNotFoundError:
             print(f"History file {filename} not found. Starting from scratch.")
