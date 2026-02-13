@@ -1432,6 +1432,7 @@ class FBFGS(Optimizer):
 #                  else:
 #                      print("Skipped Powell dampening due to small ||s||^2")
 #              if self.radius_alpha != 0:
+              y = torch.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
               y = SparseFlatTensor.dense_to_sparse_flat_tensor(y_dense.to(torch.float16))
 #              s = dense_to_sparse_flat_tensor(s_dense.to(torch.float32))
 #              s = dense_to_sparse_flat_tensor(s_sparse)
@@ -1532,9 +1533,8 @@ class FBFGS(Optimizer):
                 old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True))
                 ro.append(torch.tensor([(1. / ys)]))
                 # Convert dense y to compute norm
+# TODO: calculate this in selection before we sparsify
                 y_dense = y.to_dense()
-                y_dense = torch.nan_to_num(y_dense, nan=0.0, posinf=0.0, neginf=0.0)
-                print("Max: " + str(abs(y_dense).max()))
 #                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=float("inf"))
 #                y_dense = y_dense/abs(y_dense).max()
                 y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=2.)
