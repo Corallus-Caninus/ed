@@ -840,30 +840,33 @@ class FBFGS(Optimizer):
     def _add_grad(self, step_size, update):
         """Perform parameter update with a dense or sparse tensor update."""
         # Handle sparse tensor updates
+        if torch.is_tensor(step_size):
+            step_size = step_size.item()
         if isinstance(update, SparseFlatTensor):
-            device = torch.device(self.optimizer_device)
-            if update.values.device != device:
-                update = update.to(device)
-            
-            offset = 0
-            for p in self._params:
-                numel = p.numel()
-                p_view = p.view(-1)
-#TODO: possibly a bug here. We get loss spikes sometimes.
-                SparseFlatTensor._add_sparse_dense_alpha(update, p_view, alpha=step_size, offset=offset)
-                offset += numel
-        else:
-            # Handle dense tensor updates
-            device = torch.device(self.optimizer_device)
-            if update.device != device:
-                update = update.to(device)
-            offset = 0
-            for p in self._params:
-                numel = p.numel()
-                param_update = update[offset:offset+numel]
-                p_view = p.view(-1)
-                p_view.add_(param_update, alpha=step_size)
-                offset += numel
+            update = update.to_dense()
+#            device = torch.device(self.optimizer_device)
+#            if update.values.device != device:
+#                update = update.to(device)
+#            
+#            offset = 0
+#            for p in self._params:
+#                numel = p.numel()
+#                p_view = p.view(-1)
+##TODO: possibly a bug here. We get loss spikes sometimes.
+#                SparseFlatTensor._add_sparse_dense_alpha(update, p_view, alpha=step_size, offset=offset)
+#                offset += numel
+#        else:
+        # Handle dense tensor updates
+        device = torch.device(self.optimizer_device)
+        if update.device != device:
+            update = update.to(device)
+        offset = 0
+        for p in self._params:
+            numel = p.numel()
+            param_update = update[offset:offset+numel]
+            p_view = p.view(-1)
+            p_view.add_(param_update, alpha=step_size)
+            offset += numel
         # NaN guard - apply to each parameter
         for p in self._params:
             p.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
@@ -872,12 +875,13 @@ class FBFGS(Optimizer):
         """Evaluate with gradient regularization via second backward pass"""
 #        for p, p_saved in zip(self._params, saved_params, strict=True):
 #            p.copy_(p_saved)
-        if isinstance(d, SparseFlatTensor):
-            if d.values.device != self.optimizer_device:
-                d = d.to(self.optimizer_device)
-            self._add_grad(t, d)
-        else:
-            self._add_grad(t, d.to(self.optimizer_device))
+#        if isinstance(d, SparseFlatTensor):
+#            if d.values.device != self.optimizer_device:
+#                d = d.to(self.optimizer_device)
+#            self._add_grad(t, d)
+#        else:
+#            self._add_grad(t, d.to(self.optimizer_device))
+        self._add_grad(t, d)
             
         loss = closure()
         flat_grad = self._gather_flat_grad()
