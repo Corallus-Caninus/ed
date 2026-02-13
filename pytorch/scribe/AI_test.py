@@ -401,21 +401,28 @@ def closure():
         pdp = torch.sqrt(torch.dot(param.detach().view(-1), param.detach().view(-1)))
         pdg = torch.dot(param.grad.view(-1), param.detach().view(-1))
         if param is not None   and pdp > 50 :
-            print("PDP: " + str(pdp))
+            print("PDP: " + " on layer: " + str(name) + str(pdp))
+#            lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
+##                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-50)**2
+#            param.grad += param.detach()*lam
+#            param.grad += param.detach() * 0.5*(pdp-50)**2
 #            reg_term += torch.sum(param.grad * param.data).item()
 #If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
             if pdg > 0:
-                lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-#                lam = pdg
+#                lam = pdg/ ((pdp-50) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+#                lam = pdg/ ( torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+#                lam = lam * torch.dot(param.detach().view(-1), param.detach().view(-1))
+                lam = pdg* (pdp-50)**2
                 param.grad += param.detach()*lam
                 print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
-            if pdg == 0:
-                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
+            if pdg <= 0:
+                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))*(pdp-50)**2
+#                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-50)**2
                 param.grad += param.detach()*lam
                 print("Triggered orthogonal event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
-            if torch.dot(param.grad.view(-1), param.grad.view(-1)) == 0:
+            if torch.dot(param.grad.view(-1), param.grad.view(-1)) == 0:# TODO: do this on negative too or add GSO just for the negative alignment
                 print("Triggered zero event horizon..")
-                param.grad += param.detach()*pdp - 50
+                param.grad += param.detach()*(pdp - 50)
 #EOR
 # TODO: handle orthogonality with magnitude (0.5* grad@grad)
 #            gdg = torch.dot(param.grad.view(-1), param.grad.view(-1))
