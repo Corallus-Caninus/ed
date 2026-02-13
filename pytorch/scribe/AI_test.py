@@ -400,7 +400,7 @@ def closure():
     for name, param in model.named_parameters():
         pdp = torch.sqrt(torch.dot(param.detach().view(-1), param.detach().view(-1)))
         pdg = torch.dot(param.grad.view(-1), param.detach().view(-1))
-        if param is not None   and pdp > 500 :
+        if param is not None   and pdp > 50 :
             print("PDP: " + " on layer: " + str(name) + str(pdp))
 #            lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
 ##                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-500)**2
@@ -408,66 +408,25 @@ def closure():
 #            param.grad += param.detach() * 0.5*(pdp-500)**2
 #            reg_term += torch.sum(param.grad * param.data).item()
 #If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
-            if pdg > 0:
-#                lam = pdg/ ((pdp-500) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-#                lam = pdg/ ( torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-#                lam = lam * torch.dot(param.detach().view(-1), param.detach().view(-1))
-                lam = pdg
-#                lam = pdg* (pdp-500)**2
-                param.grad += param.detach()*lam
-                print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
-            if pdg <= 0:
-                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
-#                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))*(pdp-500)**2
-#                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-500)**2
-                param.grad += param.detach()*lam
-                print("Triggered orthogonal event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
-            if torch.dot(param.grad.view(-1), param.grad.view(-1)) == 0:# TODO: do this on negative too or add GSO just for the negative alignment
-                print("Triggered zero event horizon..")
-                param.grad += param.detach()*(pdp - 500)
-#EOR
-# TODO: handle orthogonality with magnitude (0.5* grad@grad)
-#            gdg = torch.dot(param.grad.view(-1), param.grad.view(-1))
-#            pdg = torch.dot(param.grad.view(-1), param.view(-1))
-#            if pdg.item() > 0:
-## TODO: params magnitude arent in this equation, ensure we dont blow up the logits
-## TODO: after this blows up, try increasing the regularizer aggressively since it seems we blow up the logits first then overfit the regularizer. If we never blow up the logits we fix the source of the problem.
-##                reg_term = reg_term + (pdg/torch.sqrt(gdg)) * pdp
-#                reg_term = reg_term + pdg
-#                reg_count += 1
-##                pdp = torch.dot(param.view(-1), param.view(-1))
-##                l2_decay = torch.sqrt(pdp)
-##                reg_term = reg_term + pdp*(2/(1+2.7**(-2.7*l2_decay)/500) - 1)
-###                cosine_similarity = pdg/ (torch.sqrt(torch.dot(param.view(-1), param.view(-1)))* torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-###                reg_delta =  cosine_similarity
-#### TODO always True
-###                if reg_delta > 0:
-###                    composite_loss = reg_term + reg_delta
-###                    reg_count += 1
-#### TODO: TEST ME. NOTE: this is a false positive for negative orthogonality but we want GSO to hit warp drive on reduction
-#            if pdg.item() == 0:
-### TODO: pytorch sigmoid is surely faster
-### TODO: 0.5?
-##                reg_term = reg_term +  torch.dot(param.grad.view(-1), param.grad.view(-1))**2
-#                reg_term = reg_term+ torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)) *  1/(1+e**(-torch.dot(param.grad.view(-1), param.grad.view(-1)))))
-#                reg_count += 1
-#### TODO always True
-###                if reg_delta > 0:
-###                    reg_term = reg_term + reg_delta
-###                    reg_count += 1
-#                print("hit ortho")
-###                reg_term = reg_term + torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)).item())
-## TODO: orthogonal addition after event horizon regularizer
-#    # Create composite loss
-## NOTE: We perform the product here to resist the strong regularizer from overtaking the objective function
-#    print("reg term: " + str(reg_term))
-#    # Perform second backward pass on composite loss
-#    if reg_term > 0:
-#        reg_term =  min(total_loss_tensor, reg_term)
-#        reg_term.backward()
-##    reg_term.backward()
-#    print(f"Composite loss: " + str(reg_term))
-##TODO: only graph the loss function not the regularizer too
+#            if pdg > 0:
+            if pdg >= 0:
+                param.grad += 0.5*param.detach() * pdp**2
+##                lam = pdg/ ((pdp-500) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+##                lam = pdg/ ( torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+##                lam = lam * torch.dot(param.detach().view(-1), param.detach().view(-1))
+#                lam = pdg
+##                lam = pdg* (pdp-500)**2
+#                param.grad += param.detach()*lam
+#                print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
+#            if pdg <= 0:
+#                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
+##                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))*(pdp-500)**2
+##                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-500)**2
+#                param.grad += param.detach()*lam
+#                print("Triggered orthogonal event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
+#            if torch.dot(param.grad.view(-1), param.grad.view(-1)) == 0:# TODO: do this on negative too or add GSO just for the negative alignment
+#                print("Triggered zero event horizon..")
+#                param.grad += param.detach()*(pdp - 50)
     return total_loss
 # Main training loop
 while True:
