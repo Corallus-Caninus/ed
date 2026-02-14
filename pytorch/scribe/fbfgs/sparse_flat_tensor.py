@@ -148,84 +148,27 @@ class SparseFlatTensor:
             result_dense_tensor.view(-1)[sparse_tensor.unit_indices] += sparse_tensor.unit_values
         return result_dense_tensor
     @staticmethod
-    def _add_sparse_dense_alpha(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor, alpha: float = 1.0, offset: int = 0) -> Tensor:
+    def _add_sparse_dense_alpha(sparse_tensor: 'SparseFlatTensor', dense_tensor_arg: Tensor, alpha: float = 1.0) -> Tensor:
         """
         Adds a SparseFlatTensor to a dense tensor, with an optional scaling factor alpha.
         The scaling is applied to the sparse tensor's values before addition.
-        Indices are adjusted by the given offset.
         Args:
             sparse_tensor (SparseFlatTensor): The sparse tensor to add.
             dense_tensor_arg (Tensor): The dense tensor to add to.
             alpha (float, optional): Scaling factor for the sparse tensor's values. Defaults to 1.0.
-            offset (int, optional): The starting index within the sparse tensor's global representation
-                                   that corresponds to the start of dense_tensor_arg. Defaults to 0.
         Returns:
             Tensor: The dense result of the addition (dense_tensor_arg is modified in-place).
         """
-        # dense_tensor = dense_tensor_arg # Explicitly use dense_tensor_arg
-        assert isinstance(sparse_tensor, SparseFlatTensor), "Expected sparse_tensor_arg to be a SparseFlatTensor"
-        # result_dense_tensor = dense_tensor.clone() # Not needed for in-place
-        # Debug statements to identify bounds issue - removed for clarity, can be re-added if needed
-        # print(f"dense_tensor size: {dense_tensor_arg.numel()}")
-        # print(f"sparse_tensor total_size: {sparse_tensor.total_size}")
-        # print(f"offset: {offset}")
-        # if sparse_tensor.starts.numel() > 0:
-        #     # ... (similar debug prints adjusted for offset logic)
-        # print(f"max unit_indices (global): {sparse_tensor.unit_indices.max() if sparse_tensor.unit_indices.numel() > 0 else 'N/A'}")
-        # Process segments
-        if sparse_tensor.starts.numel() > 0:
-            # --- Key Change: Adjust indices relative to the offset ---
-            # Filter segments that potentially overlap with the current dense_tensor region
-            # The dense tensor covers indices [offset, offset + dense_tensor_arg.numel())
-            region_start = offset
-            region_end = offset + dense_tensor_arg.numel()
-            # Find segments that start before the region ends and end after the region starts
-            potential_overlap_mask = (sparse_tensor.starts < region_end) & (sparse_tensor.ends > region_start)
-            if potential_overlap_mask.any():
-                filtered_starts = sparse_tensor.starts[potential_overlap_mask]
-                filtered_ends = sparse_tensor.ends[potential_overlap_mask]
-                original_segment_lengths = sparse_tensor.ends - sparse_tensor.starts
-                original_value_starts = torch.cat([
-                    torch.tensor([0], device=original_segment_lengths.device), original_segment_lengths.cumsum(0)[:-1]])
-                # Vectorized segment processing
-                seg_start_global = filtered_starts
-                seg_end_global = filtered_ends
-                seg_len = seg_end_global - seg_start_global
-                # Generate all global indices for segments in a vectorized manner
-                global_indices_for_segments = torch.repeat_interleave(seg_start_global, seg_len) + torch.arange(seg_len.sum(), device=sparse_tensor.values.device) - torch.repeat_interleave(torch.arange(seg_len.numel(), device=sparse_tensor.values.device) * seg_len, seg_len)
-                # Adjust to local indices relative to the dense_tensor_arg's view
-                local_indices_for_segments = global_indices_for_segments - offset
-                # Check which of these local indices are valid (within dense_tensor_arg bounds)
-                valid_mask_local = (local_indices_for_segments >= 0) & (local_indices_for_segments < dense_tensor_arg.numel())
-                valid_local_indices = local_indices_for_segments[valid_mask_local]
-                if valid_local_indices.numel() > 0:
-                    # Get the original indices of the filtered segments
-                    original_indices = torch.nonzero(potential_overlap_mask).squeeze(1)
-                    # Get the corresponding values from the original values tensor in a vectorized manner
-                    original_value_starts_filtered = original_value_starts[original_indices]
-                    # Calculate indices for values, ensuring they stay within bounds
-                    value_indices = original_value_starts_filtered.repeat_interleave(seg_len) + torch.arange(seg_len.sum(), device=sparse_tensor.values.device) - torch.repeat_interleave(torch.arange(seg_len.numel(), device=sparse_tensor.values.device) * seg_len, seg_len)
-                    # Clip indices to stay within bounds of sparse_tensor.values
-                    value_indices = torch.clamp(value_indices, 0, sparse_tensor.values.numel() - 1)
-                    # Select only the values corresponding to valid indices
-                    valid_values_for_segments = sparse_tensor.values[value_indices][valid_mask_local]
-                    # Apply scaling
-                    scaled_values_to_add = valid_values_for_segments * alpha
-                    # Perform the in-place addition
-                    dense_tensor_arg.view(-1)[valid_local_indices] += scaled_values_to_add
-        # Process unit indices
-        if sparse_tensor.unit_indices.numel() > 0:
-            # --- Key Change: Adjust unit indices relative to the offset ---
-            global_unit_indices = sparse_tensor.unit_indices
-            local_unit_indices = global_unit_indices - offset
-            # --- Key Change: Bounds check for local unit indices ---
-            valid_unit_mask = (local_unit_indices >= 0) & (local_unit_indices < dense_tensor_arg.numel())
-            if valid_unit_mask.any():
-                final_local_unit_indices = local_unit_indices[valid_unit_mask]
-                unit_values_to_add = sparse_tensor.unit_values[valid_unit_mask] * alpha # Apply scaling and filter
-                dense_tensor_arg.view(-1)[final_local_unit_indices] += unit_values_to_add
-        # Return the modified tensor (in-place modification)
-        return dense_tensor_arg
+        # Create a new SparseFlatTensor with scaled values
+        scaled_sparse_tensor = SparseFlatTensor(
+            sparse_tensor.starts,
+            sparse_tensor.ends,
+            sparse_tensor.values * alpha,
+            sparse_tensor.total_size,
+            sparse_tensor.unit_indices,
+            sparse_tensor.unit_values * alpha
+        )
+        return SparseFlatTensor.add_sparse_dense(scaled_sparse_tensor, dense_tensor_arg)
     @staticmethod
     def sparse_dot_dense(sparse_tensor_arg: 'SparseFlatTensor', dense_tensor):
         """

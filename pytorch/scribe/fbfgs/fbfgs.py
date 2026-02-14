@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from torch import device
 import torch
 from torch import Tensor
+import torch.nn.utils
 import gc
 import psutil
 import time
@@ -64,6 +65,7 @@ def _strong_wolfe(
     g = g
     # evaluate objective and gradient using initial step
 #    g_best g.to(direction_device)
+    t = torch.tensor(1) # Ensure t is a tensor before the loop
     f_new, g_new = obj_func(t, d)
 #TODO: better solution for initializing to NaN.
 #    if f_new != f_new:
@@ -88,7 +90,7 @@ def _strong_wolfe(
     g_best = g
     gtd_best = gtd
 #Relaxed Wolfe initialization
-    if f_new < f_best  and done != True  and f_new == f_new and f_new <= (f - abs(c1 * t * gtd)):
+    if f_new < f_best  and done != True  and f_new == f_new and f_new <= (f - abs(c1 * t * gtd)) :
 #        if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
 #NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
       success = True
@@ -125,7 +127,8 @@ def _strong_wolfe(
 #              bracket_gtd = [gtd_prev, gtd_new]
 #              break
 ##TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-        if (abs(gtd_new) <= abs(-c2 * gtd) and f_new < f) or (f_new < (f + c1 * t * gtd)):
+# TODO: we can force positive rho by ensuring linesearch ends on the right side of the descent. (remove abs). This i also possible since we zoom to 0 and dont risk missing the positive definite side of the slope
+        if ( abs(gtd_new) <= -c2 * gtd and f_new < f) or (f_new < (f + c1 * t * gtd) ):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -137,7 +140,6 @@ def _strong_wolfe(
 #TODO: we got NaN on a fast wolf here (not instant)on ys (loss was good but ys returned a NaN
             print("FAST WOLFE")
             break
-#TODO: we can still totally bracket the wrong convexity with this because we are moving the minima bracket each time? trace this out
         if gtd_new >= 0 or True:
             print("NOT DESCENDING")
             bracket = [t_prev, t]
@@ -147,6 +149,7 @@ def _strong_wolfe(
             bracket_g = [g_prev, g_new]
             bracket_gtd = [gtd_prev, gtd_new]
             break
+#TODO: we can still totally bracket the wrong convexity with this because we are moving the minima bracket each time? trace this out
 #TODO: since we reuse the last step size, we should bracket in the direction of the first interpolation direction, and change the corresponding zoom break condition if bracketing down instead of up
 #TODO: increase 100 and consider tuning 0.1 further
         min_step = t + capture_min_step * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
@@ -311,7 +314,7 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
-            if abs(gtd_new) <= abs(-c2 * gtd) and f_new < f_best : #NOTE: Ward condition #TODO: Ward condition should be < not <=, it should be based on < and if gtd is under a threshold such that we cant get a gtd delta
+            if abs(gtd_new) <= c2 * gtd and f_new < f_best : 
                 # Wolfe conditions satisfied
 #TODO: check if this is better than best loss. Sometimes the best loss isnt the most converged.
                 print("STRONG WOLFE")
@@ -334,7 +337,8 @@ def _strong_wolfe(
 #            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity. #TODO redundant NaN check
 #TODO redundant NaN check
 #TODO: we have a problem with ys here +gtd - -gtd_new == ys < 0
-            if f_new < f_best and f_new == f_new:
+#            if f_new < f_best and f_new == f_new :
+            if gtd_new < abs(gtd_best) and f_new == f_new :
               success = True
               stall_wolfe = 0
               t_best = t
@@ -618,11 +622,12 @@ class FBFGS(Optimizer):
 #            if proj_coeff >= 0:
 #              ortho_component = 0.5*ortho_component
             
-#              combined = ortho_component + oppose_component
+              combined = ortho_component + oppose_component
 #              combined =  oppose_component
               adjusted_chunks.append(combined)
             else:
-              adjusted_chunks.append(grad_chunk)
+              combined = ortho_component + oppose_component
+              adjusted_chunks.append(combined)
             
         return torch.cat(adjusted_chunks).to(dtype=flat_grad.dtype).contiguous()
     def _split_direction_to_groups(self, flat_tensor, norm_group=None):
@@ -836,27 +841,19 @@ class FBFGS(Optimizer):
         - norm_group > num_layers: Group norm (split parameters into norm_group groups)
         """
         return self.norm_select(tensor, norm=norm, radius_scaling=radius_scaling, radius_ball=radius_ball, eps=eps)
-#TODO: BROKEN!
     def _add_grad(self, step_size, update):
         """Perform parameter update with a dense or sparse tensor update."""
-        # Handle sparse tensor updates
         if torch.is_tensor(step_size):
             step_size = step_size.item()
+        
+        # SparseFlatTensor handling (new logic)
         if isinstance(update, SparseFlatTensor):
-            update = update.to_dense()
-            device = torch.device(self.optimizer_device)
-            if update.values.device != device:
-                update = update.to(device)
-            
-            offset = 0
-            for p in self._params:
-                numel = p.numel()
-                p_view = p.view(-1)
-#TODO: possibly a bug here. We get loss spikes sometimes.
-                SparseFlatTensor._add_sparse_dense_alpha(update, p_view, alpha=step_size, offset=offset)
-                offset += numel
+            flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
+            SparseFlatTensor._add_sparse_dense_alpha(update, flat_param_copy, alpha=step_size)
+            torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
+        
+        # Dense tensor handling (original logic)
         else:
-            # Handle dense tensor updates
             device = torch.device(self.optimizer_device)
             if update.device != device:
                 update = update.to(device)
@@ -867,6 +864,7 @@ class FBFGS(Optimizer):
                 p_view = p.view(-1)
                 p_view.add_(param_update, alpha=step_size)
                 offset += numel
+        
         # NaN guard - apply to each parameter
         for p in self._params:
             p.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
@@ -1216,6 +1214,7 @@ class FBFGS(Optimizer):
       rho_rewind = group["rho_rewind"]
       orthogonality = group["orthogonality"]
       ro_thresholding = 1
+      self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
       # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
       state = self.state[self._params[0]]
@@ -1342,7 +1341,7 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache() # Clear cache before history update
               # Calculate the top k ro threshold if we have history
 #TODO: clean this up
-              if len(old_dirs) == 0  or n_iter != 1 :
+              if len(old_dirs) == 0  : # or n_iter != 1 :
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
@@ -1556,6 +1555,7 @@ class FBFGS(Optimizer):
               max_abs_grad = flat_grad.abs().max()
               max_abs_q = q.abs().max()
               if max_abs_grad <= tolerance_change:
+# TODO: we probably also need gtd check since we dont abs in sw linesearch
                 print(f"Exiting: max gradient element {max_abs_grad} < tolerance {tolerance_change} (q max: {max_abs_q})")
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
@@ -1623,7 +1623,7 @@ class FBFGS(Optimizer):
           if line_search_fn is not None:
               # Save parameters before line search
 #TODO: instead of saving all the params, save the SparseFlatTensor of params masked by indices of d. Write save and restore dense methods for SparseFlatTensor.
-              saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+#              saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
               
               # perform line search, using user function
               if line_search_fn != "strong_wolfe":
@@ -1631,7 +1631,7 @@ class FBFGS(Optimizer):
               else:
                   # Define obj_func with saved_params captured
                   def obj_func(t_step, d_direction):
-                      return self._directional_evaluate(closure, t_step, d_direction, saved_params)
+                      return self._directional_evaluate(closure, t_step, d_direction, self.saved_params)
                   loss_before_ls = loss
                   flat_grad_before_ls = flat_grad
                   prev_loss = loss
@@ -1640,7 +1640,7 @@ class FBFGS(Optimizer):
                   )
                   # TODO: consider the armijo condition here to prevent bonking at higher orders (initial norm of 1).
               if not success:
-                  for p, p_saved in zip(self._params, saved_params):
+                  for p, p_saved in zip(self._params, self.saved_params):
                       p.copy_(p_saved)
 #TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
@@ -1695,6 +1695,17 @@ class FBFGS(Optimizer):
 #                          offset += numel
 #                  else: # d is a dense Tensor
                   self._add_grad(t, d)
+# TODO: we need a second closure that just does loss not generate gradients..
+# TODO: find what is causing this it could just be a bug somewhere in linesearch or the restore routine
+                  if closure() == loss:
+# TODO: maybe check closure == loss instead? as long as we have the right gradient this should be correct but if it is due to numerical instabilities the grad difference may poison the hessian
+                      self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+                  else:
+                      print("LOSS PARITY FAILURE")
+                      success = False
+                      for p, p_saved in zip(self._params, self.saved_params):
+                          p.copy_(p_saved)
+                      continue
                   loss_device = self.optimizer_device
                   print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
                   # opt_cond = loss <= 0 # This condition is not used later, can be removed if not needed elsewhere
