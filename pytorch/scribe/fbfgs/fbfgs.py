@@ -61,73 +61,33 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 #TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down #TODO: cleanup all the AI device mess
 def _strong_wolfe(
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100, optimizer_device: str = 'cuda'):
-    # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
     g = g
-    # evaluate objective and gradient using initial step
-#    g_best g.to(direction_device)
     t = torch.tensor(1) # Ensure t is a tensor before the loop
     f_new, g_new = obj_func(t, d)
-#TODO: better solution for initializing to NaN.
-#    if f_new != f_new:
-#      f_new, g_new = obj_func(x, torch.tensor(1), d)
     ls_func_evals = 1
-#TODO: why don't we scale d by t here, especially since we are normalizing?
     gtd_new = (g_new * d).sum() # Keep as scalar tensor
-#    g_new = g_new#
-#    gtd_new = gtd_new#
     success = False
     is_nan = False
-    # bracket an interval containing a point satisfying the Wolfe criteria
     t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
-#    g_prev = g_prev.to(direction_device)
     done = False
     ls_iter = 0 # Initialize ls_iter
-#    t_best = t
     t = torch.tensor(1) # Ensure t is a tensor before the loop
     t_best = t
     device = gtd.device
     f_best = torch.tensor(f, device=device)
     g_best = g
     gtd_best = gtd
-#Relaxed Wolfe initialization
     if f_new < f_best  and done != True  and f_new == f_new and f_new <= (f - abs(c1 * t * gtd)) :
-#        if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
-#NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
       success = True
       stall_wolfe = 0
       t_best = t
       f_best = torch.tensor(f_new, device=device)
-#TODO this should be a non-blocking offload
       g_best = g_new
       gtd_best = gtd_new
-#    g = g.to(direction_device)
     gc.collect()
     ls_iter=0
     stall_wolfe=0
-#TODO something is broken in insta wolfe. Check the initialization. The same step size doesnt throw when not insta-wolfing
     while ls_iter < max_ls:
-#TODO: we can calculate the delta here for insta wolfes and adjust t by the difference, essentially measuring the drift of the interpolation to see if its shifting left or right to try to stay in the min as long as possible over time
-#TODO: e.g.: if wolfe is increasing shift up t, if armijo is increasing, shift down t. We may be able to formulate this as a linear equation or a ratio
-        # check conditions #TODO: <= for ward condition should be < and just allow first iteration to not check ward condition #TODO: this can increase loss if f_best is greater than current loss (last iteration loss)
-#        if f_new > (f - abs(c1 * t * gtd))  or (f_new != f_new and is_nan == True): # or f_new >= f_prev: #NOTE: Ward condition
-#        if f_new > (f + c1 * t * gtd)  or (f_new != f_new and is_nan == True)    :
-#        print("Ward condition: " + str((gtd_new + gtd_prev)/(f_new - f_prev) ))
-#        print("gtd delta: " + str(gtd_new - gtd_prev))
-#        if (gtd_new + gtd_prev) / (f_new - f_prev)< c1 and (gtd_new - gtd_prev != 0 ) or f_new != f_new:
-#        if f_new > (f+ c1 * t * gtd)  or (f_new != f_new and is_nan == True) :  #or f_new >= f_prev: #NOTE: Ward condition
-##Insta-Wolfe reset to avoid jumbo bracket zoom phase
-##            if t_prev == 0:
-##              t = 1
-##              continue
-##            else:
-#              bracket = [t_prev, t]
-#              bracket_f = [f_prev, f_new]
-#  #            bracket_g = [g_prev, g_new]
-#              bracket_g = [g_prev, g_new]
-#              bracket_gtd = [gtd_prev, gtd_new]
-#              break
-##TODO: <= for ward condition should be < and just allow first iteration to not check ward condition
-# TODO: we can force positive rho by ensuring linesearch ends on the right side of the descent. (remove abs). This i also possible since we zoom to 0 and dont risk missing the positive definite side of the slope
         if ( abs(gtd_new) <= -c2 * gtd and f_new < f) or (f_new < (f + c1 * t * gtd) ):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
@@ -137,104 +97,54 @@ def _strong_wolfe(
             t_best = t
             f_best = torch.tensor(f_new, device=device)
             g_best = g_new
-#TODO: we got NaN on a fast wolf here (not instant)on ys (loss was good but ys returned a NaN
             print("FAST WOLFE")
             break
         if gtd_new >= 0 or True:
             print("NOT DESCENDING")
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
-#TODO: does this need to be 
-            bracket_g = [g_prev, g_new]
             bracket_g = [g_prev, g_new]
             bracket_gtd = [gtd_prev, gtd_new]
             break
-#TODO: we can still totally bracket the wrong convexity with this because we are moving the minima bracket each time? trace this out
-#TODO: since we reuse the last step size, we should bracket in the direction of the first interpolation direction, and change the corresponding zoom break condition if bracketing down instead of up
-#TODO: increase 100 and consider tuning 0.1 further
         min_step = t + capture_min_step * (t - t_prev)#TODO: this can miss, if t+0.01 breaks both armijo and wolfe condition (the interpolation is steep)
         lower_bracket = min(t_prev, t)
         upper_bracket = max(t_prev, t)
         max_step = upper_bracket * capture_max_step
-#TODO: insufficient progress for bracket maybe? set min_step = t and if t doesnt change then break or nudge here, we miss the point on bracketing too
-        # interpolate
         tmp = t
         t = _cubic_interpolate(
             t_prev, f_prev, gtd_prev, t, f_new, gtd_new, bounds=(min_step, max_step)
         )
-#TODO: insta-NaN handler
         if f_new != f_new:  #Check for NaN
-#          t = torch.tensor(1., device=device) # Reset t to 1.0 on the correct device
-#          min_step = torch.tensor(0., device=device) # Reset min_step to 0.0 on the correct device
-#          t = _cubic_interpolate(
-#              t_prev, f_prev, gtd_prev, t, f_new, gtd_new, bounds=(min_step, max_step)
-#          )
           is_nan = True
         t = torch.tensor(t, device=device) # Ensure t is a tensor on the correct device
-        # next step
         t_prev = tmp
         f_prev = f_new
-#        g_prev = g_new
         g_prev = g_new.to(direction_device)
         gtd_prev = gtd_new # type: ignore[assignment] # type: ignore[assignment]
         f_new, g_new = obj_func(t, d)
         ls_func_evals += 1 # Increment func evals after new evaluation
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
-#        g_new = g_new#
         ls_iter += 1
-        #RELAXED WOLFE CONDITION
-#        cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
-#        if f_new < f_best  and done != True and f_new == f_new : #
         if f_new < f_best  and done != True and f_new == f_new :
-#        if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
-#NOTE: prevent using the first iteration, so that we know we fulfilled the armijo condition. Theres a cleaner way to do this
           success = True
           stall_wolfe = 0
           t_best = t
           f_best = torch.tensor(f_new, device=device)
-#TODO this should be a non-blocking offload
           g_best = g_new
           gtd_best = gtd_new
-    # reached max number of iterations?
     if ls_iter == max_ls:
-#TODO: this is actually better, big zoom if we are out of iterations.
-#        bracket = [0, t]
-#        bracket_f = [f, f_new]
-#        bracket_g = [g, g_new]
-#        bracket_gtd = [gtd, gtd_new]
         bracket = [t_prev, t]
         bracket_f = [f_prev, f_new]
         bracket_g = [g_prev, g_new]
         bracket_gtd = [gtd_prev, gtd_new]
-    # zoom phase: we now have a point satisfying the criteria, or
-    # a bracket around it. We refine the bracket until we find the # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
-    # exact point satisfying the criteria
-    # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
     insuf_progress = False
-    # find high and low points in bracket
     low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)  # type: ignore[possibly-undefined]
-#    while not done and ls_iter < max_ls:
-    # zoom phase: we now have a point satisfying the criteria, or # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
-    # a bracket around it. We refine the bracket until we find the
-    # exact point satisfying the criteria
-    # WOLFE PACK: find the best strong wolfe point in case we fail to zoom.
-    #NOTE: we wait for bracket to collapse, we dont use max linesearch here, if it takes too long turn the bracket hyperparameters up.
     while not done  and ls_iter < max_ls and not is_nan:
-#        if len(bracket) < 2: # Check if bracket has at least 2 elements
-#            print("WOLFE PACK")
-#            return success, f_best, g_best, t_best, ls_func_evals
-            # line-search bracket is so small
-            #TODO: extract stall_wolfe hyperparameter
-            #        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change or ls_iter >= max_ls or stall_wolfe >= 4:   # type: ignore[possibly-undefined]
         print("zooming..")
         if abs(bracket[1] - bracket[0])  < tolerance_change  : # or stall_wolfe >= 5 :
-#TODO: getting negative ys here with stall wolfe printout
            print("WOLFE PACK")
            return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
-         #TODO: return the wolfe pack here
-       #            break
         t_prev = t
-        # compute new trial value
         t = _cubic_interpolate(
             bracket[0],
             bracket_f[0], # type: ignore[possibly-undefined]
@@ -244,30 +154,12 @@ def _strong_wolfe(
             bracket_gtd[1],
         )
         t = torch.tensor(t, device=device) # Ensure t is a tensor on the correct device
-        # insta-NaN handler
-#TODO: bracket collapses when we get NaN. Ensure we reset step size accordingly.
-#TODO: were jumping the border here
         if f_new != f_new:
-#TODO: test this since 1 can cause problems since it is the same as the gradient for initialization causing inf delta
           t = torch.tensor(1.)
           is_nan = True
-#TODO: need to revaluate here.
-#        bracket_gtd[1]#,
-#        bracket_gtd[0]#,  # type: ignore[possibly-undefined]
-        # test that we are making sufficient progress:
-        # in case `t` is so close to boundary, we mark that we are making
-        # insufficient progress, and if
-        #   + we have made insufficient progress in the last step, or
-        #   + `t` is at one of the boundary,
-        # we will move `t` to a position which is `0.1 * len(bracket)`
-        # away from the nearest boundary point.
-        #  TODO: This needs to be set based on how large our brackets are. We miss the point with these literal parameters when we arent zooming a large domain.
         eps = bracket_shift * (max(bracket) - min(bracket))
-#        eps = tolerance_change * (max(bracket) - min(bracket))
         if min(max(bracket) - t, t - min(bracket)) < eps:
-            # interpolation close to boundary
             if insuf_progress or t >= max(bracket) or t <= min(bracket):
-                # evaluate at 1/3 away from boundary
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
                     displacement = max(bracket) - eps
                     t = torch.tensor(t - bracket_shove*(t - displacement), device=device)
@@ -280,34 +172,13 @@ def _strong_wolfe(
                 insuf_progress = True
         else:
             insuf_progress = False
-        # Evaluate new point
         f_new, g_new = obj_func(t, d) # Single evaluation
         ls_func_evals += 1 # Increment func evals
         gtd_prev = gtd_new
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
-#TODO: something like this. we need to move t by the amount that linearly should bring it into c3 notch if we are over converged.
-#TODO: also this should happen before evaluation and probably be an if condition against push/shove routine
-#TODO: prompt it..
-#        if abs(gtd_new) <= -0.4 * gtd:
-#          gtd_delta = gtd_new - gtd_prev
-#          t_delta = t - t_prev
-#TODO: we also need the distance to the notch.
-#          t = t*t_delta/gtd_delta
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
-#        if f_new < f_best  and f_new == f_new:
-#        if f_new < f_best  and done != True and f_new == f_new :
-#            if (f_new > (f + c1 * t * gtd)) and done != True and f_new < f_best:  # or (ls_iter > 1 and f_new >= f_prev)) : #NOTE: Ward condition
-##          print("---GOT NEW WOLFE PACK---")
-#          success = True
-#          stall_wolfe = 0
-#          t_best = t
-#          f_best = torch.tensor(f_new, device=device)
-#          g_best = g_new.to(direction_device)
-#          gtd_best = gtd_new
         print("Ward condition: " + str((gtd_new + gtd_prev)/(f_new - f_prev) ))
-#        if (f_new - f_prev) / (gtd_new + gtd_prev) < c1  and abs(gtd_new - gtd_prev) != 0 or f_new >= bracket_f[low_pos] or f_new != f_new:
         if f_new > (f + c1 * t * gtd)  or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
-            # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
             bracket_g[high_pos] = g_new  # type: ignore[possibly-undefined]
@@ -315,8 +186,6 @@ def _strong_wolfe(
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
             if abs(gtd_new) <= -c2 * gtd and f_new < f_best : 
-                # Wolfe conditions satisfied
-#TODO: check if this is better than best loss. Sometimes the best loss isnt the most converged.
                 print("STRONG WOLFE")
                 success = True
                 done = True
@@ -325,52 +194,30 @@ def _strong_wolfe(
                 g_best = g_new.to(direction_device)
                 break
             elif gtd_new * (bracket[high_pos] - bracket[low_pos])>= 0:
-                # old high becomes new low
                 bracket[high_pos] = bracket[low_pos]
                 bracket_f[high_pos] = bracket_f[low_pos]
                 bracket_g[high_pos] = bracket_g[low_pos]  # type: ignore[possibly-undefined]
                 bracket_gtd[high_pos] = bracket_gtd[low_pos]
-            #RELAXED WOLFE CONDITION
-    #        cur_c1 = (f + t*gtd) - f_new
-#            cur_c2 =  abs(gtd_new) - -gtd  #TODO: inverted case
-    #NOTE: relaxed wolfe condition. If we fail to find a wolfe we go for best curvature to condition the Hessian.
-#            if f_new < f_best and done != True: #NOTE: Ward condition: convergence must be justified by loss reduction else its converging on orthogonal error dissimilarity. #TODO redundant NaN check
-#TODO redundant NaN check
-#TODO: we have a problem with ys here +gtd - -gtd_new == ys < 0
-#            if f_new < f_best and f_new == f_new :
             if abs(gtd_new) < abs(gtd_best) and f_new == f_new :
               success = True
               stall_wolfe = 0
               t_best = t
               f_best = torch.tensor(f_new, device=device)
               g_best = g_new
-            # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-#            bracket_g[low_pos] = g_new. # type: ignore[possibly-undefined]
             bracket_g[low_pos] = g_new
-# type: ignore[possibly-undefined]
             bracket_gtd[low_pos] = gtd_new
         stall_wolfe += 1
-        if stall_wolfe >= 5:
-          print("STALL WOLFE")
-#TODO: there is still a potential but unlikely bug here where we need to account for if loss isnt reduced. Likely we should consider the Armijo in relaxed wolfe
         if ls_iter >= max_ls and done != True and success == True: # Return Wolfe pack if max ls reached in zoom phase
           print("WOLFE PACK MAX LS")
           return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
-    # return stuff
-#TODO: TESTING
-#    t = bracket[low_pos]  # type: ignore[possibly-undefined]
-#    f_new = bracket_f[low_pos]
-#    g_new = bracket_g[low_pos]  # type: ignore[possibly-undefined]
-#TODO: EOT
-#    return success, f_new, g_new.to(optimizer_device), t, ls_func_evals
     return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
 @torch.jit.script
 def _apply_backward_loop_update(
     q: torch.Tensor,
-    dir_device: SparseFlatTensor,
-    stp_device: SparseFlatTensor,
+    sparse_dir_i: SparseFlatTensor,
+    sparse_stp_i: SparseFlatTensor,
     y_norms: List[torch.Tensor],
     i: int,
     orthogonality: float,
@@ -378,53 +225,26 @@ def _apply_backward_loop_update(
     direction_alignment_mask: torch.Tensor,
     direction_similarities: List[float],
     optimizer_device: str,
-    ro_i: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor, List[float]]:
-    sparse_dir_i = SparseFlatTensor(
-        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
-        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
-    )
-    inv_dir_norm = y_norms[i].item() 
-    #print("inv_dir_norm: " + str(inv_dir_norm))
-    normalized_dir = SparseFlatTensor(
-        sparse_dir_i.starts, sparse_dir_i.ends, sparse_dir_i.values * inv_dir_norm,
-        sparse_dir_i.total_size, sparse_dir_i.unit_indices, 
-        sparse_dir_i.unit_values * inv_dir_norm 
-    )
-    q_norm = torch.linalg.vector_norm(q, ord=2).item()
-    #print("q_norm: " + str(q_norm))
-    inv_q_norm = 1/q_norm
-    inv_q = q*inv_q_norm
-    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, inv_q).item()
-#    direction_similarity = torch.dot(normalized_dir.to_dense(), inv_q).item()
-    #print("dir sim: " + str(direction_similarity))
+    ro_i: torch.Tensor,
+    q_inv_norm: float # New argument
+) -> Tuple[torch.Tensor, torch.Tensor, List[float], float]: 
+    inv_dir_norm = torch.tensor(y_norms[i].item() )
+    normalized_dir = sparse_dir_i * inv_dir_norm
+    # Use the passed q_inv_norm directly
+    direction_similarity = SparseFlatTensor.sparse_dot_dense(normalized_dir, q * q_inv_norm).item()
     aligned =  -orthogonality <= direction_similarity <= orthogonality
     direction_alignment_mask[i] = aligned
     direction_similarities.append(direction_similarity)
     
     if direction_alignment_mask[i]:
-        sparse_dir_i_recreated = SparseFlatTensor(
-            dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
-            dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
-        )
-        sparse_stp_i = SparseFlatTensor(
-            stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
-            stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
-        )
         alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
-        al[i] = alpha * ro_i.item() # Changed ro[i].item() to ro_i.item()
-        sparse_old_dir_scaled = SparseFlatTensor(
-            sparse_dir_i_recreated.starts, sparse_dir_i_recreated.ends, 
-            sparse_dir_i_recreated.values * (-al[i]),
-            sparse_dir_i_recreated.total_size, sparse_dir_i_recreated.unit_indices,
-            sparse_dir_i_recreated.unit_values * (-al[i]) 
-        )
-        q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q)
-#        #print("HIT IN BL")
-        q_norm = torch.linalg.vector_norm(q, ord=2).item()
-#        inv_q_norm = 1/q_norm
-#        q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
-    return q, direction_alignment_mask, direction_similarities
+        al[i] = alpha * ro_i.item()
+        sparse_old_dir_scaled = sparse_dir_i * torch.tensor(-al[i])
+        q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q) # Update q
+        new_q_inv_norm = 1.0 / (torch.linalg.vector_norm(q, ord=2).item() )
+        return q, direction_alignment_mask, direction_similarities, new_q_inv_norm # Return new_q_inv_norm
+    
+    return q, direction_alignment_mask, direction_similarities, q_inv_norm # Return original q_inv_norm
 @torch.jit.script
 def _apply_forward_loop_update(
     d: torch.Tensor,
@@ -432,24 +252,17 @@ def _apply_forward_loop_update(
     dir_device: SparseFlatTensor,
     al: torch.Tensor,
     idx: int,
-    ro_idx: torch.Tensor # Changed from List[Tensor] to torch.Tensor
+    ro_idx: torch.Tensor
 ) -> torch.Tensor:
-    old_dir_for_dense = SparseFlatTensor(
-        dir_device.starts, dir_device.ends, dir_device.values.to(dtype=torch.float32),
-        dir_device.total_size, dir_device.unit_indices, dir_device.unit_values.to(dtype=torch.float32)
+    dot_product_val = SparseFlatTensor.sparse_dot_dense(dir_device, d)
+    alpha_val = al[idx] - dot_product_val * ro_idx.item()
+    
+    scaled_stp = SparseFlatTensor(
+        stp_device.starts, stp_device.ends, stp_device.values * (alpha_val),
+        stp_device.total_size, stp_device.unit_indices,
+        stp_device.unit_values * (alpha_val) if stp_device.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=stp_device.values.device)
     )
-    dot_product_val = SparseFlatTensor.sparse_dot_dense(old_dir_for_dense, d)
-    alpha_val = al[idx] - dot_product_val * ro_idx.item() # Changed ro[idx].item() to ro_idx.item()
-    sparse_stp_i = SparseFlatTensor(
-        stp_device.starts, stp_device.ends, stp_device.values.to(dtype=torch.float32),
-        stp_device.total_size, stp_device.unit_indices, stp_device.unit_values.to(dtype=torch.float32)
-    )
-    sparse_old_stp_scaled = SparseFlatTensor(
-        sparse_stp_i.starts, sparse_stp_i.ends, sparse_stp_i.values * (alpha_val),
-        sparse_stp_i.total_size, sparse_stp_i.unit_indices,
-        sparse_stp_i.unit_values * (alpha_val) if sparse_stp_i.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=sparse_stp_i.values.device)
-    )
-    d = SparseFlatTensor.add_sparse_dense(sparse_old_stp_scaled, d)
+    d = SparseFlatTensor.add_sparse_dense(scaled_stp, d)
     return d
 class FBFGS(Optimizer):
     """Implements L-BFGS algorithm.
@@ -905,6 +718,8 @@ class FBFGS(Optimizer):
         # Normalize each parameter's chunk
         q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
         print("q max value after layer norm: " + str(q.max()))
+        q_current_l2_norm = torch.linalg.vector_norm(q, ord=2).item()
+        q_inv_norm = 1.0 / (q_current_l2_norm + torch.finfo(q.dtype).eps)
         al = torch.empty(num_old, dtype=q.dtype, device=optimizer_device)
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=optimizer_device)
         direction_similarities = []
@@ -948,9 +763,7 @@ class FBFGS(Optimizer):
             
             # Process valid indices in reverse order
             q_norm = torch.linalg.vector_norm(q, ord=2).item()
-#            inv_q_norm = 1.0 / torch.linalg.vector_norm(q, ord=2)
-#            normalized_q = q / q_norm
-            inv_q_norm = 1/q_norm
+#            q_inv_norm = 1/q_norm
             for idx_pos in range(len(valid_indices)-1, -1, -1):
                 i = valid_indices[idx_pos]
                 start_time = time.time()
@@ -982,8 +795,8 @@ class FBFGS(Optimizer):
                     wait_end = time.time()
                 
 #EXTRACT ME GEMINI
-                q, direction_alignment_mask, direction_similarities = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i]
+                q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
