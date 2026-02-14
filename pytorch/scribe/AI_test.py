@@ -118,7 +118,7 @@ batch_train = None
 # Initialize FBFGS optimizer
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e3, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.001, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.01, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e3, radius_ball=500, radius_ball_s=500, radius_s=1e6, c1=0, c2=0.001, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
@@ -400,8 +400,9 @@ def closure():
     for name, param in model.named_parameters():
         pdp = torch.sqrt(torch.dot(param.detach().view(-1), param.detach().view(-1)))
         pdg = torch.dot(param.grad.view(-1), param.detach().view(-1))
-        if param is not None   and pdp > 50 :
-            print("PDP: " + " on layer: " + str(name) + str(pdp))
+        if param is not None: # and pdp > 50 :
+            if pdp > 500:
+                print("PDP: " + " on layer: " + str(name) + str(pdp))
 #            lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
 ##                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-500)**2
 #            param.grad += param.detach()*lam
@@ -409,8 +410,8 @@ def closure():
 #            reg_term += torch.sum(param.grad * param.data).item()
 #If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
 #            if pdg > 0:
-            if pdg >= 0:
-                param.grad += 0.5*param.detach() * pdp**2
+#            if pdg >= 0:
+            param.grad += (1/500) * 0.5*param.detach() * pdp**2
 ##                lam = pdg/ ((pdp-500) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
 ##                lam = pdg/ ( torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
 ##                lam = lam * torch.dot(param.detach().view(-1), param.detach().view(-1))
@@ -599,6 +600,10 @@ while True:
     loss_before = closure()
     loss_before = loss_without_regularizer
     print(f"Loss before step: {loss_without_regularizer:.16f}")
+    
+    # Save model parameters before the step
+    saved_model_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+    
     optimizer.step(closure)
     step_text = f" STEP {step_count} "
     color_cycle = ["\033[38;2;255;0;0m", "\033[38;2;0;255;0m", "\033[38;2;0;0;255m"]
@@ -617,10 +622,18 @@ while True:
     loss_after = loss_without_regularizer
     
     loss_delta = loss_before - loss_after  # Use pure loss before - pure loss after
-    # Assert that loss_delta is never negative
-#    if loss_delta < -1e-6: # Allow for small floating point inaccuracies
-#        raise AssertionError(f"Loss delta is negative ({loss_delta:.16f}), violating Strong Wolfe conditions.")
-#TODO: reset params here if gap is negative as a test
+    
+    if loss_delta < 0: # Allow for small floating point inaccuracies
+        print(f"\033[91mLoss delta is negative ({loss_delta:.16f}), restoring model parameters.\033[0m")
+        model.load_state_dict(saved_model_state_dict)
+        # Re-evaluate loss_after to reflect restored state for logging purposes
+        loss_after = closure()
+        loss_after = loss_without_regularizer
+        loss_delta = loss_before - loss_after # Recalculate loss_delta after restore
+    
+#    if loss_delta < -1e-6: # Re-add AssertionError for significantly negative loss delta after restoration attempt
+#        raise AssertionError(f"Loss delta is negative ({loss_delta:.16f}) even after restoration, violating Strong Wolfe conditions.")
+    
     print(f"\033[90mLoss delta gap: {loss_delta:.16f}\033[0m")
     
     log_filename = "log.csv"
