@@ -177,6 +177,12 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
+        if f_new < f_best and f_new == f_new and f_new <= (f + c1 * t * gtd):
+          success = True
+          stall_wolfe = 0
+          t_best = t
+          f_best = torch.tensor(f_new, device=device)
+          g_best = g_new
         print("Ward condition: " + str((gtd_new + gtd_prev)/(f_new - f_prev) ))
         if f_new > (f + c1 * t * gtd)  or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
             bracket[high_pos] = t
@@ -198,12 +204,12 @@ def _strong_wolfe(
                 bracket_f[high_pos] = bracket_f[low_pos]
                 bracket_g[high_pos] = bracket_g[low_pos]  # type: ignore[possibly-undefined]
                 bracket_gtd[high_pos] = bracket_gtd[low_pos]
-            if abs(gtd_new) < abs(gtd_best) and f_new == f_new :
-              success = True
-              stall_wolfe = 0
-              t_best = t
-              f_best = torch.tensor(f_new, device=device)
-              g_best = g_new
+#            if abs(gtd_new) < abs(gtd_best) and f_new == f_new :
+#              success = True
+#              stall_wolfe = 0
+#              t_best = t
+#              f_best = torch.tensor(f_new, device=device)
+#              g_best = g_new
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
             bracket_g[low_pos] = g_new
@@ -762,8 +768,6 @@ class FBFGS(Optimizer):
                 filtered_idx -= 1
             
             # Process valid indices in reverse order
-            q_norm = torch.linalg.vector_norm(q, ord=2).item()
-#            q_inv_norm = 1/q_norm
             for idx_pos in range(len(valid_indices)-1, -1, -1):
                 i = valid_indices[idx_pos]
                 start_time = time.time()
