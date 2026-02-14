@@ -314,7 +314,7 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
-            if abs(gtd_new) <= c2 * gtd and f_new < f_best : 
+            if abs(gtd_new) <= -c2 * gtd and f_new < f_best : 
                 # Wolfe conditions satisfied
 #TODO: check if this is better than best loss. Sometimes the best loss isnt the most converged.
                 print("STRONG WOLFE")
@@ -338,7 +338,7 @@ def _strong_wolfe(
 #TODO redundant NaN check
 #TODO: we have a problem with ys here +gtd - -gtd_new == ys < 0
 #            if f_new < f_best and f_new == f_new :
-            if gtd_new < abs(gtd_best) and f_new == f_new :
+            if abs(gtd_new) < abs(gtd_best) and f_new == f_new :
               success = True
               stall_wolfe = 0
               t_best = t
@@ -1341,7 +1341,7 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache() # Clear cache before history update
               # Calculate the top k ro threshold if we have history
 #TODO: clean this up
-              if len(old_dirs) == 0  : # or n_iter != 1 :
+              if len(old_dirs) != 0  : # or n_iter != 1 :
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
@@ -1702,6 +1702,7 @@ class FBFGS(Optimizer):
                       self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
                   else:
                       print("LOSS PARITY FAILURE")
+                      exit()
                       success = False
                       for p, p_saved in zip(self._params, self.saved_params):
                           p.copy_(p_saved)
