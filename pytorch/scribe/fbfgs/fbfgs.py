@@ -1633,6 +1633,7 @@ class FBFGS(Optimizer):
 #                          offset += numel
 #                  else: # d is a dense Tensor
                   self._add_grad(t, d)
+                  self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 # TODO: we need a second closure that just does loss not generate gradients..
 # TODO: find what is causing this it could just be a bug somewhere in linesearch or the restore routine
 #                  if closure() == loss:
