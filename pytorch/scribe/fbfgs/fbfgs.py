@@ -224,8 +224,8 @@ def _split_tensor_to_groups_jit(
     flat_tensor: torch.Tensor,
     split_sizes: List[int]
 ) -> List[torch.Tensor]:
-    if not split_sizes: # Handle case of empty split_sizes (e.g., if total_size is 0)
-        return []
+#    if not split_sizes: # Handle case of empty split_sizes (e.g., if total_size is 0)
+#        return []
     return torch.split(flat_tensor, split_sizes, dim=0)
 @torch.jit.script
 def _apply_backward_loop_update(
@@ -260,10 +260,10 @@ def _apply_backward_loop_update(
         # Split tensor into groups based on norm_group_y
         chunks = _split_tensor_to_groups_jit(q, active_split_sizes_y)
         # Vectorized and simplified ball projection (radius_ball is assumed > 0)
-        # Handle empty chunks by replacing them with a tensor that won't affect calculations
-        processed_chunks = [chk if chk.numel() > 0 else torch.tensor(0., device=q.device) for chk in chunks]
+        # Assuming chunks will NEVER contain numel() == 0 tensors, and is NEVER empty.
+        
         # Calculate L2 norms for all chunks at once
-        l2_norms = torch.stack([torch.linalg.vector_norm(chk, ord=2) for chk in processed_chunks])
+        l2_norms = torch.stack([torch.linalg.vector_norm(chk, ord=2) for chk in chunks]) # Directly use chunks
         # Calculate factors: Only scale down when l2_norm/radius_ball >= 1
         # Use torch.where for vectorized conditional logic
         factors = torch.where(
@@ -271,12 +271,21 @@ def _apply_backward_loop_update(
             l2_norms / radius_ball,
             torch.tensor(1.0, device=q.device)
         )
-        # Apply factors to chunks using a list comprehension (can't directly vectorize across list of tensors)
-        chunks = [
-            chk / factor
-            if chk.numel() > 0 else chk
-            for chk, factor in zip(chunks, factors)
-        ]
+        # Apply factors to chunks in a vectorized manner (concatenate, divide, then split)
+        concatenated_chunks = torch.cat(chunks)
+        chunk_numels = [chk.numel() for chk in chunks]
+        chunk_numels_tensor = torch.tensor(chunk_numels, dtype=torch.int64, device=q.device)
+
+        factors = factors.to(q.device)
+        expanded_factors = torch.repeat_interleave(factors, chunk_numels_tensor)
+        
+        divided_concatenated_chunks = concatenated_chunks / expanded_factors
+        chunks = _split_tensor_to_groups_jit(divided_concatenated_chunks, active_split_sizes_y)
+#        chunks = [
+#            chk / factor
+#            if chk.numel() > 0 else chk
+#            for chk, factor in zip(chunks, factors)
+#        ]
 #        if len(chunks) == 0:
 #            q = q # No change if no chunks
 #        else:
@@ -308,9 +317,10 @@ def _apply_forward_loop_update(
     # Apply the norm_select logic directly within the jitted function (forward loop)
     # Split tensor into groups based on norm_group_s
     d_chunks = _split_tensor_to_groups_jit(d, active_split_sizes_s)
-    processed_d_chunks = [chk_d if chk_d.numel() > 0 else torch.tensor(0., device=d.device) for chk_d in d_chunks]
     # Ball projection (radius_ball_s is assumed > 0)
-    l2_norms_d = torch.stack([torch.linalg.vector_norm(chk_d, ord=2) for chk_d in processed_d_chunks])
+    # Assuming d_chunks will NEVER contain numel() == 0 tensors, and is NEVER empty.
+    
+    l2_norms_d = torch.stack([torch.linalg.vector_norm(chk_d, ord=2) for chk_d in d_chunks]) # Directly use d_chunks
     
     factors_d = torch.where(
         (l2_norms_d / radius_ball_s >= 1), # Removed epsilon check as requested
@@ -318,11 +328,16 @@ def _apply_forward_loop_update(
         torch.tensor(1.0, device=d.device)
     )
     
-    d_chunks = [
-        chk_d / factor_d
-        if chk_d.numel() > 0 else chk_d # CORRECTED HERE
-        for chk_d, factor_d in zip(d_chunks, factors_d)
-    ]
+    # Vectorized division of chunks by factors_d
+    concatenated_d_chunks = torch.cat(d_chunks)
+    d_chunk_numels = [chk.numel() for chk in d_chunks]
+    d_chunk_numels_tensor = torch.tensor(d_chunk_numels, dtype=torch.int64, device=d.device)
+
+    factors_d = factors_d.to(d.device)
+    expanded_factors_d = torch.repeat_interleave(factors_d, d_chunk_numels_tensor)
+
+    divided_concatenated_d_chunks = concatenated_d_chunks / expanded_factors_d
+    d_chunks = _split_tensor_to_groups_jit(divided_concatenated_d_chunks, active_split_sizes_s)
     
 #    if len(d_chunks) == 0:
 #        d = d
@@ -1740,3 +1755,4 @@ class FBFGS(Optimizer):
             print(f"History file {filename} not found. Starting from scratch.")
         except Exception as e:
             print(f"Error loading FBFGS history from {filename}: {e}. Starting from scratch.")
+#        processed_chunks = [chk if chk.numel() > 0 else torch.tensor(0., device=q.device) for chk in chunks]
