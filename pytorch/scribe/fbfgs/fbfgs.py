@@ -222,69 +222,11 @@ def _strong_wolfe(
 @torch.jit.script
 def _split_tensor_to_groups_jit(
     flat_tensor: torch.Tensor,
-    offsets: List[int],
-    norm_group: Optional[Union[int, float]]
+    split_sizes: List[int]
 ) -> List[torch.Tensor]:
-    num_layers = len(offsets)
-    param_sizes: List[int] = []
-    for k in range(num_layers):
-        if k + 1 < num_layers:
-            param_sizes.append(offsets[k+1] - offsets[k])
-        else:
-            param_sizes.append(flat_tensor.numel() - offsets[k])
-    total_size = flat_tensor.numel()
-    
-    # Handle norm_group == 0 as norm_group == 1
-    effective_norm_group: float = 1.0 # Initialize with a default value
-    if norm_group is None:
-        effective_norm_group = 1.0
-    elif norm_group == 0 or norm_group == 0.0:
-        effective_norm_group = 1.0
-    else:
-        effective_norm_group = float(norm_group)
-    # Determine number of groups
-    groups: List[torch.Tensor] = []
-    current_offset = 0
-    if effective_norm_group == 1.0: # One group per layer (matrix norm)
-        for size in param_sizes:
-            groups.append(flat_tensor[current_offset:current_offset+size])
-            current_offset += size
-        return groups
-    elif effective_norm_group == float(num_layers): # One group for all parameters (vector norm)
-        return [flat_tensor]
-    elif effective_norm_group < 1.0: # Split each layer into int(1/norm_group) groups
-        groups_per_layer = int(1.0 / effective_norm_group)
-        for layer_idx in range(num_layers):
-            size = param_sizes[layer_idx]
-            layer_tensor = flat_tensor[current_offset:current_offset+size]
-            # Split this layer into groups_per_layer groups
-            min_size = size // groups_per_layer
-            remainder = size % groups_per_layer
-            split_sizes: List[int] = []
-            for i in range(groups_per_layer):
-                split_size = min_size
-                if i < remainder:
-                    split_size += 1
-                split_sizes.append(split_size)
-            
-            layer_groups = torch.split(layer_tensor, split_sizes, dim=0)
-            for lg in layer_groups:
-                groups.append(lg)
-            current_offset += size
-        return groups
-    else: # norm_group > num_layers: Split total parameters into norm_group groups
-        num_groups = int(effective_norm_group)
-        
-        group_size = total_size // num_groups
-        remainder = total_size % num_groups
-        
-        for i in range(num_groups):
-            current_group_size = group_size
-            if i < remainder:
-                current_group_size += 1
-            groups.append(flat_tensor[current_offset:current_offset+current_group_size])
-            current_offset += current_group_size
-        return groups
+    if not split_sizes: # Handle case of empty split_sizes (e.g., if total_size is 0)
+        return []
+    return torch.split(flat_tensor, split_sizes, dim=0)
 @torch.jit.script
 def _apply_backward_loop_update(
     q: torch.Tensor,
@@ -299,9 +241,8 @@ def _apply_backward_loop_update(
     optimizer_device: str,
     ro_i: torch.Tensor,
     q_inv_norm: float,
-    offsets: List[int],
     radius_ball: float,
-    norm_group_y: Optional[Union[int, float]],
+    active_split_sizes_y: List[int], # NEW ARGUMENT
 ) -> Tuple[torch.Tensor, torch.Tensor, List[float], float]:
     inv_dir_norm = torch.tensor(y_norms[i].item() )
     normalized_dir = sparse_dir_i * inv_dir_norm
@@ -317,7 +258,7 @@ def _apply_backward_loop_update(
         q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q) # Update q
         # Apply the norm_select logic directly within the jitted function
         # Split tensor into groups based on norm_group_y
-        chunks = _split_tensor_to_groups_jit(q, offsets, norm_group_y)
+        chunks = _split_tensor_to_groups_jit(q, active_split_sizes_y)
         # Vectorized and simplified ball projection (radius_ball is assumed > 0)
         # Handle empty chunks by replacing them with a tensor that won't affect calculations
         processed_chunks = [chk if chk.numel() > 0 else torch.tensor(0., device=q.device) for chk in chunks]
@@ -352,9 +293,8 @@ def _apply_forward_loop_update(
     al: torch.Tensor,
     idx: int,
     ro_idx: torch.Tensor,
-    offsets: List[int],
     radius_ball_s: float,
-    norm_group_s: Optional[Union[int, float]]
+    active_split_sizes_s: List[int] # NEW ARGUMENT
 ) -> torch.Tensor:
     dot_product_val = SparseFlatTensor.sparse_dot_dense(dir_device, d)
     alpha_val = al[idx] - dot_product_val * ro_idx.item()
@@ -367,7 +307,7 @@ def _apply_forward_loop_update(
     d = SparseFlatTensor.add_sparse_dense(scaled_stp, d)
     # Apply the norm_select logic directly within the jitted function (forward loop)
     # Split tensor into groups based on norm_group_s
-    d_chunks = _split_tensor_to_groups_jit(d, offsets, norm_group_s)
+    d_chunks = _split_tensor_to_groups_jit(d, active_split_sizes_s)
     processed_d_chunks = [chk_d if chk_d.numel() > 0 else torch.tensor(0., device=d.device) for chk_d in d_chunks]
     # Ball projection (radius_ball_s is assumed > 0)
     l2_norms_d = torch.stack([torch.linalg.vector_norm(chk_d, ord=2) for chk_d in processed_d_chunks])
@@ -380,7 +320,7 @@ def _apply_forward_loop_update(
     
     d_chunks = [
         chk_d / factor_d
-        if chk_d.numel() > 0 else chk_d
+        if chk_d.numel() > 0 else chk_d # CORRECTED HERE
         for chk_d, factor_d in zip(d_chunks, factors_d)
     ]
     
@@ -499,7 +439,76 @@ class FBFGS(Optimizer):
         self.max_iter = max_iter
         self.t = 1
         
-        # Compute and store offsets for parameters
+        self._calculate_param_info() # Calculate param_sizes, total_size, num_layers, and offsets
+        # Store norm_group values directly, default logic will use these to pick precomputed split_sizes
+        self.norm_group_s_val = norm_group_s if norm_group_s is not None else float(self._num_layers) # Default to vector norm (one group for all parameters)
+        self.norm_group_y_val = norm_group_y if norm_group_y is not None else 1.0 # Default to matrix norm (one group per layer)
+        # Precompute split_sizes for all relevant scenarios
+        self._split_sizes_map: Dict[str, List[int]] = {}
+        # Scenario 1: One group per layer (effective_norm_group == 1.0)
+        self._split_sizes_map['1.0'] = self._get_split_sizes_one_group_per_layer()
+        # Scenario 2: One group for all parameters (effective_norm_group == float(self._num_layers))
+        self._split_sizes_map[str(float(self._num_layers))] = self._get_split_sizes_one_group_all_params()
+        # Scenario 3: Sub-layer groups (effective_norm_group < 1.0)
+        # Check if norm_group_y_val or norm_group_s_val requires this split
+        if self.norm_group_y_val < 1.0:
+            self._split_sizes_map[f'lt1.0_y_{self.norm_group_y_val}'] = self._get_split_sizes_sub_layer_groups(self.norm_group_y_val)
+        if self.norm_group_s_val < 1.0:
+            self._split_sizes_map[f'lt1.0_s_{self.norm_group_s_val}'] = self._get_split_sizes_sub_layer_groups(self.norm_group_s_val)
+        # Scenario 4: Total groups (effective_norm_group > num_layers)
+        # Check if norm_group_y_val or norm_group_s_val requires this split
+        if self.norm_group_y_val > self._num_layers:
+            self._split_sizes_map[f'gt_num_layers_y_{self.norm_group_y_val}'] = self._get_split_sizes_total_groups(self.norm_group_y_val)
+        if self.norm_group_s_val > self._num_layers:
+            self._split_sizes_map[f'gt_num_layers_s_{self.norm_group_s_val}'] = self._get_split_sizes_total_groups(self.norm_group_s_val)
+        # Store references to the active split_sizes lists for direct access in loops
+        # This replaces the need for an if/elif/else chain in the hot loop
+        _effective_norm_group_s = self.norm_group_s_val
+        if _effective_norm_group_s == 1.0:
+            self._active_split_sizes_s = self._split_sizes_map['1.0']
+        elif _effective_norm_group_s == float(self._num_layers):
+            self._active_split_sizes_s = self._split_sizes_map[str(float(self._num_layers))]
+        elif _effective_norm_group_s < 1.0:
+            # Fallback for dynamic key if not pre-generated (should be if conditions above are right)
+            if f'lt1.0_s_{self.norm_group_s_val}' not in self._split_sizes_map:
+                self._split_sizes_map[f'lt1.0_s_{self.norm_group_s_val}'] = self._get_split_sizes_sub_layer_groups(self.norm_group_s_val)
+            self._active_split_sizes_s = self._split_sizes_map[f'lt1.0_s_{self.norm_group_s_val}']
+        else: # > num_layers
+            # Fallback for dynamic key if not pre-generated
+            if f'gt_num_layers_s_{self.norm_group_s_val}' not in self._split_sizes_map:
+                self._split_sizes_map[f'gt_num_layers_s_{self.norm_group_s_val}'] = self._get_split_sizes_total_groups(self.norm_group_s_val)
+            self._active_split_sizes_s = self._split_sizes_map[f'gt_num_layers_s_{self.norm_group_s_val}']
+        _effective_norm_group_y = self.norm_group_y_val
+        if _effective_norm_group_y == 1.0:
+            self._active_split_sizes_y = self._split_sizes_map['1.0']
+        elif _effective_norm_group_y == float(self._num_layers):
+            self._active_split_sizes_y = self._split_sizes_map[str(float(self._num_layers))]
+        elif _effective_norm_group_y < 1.0:
+            # Fallback for dynamic key if not pre-generated
+            if f'lt1.0_y_{self.norm_group_y_val}' not in self._split_sizes_map:
+                self._split_sizes_map[f'lt1.0_y_{self.norm_group_y_val}'] = self._get_split_sizes_sub_layer_groups(self.norm_group_y_val)
+            self._active_split_sizes_y = self._split_sizes_map[f'lt1.0_y_{self.norm_group_y_val}']
+        else: # > num_layers
+            # Fallback for dynamic key if not pre-generated
+            if f'gt_num_layers_y_{self.norm_group_y_val}' not in self._split_sizes_map:
+                self._split_sizes_map[f'gt_num_layers_y_{self.norm_group_y_val}'] = self._get_split_sizes_total_groups(self.norm_group_y_val)
+            self._active_split_sizes_y = self._split_sizes_map[f'gt_num_layers_y_{self.norm_group_y_val}']
+        self.prefetch_buffer = prefetch_buffer
+        self.ro_threshold_rate = ro_threshold_rate
+        self.current_ro_threshold = 0
+        self.y_norms = []
+    def _numel(self):
+        if self._numel_cache is None:
+            self._numel_cache = sum(
+                2 * p.numel() if torch.is_complex(p) else p.numel()
+                for p in self._params
+            )
+        return self._numel_cache
+    def _calculate_param_info(self):
+        self._param_sizes = [p.numel() for p in self._params]
+        self._total_size = sum(self._param_sizes)
+        self._num_layers = len(self._params)
+        
         self._offsets = []
         offset = 0
         for p in self._params:
@@ -508,19 +517,6 @@ class FBFGS(Optimizer):
                 offset += 2 * p.numel()
             else:
                 offset += p.numel()
-        self.prefetch_buffer = prefetch_buffer
-        self.norm_group_s = norm_group_s if norm_group_s is not None else len(self._params)  # Default to vector norm (num_layers)
-        self.norm_group_y = norm_group_y if norm_group_y is not None else 1  # Default to matrix norm (1)
-        self.ro_threshold_rate = ro_threshold_rate
-        self.current_ro_threshold = 0  # Start at threshold of 0
-        self.y_norms = [] # Initialize y_norms as a direct attribute
-    def _numel(self):
-        if self._numel_cache is None:
-            self._numel_cache = sum(
-                2 * p.numel() if torch.is_complex(p) else p.numel()
-                for p in self._params
-            )
-        return self._numel_cache
     # Remove _init_flat_params method entirely
     def _split_direction_to_layers(self, flat_tensor):
         """Split flat tensor into chunks corresponding to parameter sizes."""
@@ -531,6 +527,47 @@ class FBFGS(Optimizer):
             chunks.append(flat_tensor[offset:offset+size])
             offset += size
         return chunks
+    # --- New helper methods for split_sizes pre-computation ---
+    def _get_split_sizes_one_group_per_layer(self) -> List[int]:
+        return self._param_sizes
+    def _get_split_sizes_one_group_all_params(self) -> List[int]:
+        return [self._total_size]
+    def _get_split_sizes_sub_layer_groups(self, effective_norm_group: float) -> List[int]:
+        groups_per_layer = int(1.0 / effective_norm_group)
+        if groups_per_layer <= 0: # Safeguard, though unlikely for norm_group < 1.0
+            groups_per_layer = 1
+        
+        all_split_sizes: List[int] = []
+        for size in self._param_sizes:
+            if size == 0:
+                continue
+            min_size = size // groups_per_layer
+            remainder = size % groups_per_layer
+            
+            split_sizes_for_layer: List[int] = []
+            for i in range(groups_per_layer):
+                split_size = min_size
+                if i < remainder:
+                    split_size += 1
+                split_sizes_for_layer.append(split_size)
+            all_split_sizes.extend(split_sizes_for_layer)
+        return all_split_sizes
+    def _get_split_sizes_total_groups(self, effective_norm_group: float) -> List[int]:
+        num_groups = int(effective_norm_group)
+        if num_groups <= 0: # Safeguard
+            num_groups = 1
+        
+        split_sizes: List[int] = []
+        group_size = self._total_size // num_groups
+        remainder = self._total_size % num_groups
+        
+        for i in range(num_groups):
+            current_group_size = group_size
+            if i < remainder:
+                current_group_size += 1
+            split_sizes.append(current_group_size)
+        return split_sizes
+    # --- End of new helper methods ---
     def gram_schmidt_orthogonalization(self, flat_grad: Tensor, ball_radius: float = 500) -> Tensor:
         """Decompose gradients into orthogonal and natural opposition components."""
 # TODO: detach params
@@ -568,104 +605,19 @@ class FBFGS(Optimizer):
               adjusted_chunks.append(combined)
             
         return torch.cat(adjusted_chunks).to(dtype=flat_grad.dtype).contiguous()
-    def _split_direction_to_groups(self, flat_tensor, norm_group=None):
-        """Split flat tensor into groups based on norm_group parameter.
-        
-        norm_group behavior:
-        - norm_group == 1: One group per layer (matrix norm, current behavior)
-        - norm_group == num_layers: One group for all parameters (vector norm on flat_grad)
-        - norm_group < 1: Split each layer into int(1/norm_group) groups (sub-layer norm)
-        - norm_group > num_layers: Split parameters into norm_group groups
-        - norm_group == 0: Treat as 1 (fallback to matrix norm)
-        """
-        param_sizes = [p.numel() for p in self._params]
-        total_size = sum(param_sizes)
-        num_layers = len(self._params)
-        
-        # Use provided norm_group or fall back to instance variable
-        effective_norm_group = norm_group if norm_group is not None else self.norm_group
-        
-        # Handle norm_group == 0 as norm_group == 1
-        if effective_norm_group == 0:
-            norm_group = 1
-        else:
-            norm_group = effective_norm_group
-            
-        # Determine number of groups
-        if norm_group == 1:
-            # Matrix norm: one group per layer (current behavior)
-            groups = []
-            offset = 0
-            for size in param_sizes:
-                groups.append(flat_tensor[offset:offset+size])
-                offset += size
-            return groups
-        elif norm_group == num_layers:
-            # Vector norm on flat_grad: one group for all parameters
-            return [flat_tensor]
-        elif norm_group < 1:
-            # Split each layer into int(1/norm_group) groups
-            groups_per_layer = int(1 / norm_group)
-            if groups_per_layer <= 0:
-                groups_per_layer = 1  # Fallback
-            groups = []
-            offset = 0
-            for layer_idx, size in enumerate(param_sizes):
-                layer_tensor = flat_tensor[offset:offset+size]
-                if groups_per_layer == 1 or size == 0:
-                    groups.append(layer_tensor)
-                else:
-                    # Split this layer into groups_per_layer groups
-                    # Use split with sizes to handle uneven splits
-                    min_size = size // groups_per_layer
-                    remainder = size % groups_per_layer
-                    split_sizes = [min_size] * groups_per_layer
-                    for i in range(remainder):
-                        split_sizes[i] += 1
-                    
-                    layer_groups = torch.split(layer_tensor, split_sizes, dim=0)
-                    groups.extend(layer_groups)
-                offset += size
-            return groups
-        else:
-#TODO: I think this should just be an error.
-            # norm_group > num_layers: Split total parameters into norm_group groups
-            num_groups = int(norm_group)
-            if num_groups <= 0:
-                num_groups = 1  # Fallback
-            groups = []
-            offset = 0
-            group_size = total_size // num_groups
-            remainder = total_size % num_groups
-            
-#TODO: this is wrong the remainder should go with the last layer as a jumbo layer
-            for i in range(num_groups):
-                # Distribute remainder among first few groups
-                current_size = group_size + (1 if i < remainder else 0)
-                if current_size > 0:
-                    groups.append(flat_tensor[offset:offset+current_size])
-                    offset += current_size
-            return groups
     def norm_select(self, tensor: Tensor, 
+                   active_split_sizes: List[int], # NEW ARGUMENT
                    norm: int = 2,
                    radius_scaling: float = 1.0,
                    radius_ball: float = 1.0,
-                   eps: float = 1e-8,
-                   norm_group: Optional[Union[int, float]] = None) -> Tensor:
+                   eps: float = 1e-8) -> Tensor:
         """
-        Encapsulates the normalization logic based on norm_group parameter.
-        Splits the tensor into groups based on norm_group and applies normalization.
-        
-        norm_group behavior:
-        - norm_group == 1: Matrix norm (one group per layer, current behavior)
-        - norm_group == num_layers: Vector norm on flat_grad (one group for all parameters)
-        - norm_group < 1: Sub-layer norm (split each layer into groups)
-        - norm_group > num_layers: Group norm (split parameters into norm_group groups)
+        Encapsulates the normalization logic.
+        Splits the tensor into groups based on active_split_sizes and applies normalization.
         """
         with torch.no_grad():
-            # Split tensor into groups based on norm_group
-            effective_norm_group = norm_group if norm_group is not None else self.norm_group
-            chunks = self._split_direction_to_groups(tensor, norm_group=effective_norm_group)
+            # Split tensor into groups based on active_split_sizes
+            chunks = _split_tensor_to_groups_jit(tensor, active_split_sizes)
             
             # Vectorized Phase 1: Parameter-wise scaling (optional) - zero out small elements per group
             if radius_scaling > 0:
@@ -763,7 +715,7 @@ class FBFGS(Optimizer):
         """Gather flat gradients and normalize based on norm_group parameter."""
         flat_grad = self._gather_flat_grad()
         # Use norm_select to handle normalization based on norm_group
-        normed_grad = self.norm_select(flat_grad, norm=norm, radius_scaling=radius_ball, radius_ball=2.)
+        normed_grad = self.norm_select(flat_grad, self._active_split_sizes_s, norm=norm, radius_scaling=radius_ball, radius_ball=2.)
         return normed_grad
     def normalize_per_parameter_chunks(self, tensor: Tensor, 
                                      norm: int = 2,
@@ -778,7 +730,7 @@ class FBFGS(Optimizer):
         - norm_group < 1: Sub-layer norm (split each layer into groups)
         - norm_group > num_layers: Group norm (split parameters into norm_group groups)
         """
-        return self.norm_select(tensor, norm=norm, radius_scaling=radius_scaling, radius_ball=radius_ball, eps=eps)
+        return self.norm_select(tensor, self._active_split_sizes_s, norm=norm, radius_scaling=radius_scaling, radius_ball=radius_ball, eps=eps)
     def _add_grad(self, step_size, update):
         """Perform parameter update with a dense or sparse tensor update."""
         if torch.is_tensor(step_size):
@@ -839,7 +791,7 @@ class FBFGS(Optimizer):
         q = flat_grad.to(torch.float32).to(optimizer_device).neg()
 #put on the local ball without selection
         #put on the local ball without selection
-        q = self.norm_select(q, norm=2., radius_scaling=0., radius_ball=self.radius_ball, norm_group=self.norm_group_y)
+        q = self.norm_select(q, self._active_split_sizes_y, norm=2., radius_scaling=0., radius_ball=self.radius_ball)
         
         # Normalize each parameter's chunk
         q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
@@ -920,7 +872,7 @@ class FBFGS(Optimizer):
                 
 #EXTRACT ME GEMINI
                 q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, self._offsets, self.radius_ball, self.norm_group_y
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, self.radius_ball, self._active_split_sizes_y
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
@@ -1024,7 +976,7 @@ class FBFGS(Optimizer):
                         event.wait()
                         wait_end = time.time()
                     
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self._offsets, self.radius_ball_s, self.norm_group_s)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s)
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self._offsets, self.radius_ball, self.norm_group_y)
                     
                     # Cleanup
@@ -1065,7 +1017,7 @@ class FBFGS(Optimizer):
 #        d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
     # gram_schmidt_orthogonalization(self, flat_grad: Tensor, l2_threshold: float = 250.0) -> Tensor:
 #        d = self.gram_schmidt_orthogonalization(d)
-        d = self.norm_select(d, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s, norm_group=effective_norm_group)
+        d = self.norm_select(d, self._active_split_sizes_s, norm=norm, radius_scaling=radius_s, radius_ball=self.radius_ball_s)
 #        d = self.gram_schmidt_orthogonalization(d)
         d = torch.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
         d = d.to(torch.float16)
@@ -1283,15 +1235,15 @@ class FBFGS(Optimizer):
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
-                    y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, 
-                    norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val
+                    y_norm=self.norm_group_y_val, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, 
+                    norm_group=self.norm_group_s_val, ro_threshold_val=ro_threshold_val
                 )
               else:
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     [], [], [], flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
-                    y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, 
-                    n_iter=n_iter, norm_group=self.norm_group_s, ro_threshold_val=0
+                    y_norm=self.norm_group_y_val, ls_failed=ls_failed, orthogonality=orthogonality, 
+                    n_iter=n_iter, norm_group=self.norm_group_s_val, ro_threshold_val=0
                 )
 #                  d = self._gather_flat_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
 #                  #TODO: should we also do norm float("inf") here to match direction S?
@@ -1343,7 +1295,7 @@ class FBFGS(Optimizer):
               #Shotgun Noise
               # Use norm_select for normalization instead of manual per-parameter normalization
               print("y dense raw before ops: " + str((y_dense != 0).sum()))
-              y_dense = self.norm_select(y_dense, norm=y_norm, radius_scaling=self.radius_y, radius_ball=self.radius_ball, norm_group=self.norm_group_y)
+              y_dense = self.norm_select(y_dense, self._active_split_sizes_y, norm=y_norm, radius_scaling=self.radius_y, radius_ball=self.radius_ball)
               y_mask = (y_dense != 0)
               print("y dense pre s-mask " + str((y_dense != 0).sum()))
               y_dense[s_mask] = 0
@@ -1527,7 +1479,7 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=y_norm, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s, ro_threshold_val=ro_threshold_val )
+              d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=self.norm_group_y_val, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s_val, ro_threshold_val=ro_threshold_val )
               state["direction_alignment_mask"] = direction_alignment_mask
               # sparse_direction_approximate already applies norm_select
               del H_diag
