@@ -242,7 +242,8 @@ def _apply_backward_loop_update(
     ro_i: torch.Tensor,
     q_inv_norm: float,
     radius_ball: float,
-    active_split_sizes_y: List[int], # NEW ARGUMENT
+    active_split_sizes_y: List[int],
+    segment_lengths_tensor_y: torch.Tensor, # NEW ARGUMENT
 ) -> Tuple[torch.Tensor, torch.Tensor, List[float], float]:
     inv_dir_norm = torch.tensor(y_norms[i].item() )
     normalized_dir = sparse_dir_i * inv_dir_norm
@@ -262,36 +263,25 @@ def _apply_backward_loop_update(
         # Vectorized and simplified ball projection (radius_ball is assumed > 0)
         # Assuming chunks will NEVER contain numel() == 0 tensors, and is NEVER empty.
         
-        # Calculate L2 norms for all chunks at once
-        l2_norms = torch.stack([torch.linalg.vector_norm(chk, ord=2) for chk in chunks]) # Directly use chunks
-        # Calculate factors: Only scale down when l2_norm/radius_ball >= 1
-        # Use torch.where for vectorized conditional logic
+        # 1. Concatenate all chunks (required for segment operations)
+        concatenated_chunks = torch.cat(chunks)
+        
+        # 2. Calculate L2 norms for all chunks at once using torch.segment_reduce
+        sum_of_squares_per_segment = torch.segment_reduce(concatenated_chunks.pow(2), reduce="sum", lengths=segment_lengths_tensor_y)
+        l2_norms = sum_of_squares_per_segment.sqrt()
+
+        # 3. Calculate factors: Only scale down when l2_norm/radius_ball >= 1
         factors = torch.where(
             (l2_norms / radius_ball >= 1),
             l2_norms / radius_ball,
             torch.tensor(1.0, device=q.device)
         )
-        # Apply factors to chunks in a vectorized manner (concatenate, divide, then split)
-        concatenated_chunks = torch.cat(chunks)
-        chunk_numels = [chk.numel() for chk in chunks]
-        chunk_numels_tensor = torch.tensor(chunk_numels, dtype=torch.int64, device=q.device)
-
-        factors = factors.to(q.device)
-        expanded_factors = torch.repeat_interleave(factors, chunk_numels_tensor)
+        # 4. Apply factors to chunks in a vectorized manner (concatenate, divide, then split)
+        #    Use precomputed segment_lengths_tensor_y for expanded_factors
+        expanded_factors = torch.repeat_interleave(factors, segment_lengths_tensor_y)
         
         divided_concatenated_chunks = concatenated_chunks / expanded_factors
         chunks = _split_tensor_to_groups_jit(divided_concatenated_chunks, active_split_sizes_y)
-#        chunks = [
-#            chk / factor
-#            if chk.numel() > 0 else chk
-#            for chk, factor in zip(chunks, factors)
-#        ]
-#        if len(chunks) == 0:
-#            q = q # No change if no chunks
-#        else:
-        q = torch.cat(chunks)
-        new_q_inv_norm = 1.0 / (torch.linalg.vector_norm(q, ord=2).item() )
-        return q, direction_alignment_mask, direction_similarities, new_q_inv_norm # Return new_q_inv_norm
     
     return q, direction_alignment_mask, direction_similarities, q_inv_norm # Return original q_inv_norm
 @torch.jit.script
@@ -303,7 +293,8 @@ def _apply_forward_loop_update(
     idx: int,
     ro_idx: torch.Tensor,
     radius_ball_s: float,
-    active_split_sizes_s: List[int] # NEW ARGUMENT
+    active_split_sizes_s: List[int], # NEW ARGUMENT
+    segment_lengths_tensor_s: torch.Tensor, # NEW ARGUMENT
 ) -> torch.Tensor:
     dot_product_val = SparseFlatTensor.sparse_dot_dense(dir_device, d)
     alpha_val = al[idx] - dot_product_val * ro_idx.item()
@@ -320,22 +311,23 @@ def _apply_forward_loop_update(
     # Ball projection (radius_ball_s is assumed > 0)
     # Assuming d_chunks will NEVER contain numel() == 0 tensors, and is NEVER empty.
     
-    l2_norms_d = torch.stack([torch.linalg.vector_norm(chk_d, ord=2) for chk_d in d_chunks]) # Directly use d_chunks
+    # 1. Concatenate all d_chunks (required for segment operations)
+    concatenated_d_chunks = torch.cat(d_chunks)
     
+    # 2. Calculate L2 norms for all d_chunks at once using torch.segment_reduce
+    sum_of_squares_per_segment_d = torch.segment_reduce(concatenated_d_chunks.pow(2), reduce="sum", lengths=segment_lengths_tensor_s)
+    l2_norms_d = sum_of_squares_per_segment_d.sqrt()
+    
+    # 3. Calculate factors: Only scale down when l2_norm/radius_ball >= 1
     factors_d = torch.where(
         (l2_norms_d / radius_ball_s >= 1), # Removed epsilon check as requested
         l2_norms_d / radius_ball_s, # Use radius_ball_s directly
         torch.tensor(1.0, device=d.device)
     )
     
-    # Vectorized division of chunks by factors_d
-    concatenated_d_chunks = torch.cat(d_chunks)
-    d_chunk_numels = [chk.numel() for chk in d_chunks]
-    d_chunk_numels_tensor = torch.tensor(d_chunk_numels, dtype=torch.int64, device=d.device)
-
-    factors_d = factors_d.to(d.device)
-    expanded_factors_d = torch.repeat_interleave(factors_d, d_chunk_numels_tensor)
-
+    # 4. Apply factors to d_chunks in a vectorized manner (concatenate, divide, then split)
+    #    Use precomputed segment_lengths_tensor_s for expanded_factors_d
+    expanded_factors_d = torch.repeat_interleave(factors_d, segment_lengths_tensor_s)
     divided_concatenated_d_chunks = concatenated_d_chunks / expanded_factors_d
     d_chunks = _split_tensor_to_groups_jit(divided_concatenated_d_chunks, active_split_sizes_s)
     
@@ -508,6 +500,11 @@ class FBFGS(Optimizer):
             if f'gt_num_layers_y_{self.norm_group_y_val}' not in self._split_sizes_map:
                 self._split_sizes_map[f'gt_num_layers_y_{self.norm_group_y_val}'] = self._get_split_sizes_total_groups(self.norm_group_y_val)
             self._active_split_sizes_y = self._split_sizes_map[f'gt_num_layers_y_{self.norm_group_y_val}']
+
+        # Precompute segment lengths as tensors for JIT-friendly segment_reduce and repeat_interleave
+        self._segment_lengths_tensor_y = torch.tensor(self._active_split_sizes_y, dtype=torch.int64, device=self.optimizer_device)
+        self._segment_lengths_tensor_s = torch.tensor(self._active_split_sizes_s, dtype=torch.int64, device=self.optimizer_device)
+
         self.prefetch_buffer = prefetch_buffer
         self.ro_threshold_rate = ro_threshold_rate
         self.current_ro_threshold = 0
@@ -887,7 +884,7 @@ class FBFGS(Optimizer):
                 
 #EXTRACT ME GEMINI
                 q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, self.radius_ball, self._active_split_sizes_y
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
@@ -991,7 +988,7 @@ class FBFGS(Optimizer):
                         event.wait()
                         wait_end = time.time()
                     
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self._offsets, self.radius_ball, self.norm_group_y)
                     
                     # Cleanup
