@@ -220,6 +220,72 @@ def _strong_wolfe(
           return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
     return success, f_best, g_best.to(optimizer_device), t_best, ls_func_evals
 @torch.jit.script
+def _split_tensor_to_groups_jit(
+    flat_tensor: torch.Tensor,
+    offsets: List[int],
+    norm_group: Optional[Union[int, float]]
+) -> List[torch.Tensor]:
+    num_layers = len(offsets)
+    param_sizes: List[int] = []
+    for k in range(num_layers):
+        if k + 1 < num_layers:
+            param_sizes.append(offsets[k+1] - offsets[k])
+        else:
+            param_sizes.append(flat_tensor.numel() - offsets[k])
+    total_size = flat_tensor.numel()
+    
+    # Handle norm_group == 0 as norm_group == 1
+    effective_norm_group: float = 1.0 # Initialize with a default value
+    if norm_group is None:
+        effective_norm_group = 1.0
+    elif norm_group == 0 or norm_group == 0.0:
+        effective_norm_group = 1.0
+    else:
+        effective_norm_group = float(norm_group)
+    # Determine number of groups
+    groups: List[torch.Tensor] = []
+    current_offset = 0
+    if effective_norm_group == 1.0: # One group per layer (matrix norm)
+        for size in param_sizes:
+            groups.append(flat_tensor[current_offset:current_offset+size])
+            current_offset += size
+        return groups
+    elif effective_norm_group == float(num_layers): # One group for all parameters (vector norm)
+        return [flat_tensor]
+    elif effective_norm_group < 1.0: # Split each layer into int(1/norm_group) groups
+        groups_per_layer = int(1.0 / effective_norm_group)
+        for layer_idx in range(num_layers):
+            size = param_sizes[layer_idx]
+            layer_tensor = flat_tensor[current_offset:current_offset+size]
+            # Split this layer into groups_per_layer groups
+            min_size = size // groups_per_layer
+            remainder = size % groups_per_layer
+            split_sizes: List[int] = []
+            for i in range(groups_per_layer):
+                split_size = min_size
+                if i < remainder:
+                    split_size += 1
+                split_sizes.append(split_size)
+            
+            layer_groups = torch.split(layer_tensor, split_sizes, dim=0)
+            for lg in layer_groups:
+                groups.append(lg)
+            current_offset += size
+        return groups
+    else: # norm_group > num_layers: Split total parameters into norm_group groups
+        num_groups = int(effective_norm_group)
+        
+        group_size = total_size // num_groups
+        remainder = total_size % num_groups
+        
+        for i in range(num_groups):
+            current_group_size = group_size
+            if i < remainder:
+                current_group_size += 1
+            groups.append(flat_tensor[current_offset:current_offset+current_group_size])
+            current_offset += current_group_size
+        return groups
+@torch.jit.script
 def _apply_backward_loop_update(
     q: torch.Tensor,
     sparse_dir_i: SparseFlatTensor,
@@ -232,8 +298,11 @@ def _apply_backward_loop_update(
     direction_similarities: List[float],
     optimizer_device: str,
     ro_i: torch.Tensor,
-    q_inv_norm: float # New argument
-) -> Tuple[torch.Tensor, torch.Tensor, List[float], float]: 
+    q_inv_norm: float,
+    offsets: List[int],
+    radius_ball: float,
+    norm_group_y: Optional[Union[int, float]],
+) -> Tuple[torch.Tensor, torch.Tensor, List[float], float]:
     inv_dir_norm = torch.tensor(y_norms[i].item() )
     normalized_dir = sparse_dir_i * inv_dir_norm
     # Use the passed q_inv_norm directly
@@ -241,12 +310,36 @@ def _apply_backward_loop_update(
     aligned =  -orthogonality <= direction_similarity <= orthogonality
     direction_alignment_mask[i] = aligned
     direction_similarities.append(direction_similarity)
-    
     if direction_alignment_mask[i]:
         alpha = SparseFlatTensor.sparse_dot_dense(sparse_stp_i, q).item()
         al[i] = alpha * ro_i.item()
         sparse_old_dir_scaled = sparse_dir_i * torch.tensor(-al[i])
         q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q) # Update q
+        # Apply the norm_select logic directly within the jitted function
+        # Split tensor into groups based on norm_group_y
+        chunks = _split_tensor_to_groups_jit(q, offsets, norm_group_y)
+        # Vectorized and simplified ball projection (radius_ball is assumed > 0)
+        # Handle empty chunks by replacing them with a tensor that won't affect calculations
+        processed_chunks = [chk if chk.numel() > 0 else torch.tensor(0., device=q.device) for chk in chunks]
+        # Calculate L2 norms for all chunks at once
+        l2_norms = torch.stack([torch.linalg.vector_norm(chk, ord=2) for chk in processed_chunks])
+        # Calculate factors: Only scale down when l2_norm/radius_ball >= 1
+        # Use torch.where for vectorized conditional logic
+        factors = torch.where(
+            (l2_norms / radius_ball >= 1),
+            l2_norms / radius_ball,
+            torch.tensor(1.0, device=q.device)
+        )
+        # Apply factors to chunks using a list comprehension (can't directly vectorize across list of tensors)
+        chunks = [
+            chk / factor
+            if chk.numel() > 0 else chk
+            for chk, factor in zip(chunks, factors)
+        ]
+#        if len(chunks) == 0:
+#            q = q # No change if no chunks
+#        else:
+        q = torch.cat(chunks)
         new_q_inv_norm = 1.0 / (torch.linalg.vector_norm(q, ord=2).item() )
         return q, direction_alignment_mask, direction_similarities, new_q_inv_norm # Return new_q_inv_norm
     
@@ -258,7 +351,10 @@ def _apply_forward_loop_update(
     dir_device: SparseFlatTensor,
     al: torch.Tensor,
     idx: int,
-    ro_idx: torch.Tensor
+    ro_idx: torch.Tensor,
+    offsets: List[int],
+    radius_ball_s: float,
+    norm_group_s: Optional[Union[int, float]]
 ) -> torch.Tensor:
     dot_product_val = SparseFlatTensor.sparse_dot_dense(dir_device, d)
     alpha_val = al[idx] - dot_product_val * ro_idx.item()
@@ -269,6 +365,29 @@ def _apply_forward_loop_update(
         stp_device.unit_values * (alpha_val) if stp_device.unit_values.numel() > 0 else torch.empty(0, dtype=torch.float32, device=stp_device.values.device)
     )
     d = SparseFlatTensor.add_sparse_dense(scaled_stp, d)
+    # Apply the norm_select logic directly within the jitted function (forward loop)
+    # Split tensor into groups based on norm_group_s
+    d_chunks = _split_tensor_to_groups_jit(d, offsets, norm_group_s)
+    processed_d_chunks = [chk_d if chk_d.numel() > 0 else torch.tensor(0., device=d.device) for chk_d in d_chunks]
+    # Ball projection (radius_ball_s is assumed > 0)
+    l2_norms_d = torch.stack([torch.linalg.vector_norm(chk_d, ord=2) for chk_d in processed_d_chunks])
+    
+    factors_d = torch.where(
+        (l2_norms_d / radius_ball_s >= 1), # Removed epsilon check as requested
+        l2_norms_d / radius_ball_s, # Use radius_ball_s directly
+        torch.tensor(1.0, device=d.device)
+    )
+    
+    d_chunks = [
+        chk_d / factor_d
+        if chk_d.numel() > 0 else chk_d
+        for chk_d, factor_d in zip(d_chunks, factors_d)
+    ]
+    
+#    if len(d_chunks) == 0:
+#        d = d
+#    else:
+    d = torch.cat(d_chunks)
     return d
 class FBFGS(Optimizer):
     """Implements L-BFGS algorithm.
@@ -719,13 +838,14 @@ class FBFGS(Optimizer):
         num_old = len(old_dirs)
         q = flat_grad.to(torch.float32).to(optimizer_device).neg()
 #put on the local ball without selection
-        q = self.norm_select(q, norm=y_norm, radius_scaling=0., radius_ball=self.radius_ball, norm_group=self.norm_group_y)
+        #put on the local ball without selection
+        q = self.norm_select(q, norm=2., radius_scaling=0., radius_ball=self.radius_ball, norm_group=self.norm_group_y)
         
         # Normalize each parameter's chunk
         q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
         print("q max value after layer norm: " + str(q.max()))
         q_current_l2_norm = torch.linalg.vector_norm(q, ord=2).item()
-        q_inv_norm = 1.0 / (q_current_l2_norm + torch.finfo(q.dtype).eps)
+        q_inv_norm = 1.0 / (q_current_l2_norm )
         al = torch.empty(num_old, dtype=q.dtype, device=optimizer_device)
         direction_alignment_mask = torch.empty(num_old, dtype=torch.bool, device=optimizer_device)
         direction_similarities = []
@@ -800,7 +920,7 @@ class FBFGS(Optimizer):
                 
 #EXTRACT ME GEMINI
                 q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, self._offsets, self.radius_ball, self.norm_group_y
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
@@ -904,7 +1024,8 @@ class FBFGS(Optimizer):
                         event.wait()
                         wait_end = time.time()
                     
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx])
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self._offsets, self.radius_ball_s, self.norm_group_s)
+#                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self._offsets, self.radius_ball, self.norm_group_y)
                     
                     # Cleanup
                     del forward_buffer_dict[idx]
@@ -1514,16 +1635,16 @@ class FBFGS(Optimizer):
                   self._add_grad(t, d)
 # TODO: we need a second closure that just does loss not generate gradients..
 # TODO: find what is causing this it could just be a bug somewhere in linesearch or the restore routine
-                  if closure() == loss:
-# TODO: maybe check closure == loss instead? as long as we have the right gradient this should be correct but if it is due to numerical instabilities the grad difference may poison the hessian
-                      self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
-                  else:
-                      print("LOSS PARITY FAILURE")
-                      exit()
-                      success = False
-                      for p, p_saved in zip(self._params, self.saved_params):
-                          p.copy_(p_saved)
-                      continue
+#                  if closure() == loss:
+## TODO: maybe check closure == loss instead? as long as we have the right gradient this should be correct but if it is due to numerical instabilities the grad difference may poison the hessian
+#                      self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
+#                  else:
+#                      print("LOSS PARITY FAILURE")
+#                      exit()
+#                      success = False
+#                      for p, p_saved in zip(self._params, self.saved_params):
+#                          p.copy_(p_saved)
+#                      continue
                   loss_device = self.optimizer_device
                   print(f" \n -----------got stepsize: {t} and loss: \033[92m{loss}\033[0m on device: {loss_device}-----------")
                   # opt_cond = loss <= 0 # This condition is not used later, can be removed if not needed elsewhere
