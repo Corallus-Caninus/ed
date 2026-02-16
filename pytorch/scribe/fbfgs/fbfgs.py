@@ -61,7 +61,9 @@ def _strong_wolfe(
     f_best = torch.tensor(f, device=device)
     g_best = g
     gtd_best = gtd
-    if f_new < f_best  and done != True  and f_new == f_new and f_new <= (f + c1 * t * gtd):
+    c1 = 1/c1
+    print("Ward condition: " + str((gtd_new + gtd)/(f_new - f) ))
+    if f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new + gtd)/(f_new - f):
       success = True
       stall_wolfe = 0
       t_best = t
@@ -72,7 +74,7 @@ def _strong_wolfe(
     ls_iter=0
     stall_wolfe=0
     while ls_iter < max_ls:
-        if ( abs(gtd_new) <= -c2 * gtd and f_new < f) and (f_new < (f + c1 * t * gtd) ):
+        if ( abs(gtd_new) <= -c2 * gtd and f_new < f) or (c1 > (gtd_new + gtd)/(f_new - f) ):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -161,14 +163,14 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
-        if f_new < f_best and f_new == f_new and f_new <= (f + c1 * t * gtd):
+        if f_new < f_best and f_new == f_new and c1 > (gtd_new + gtd)/(f_new - f):
           success = True
           stall_wolfe = 0
           t_best = t
           f_best = torch.tensor(f_new, device=device)
           g_best = g_new
-        print("Ward condition: " + str((gtd_new + gtd_prev)/(f_new - f_prev) ))
-        if f_new > (f + c1 * t * gtd)  or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
+        print("Ward condition: " + str((gtd_new + gtd)/(f_new - f) ))
+        if c1 > (gtd_new + gtd)/ (f_new - f)  or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
             bracket_g[high_pos] = g_new  # type: ignore[possibly-undefined]
@@ -1451,12 +1453,12 @@ class FBFGS(Optimizer):
           # Unpack d from tuple before using it
           gtd_sparse_product = flat_grad * d.to(self.optimizer_device) # Ensure d is on optimizer_device
           gtd = gtd_sparse_product.sum()  # g * d
-          if gtd >= -tolerance_change:
-            print(f"Exiting: gtd element {gtd} < tolerance {tolerance_change} (q max: {max_abs_q})")
-            state["old_stps"] = old_stps
-            state["ro"] = ro
-            state["old_dirs"] = old_dirs
-            break
+#          if gtd >= -tolerance_change:
+#            print(f"Exiting: gtd element {gtd} < tolerance {tolerance_change} (q max: {max_abs_q})")
+#            state["old_stps"] = old_stps
+#            state["ro"] = ro
+#            state["old_dirs"] = old_dirs
+#            break
           del gtd_sparse_product
           gc.collect()
           torch.cuda.empty_cache()
