@@ -61,7 +61,7 @@ def _strong_wolfe(
     f_best = torch.tensor(f, device=device)
     g_best = g
     gtd_best = gtd
-    if f_new < f_best  and done != True  and f_new == f_new and f_new <= (f - abs(c1 * t * gtd)) :
+    if f_new < f_best  and done != True  and f_new == f_new and f_new <= (f + c1 * t * gtd):
       success = True
       stall_wolfe = 0
       t_best = t
@@ -72,7 +72,7 @@ def _strong_wolfe(
     ls_iter=0
     stall_wolfe=0
     while ls_iter < max_ls:
-        if ( abs(gtd_new) <= -c2 * gtd and f_new < f) or (f_new < (f + c1 * t * gtd) ):
+        if ( abs(gtd_new) <= -c2 * gtd and f_new < f) and (f_new < (f + c1 * t * gtd) ):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -967,8 +967,8 @@ class FBFGS(Optimizer):
                         event.wait()
                         wait_end = time.time()
                     
-#                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
+#                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y)
                     
                     # Cleanup
                     del forward_buffer_dict[idx]
@@ -1337,23 +1337,21 @@ class FBFGS(Optimizer):
                 old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                 ls_failed = True
                 state["ls_failed"] = True
-                ls_failed = True
-                state["ls_failed"] = True
-              # Only add to history if ys meets threshold
-              if ys >= self.ro_threshold_rate:  # TODO: is this Kosher?
-                if self.direction_device != 'cpu' and torch.cuda.is_available():
-                  try:
-                    cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
-                    print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {history_size} GB") # Debug print
-                    while cuda_memory_allocated >= history_size:#TODO: history size is the amount of memory available from the device
-                        cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
-                        # shift  history by one (limited-memory)
-                        old_dirs.pop(0)
-                        old_stps.pop(0)
-                        ro.pop(0)
-                  except Exception as e:
-                    print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
-                elif self.direction_device == 'cpu':
+              
+              # Always handle memory management and add to history for the current iteration
+              if self.direction_device != 'cpu' and torch.cuda.is_available():
+                try:
+                  cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
+                  print(f"CUDA memory allocated: {cuda_memory_allocated} GB, history_size: {history_size} GB") # Debug print
+                  while cuda_memory_allocated >= history_size:#TODO: history size is the amount of memory available from the device
+                      cuda_memory_allocated = torch.cuda.memory_allocated(device=self.direction_device) / 1000000000
+                      # shift  history by one (limited-memory)
+                      old_dirs.pop(0)
+                      old_stps.pop(0)
+                      ro.pop(0)
+                except Exception as e:
+                  print(f"CUDA memory check failed: {e}.  Falling back to psutil.")
+              elif self.direction_device == 'cpu':
                   try:
                     cpu_ram_available = psutil.virtual_memory().available / (1024**3) # Available RAM in GB
                     print(f"CPU RAM available: {cpu_ram_available} GB, history_size: {history_size} GB") # Debug print
@@ -1376,22 +1374,19 @@ class FBFGS(Optimizer):
                             time.sleep(0.01) # Small sleep to prevent busy-waiting
                   except Exception as e:
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
-                print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
-                torch.cuda.empty_cache() # Clear cache before history update
-                # Store new direction/step and compute its L2 norm
-                y_to_store = y.to(self.direction_device, non_blocking=False, pin_memory=True)
-                old_dirs.append(y_to_store)
-                old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True))
-                ro.append(torch.tensor([(1. / ys)]))
-                # Convert dense y to compute norm
-# TODO: calculate this in selection before we sparsify
-#                y_dense = y.to_dense()
-##                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=float("inf"))
-##                y_dense = y_dense/abs(y_dense).max()
-#                y_norm_l2 = torch.linalg.vector_norm(y_dense, ord=2.)
-#                self.y_norms.append(1/torch.sqrt(torch.sum(y_dense**2)))
-                self.y_norms.append(1/y_norm_l2)
-                new_ys_x = new_ys_x + 1
+              print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
+              torch.cuda.empty_cache() # Clear cache before history update
+              # Store new direction/step and compute its L2 norm
+              y_to_store = y.to(self.direction_device, non_blocking=False, pin_memory=True)
+              old_dirs.append(y_to_store)
+              old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True))
+              ro.append(torch.tensor([(1. / ys)]))
+              self.y_norms.append(1/y_norm_l2)
+              new_ys_x = new_ys_x + 1
+              # Set ls_failed if ys is below threshold (moved here)
+              if ys < self.ro_threshold_rate:
+                  ls_failed = True
+                  state["ls_failed"] = True
               if n_iter > max_iter or loss == 0:
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
@@ -1456,6 +1451,12 @@ class FBFGS(Optimizer):
           # Unpack d from tuple before using it
           gtd_sparse_product = flat_grad * d.to(self.optimizer_device) # Ensure d is on optimizer_device
           gtd = gtd_sparse_product.sum()  # g * d
+          if gtd >= -tolerance_change:
+            print(f"Exiting: gtd element {gtd} < tolerance {tolerance_change} (q max: {max_abs_q})")
+            state["old_stps"] = old_stps
+            state["ro"] = ro
+            state["old_dirs"] = old_dirs
+            break
           del gtd_sparse_product
           gc.collect()
           torch.cuda.empty_cache()
