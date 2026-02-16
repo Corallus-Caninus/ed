@@ -63,7 +63,7 @@ def _strong_wolfe(
     gtd_best = gtd
     c1 = 1/c1
     print("Ward condition: " + str((gtd_new - abs(gtd))/(f_new - f) ))
-    if gtd_new < abs(gtd) and f_new < f_best  and done != True  and f_new == f_new and c1 < (gtd_new - abs(gtd))/(f_new - f) > 0:
+    if gtd_new < abs(gtd) and f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) > 0:
       success = True
       stall_wolfe = 0
       t_best = t
@@ -164,14 +164,14 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
-        if gtd_new < abs(gtd) and f_new < f_best and f_new == f_new and c1 < (gtd_new - abs(gtd))/(f_new - f) > 0:
+        if gtd_new < abs(gtd) and f_new < f_best and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) > 0:
           success = True
           stall_wolfe = 0
           t_best = t
           f_best = torch.tensor(f_new, device=device)
           g_best = g_new
         print("Ward condition: " + str((gtd_new - abs(gtd))/(f_new - f) ))
-        if gtd_new < abs(gtd) and c1 > (gtd_new - abs(gtd))/ (f_new - f)   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
+        if gtd_new < abs(gtd) and c1 < (gtd_new - abs(gtd))/ (f_new - f)   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
             bracket_g[high_pos] = g_new  # type: ignore[possibly-undefined]
