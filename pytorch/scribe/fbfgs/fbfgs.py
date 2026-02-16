@@ -869,7 +869,7 @@ class FBFGS(Optimizer):
                 
 #EXTRACT ME GEMINI
                 q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, 1e3, self._active_split_sizes_y, self._segment_lengths_tensor_y
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
@@ -973,7 +973,8 @@ class FBFGS(Optimizer):
                         event.wait()
                         wait_end = time.time()
                     
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
+#                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], 1e3, self._active_split_sizes_s, self._segment_lengths_tensor_s)
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y)
                     
                     # Cleanup
@@ -1228,7 +1229,8 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache() # Clear cache before history update
               # Calculate the top k ro threshold if we have history
 #TODO: clean this up
-              if len(old_dirs) != 0  : # or n_iter != 1 :
+#              if len(old_dirs) != 0  : # or n_iter != 1 :
+              if n_iter != 1:
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
@@ -1337,12 +1339,12 @@ class FBFGS(Optimizer):
 #TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
 #TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
               # Rho Rewind when ys is too small
-              if ys < 1:
-                # Ensure recycle_bin is initialized before use
-                recycle_bin = state.setdefault("recycle_bin", [])
-                old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
-                ls_failed = True
-                state["ls_failed"] = True
+#              if ys < 1/self.radius_ball_y:
+#                # Ensure recycle_bin is initialized before use
+#                recycle_bin = state.setdefault("recycle_bin", [])
+#                old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
+#                ls_failed = True
+#                state["ls_failed"] = True
               
               # Always handle memory management and add to history for the current iteration
               if self.direction_device != 'cpu' and torch.cuda.is_available():
@@ -1382,12 +1384,13 @@ class FBFGS(Optimizer):
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
               print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
               torch.cuda.empty_cache() # Clear cache before history update
-              # Store new direction/step and compute its L2 norm
-              y_to_store = y.to(self.direction_device, non_blocking=False, pin_memory=True)
-              old_dirs.append(y_to_store)
-              old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True))
-              ro.append(torch.tensor([(1. / ys)]))
-              self.y_norms.append(1/y_norm_l2)
+              if ys > 1e-3:
+                # Store new direction/step and compute its L2 norm
+                y_to_store = y.to(self.direction_device, non_blocking=False, pin_memory=True)
+                old_dirs.append(y_to_store)
+                old_stps.append(s_sparse.to(self.direction_device, non_blocking=False, pin_memory=True))
+                ro.append(torch.tensor([(1. / ys)]))
+                self.y_norms.append(1/y_norm_l2)
               new_ys_x = new_ys_x + 1
               # Set ls_failed if ys is below threshold (moved here)
               if ys < self.ro_threshold_rate:
@@ -1414,7 +1417,7 @@ class FBFGS(Optimizer):
 #              if ys > 0:
 #                y_squared = y_dense.dot(y_dense)
 #                H_diag = ys / y_squared  
-#                del y_squared 
+#                 y_squared 
 #              else:
 #                H_diag = 1.
 #                H_diag = torch.tensor(H_diag, device=self.optimizer_device)  
@@ -1509,7 +1512,7 @@ class FBFGS(Optimizer):
                   old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
-                  if not old_dirs or not direction_alignment_mask.any():
+                  if True or not old_dirs or not direction_alignment_mask.any():
                     return orig_loss
                   # Continue to next iteration to retry
                   continue
