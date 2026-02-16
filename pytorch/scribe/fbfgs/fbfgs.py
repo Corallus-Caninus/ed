@@ -1393,7 +1393,7 @@ class FBFGS(Optimizer):
               if ys < self.ro_threshold_rate:
                   ls_failed = True
                   state["ls_failed"] = True
-              if n_iter > max_iter or loss == 0:
+              if n_iter >= max_iter or loss == 0:
                 self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
                 state["ro"] = ro
