@@ -74,7 +74,8 @@ def _strong_wolfe(
     ls_iter=0
     stall_wolfe=0
     while ls_iter < max_ls:
-        if gtd_new < 0 and ( abs(gtd_new) <= -c2 * abs(gtd) and f_new < f) or (c1 > (gtd_new - abs(gtd))/(f_new - f) > 0 ):
+#        if gtd_new < 0 and ( abs(gtd_new) <= -c2 * abs(gtd) and f_new < f) and (c1 > (gtd_new - abs(gtd))/(f_new - f) > 0 ):
+        if gtd_new < 0 and (c1 > (gtd_new - abs(gtd))/(f_new - f) > 0 ):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
