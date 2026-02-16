@@ -74,7 +74,7 @@ def _strong_wolfe(
     ls_iter=0
     stall_wolfe=0
     while ls_iter < max_ls:
-        if gtd_new < 0 and ( abs(gtd_new) <= -c2 * gtd and f_new < f) or (c1 > (gtd_new - abs(gtd))/(f_new - f) > 0 ):
+        if gtd_new < 0 and ( abs(gtd_new) <= -c2 * abs(gtd) and f_new < f) or (c1 > (gtd_new - abs(gtd))/(f_new - f) > 0 ):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -177,7 +177,7 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
-            if abs(gtd_new) <= -c2 * gtd and f_new < f_best : 
+            if abs(gtd_new) <= -c2 * abs(gtd) and f_new < f_best : 
                 print("STRONG WOLFE")
                 success = True
                 done = True
