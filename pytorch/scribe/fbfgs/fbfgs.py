@@ -63,7 +63,7 @@ def _strong_wolfe(
     gtd_best = gtd
     c1 = 1/c1
     print("Ward condition: " + str((gtd_new - abs(gtd))/(f_new - f) ))
-    if gtd_new < abs(gtd) and f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
+    if f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
       success = True
       stall_wolfe = 0
       t_best = t
@@ -74,8 +74,8 @@ def _strong_wolfe(
     ls_iter=0
     stall_wolfe=0
     while ls_iter < max_ls:
-#        if gtd_new < abs(gtd) and ( abs(abs(gtd_new)) <= -c2 * abs(gtd) and f_new < f) and (c1 > (abs(gtd_new) - abs(gtd))/(f_new - f) > 0 ):
-        if gtd_new < abs(gtd) and (c1 > (gtd_new - abs(gtd))/(f_new - f) ) and f_new < f:
+#        if ( abs(abs(gtd_new)) <= -c2 * abs(gtd) and f_new < f) and (c1 > (abs(gtd_new) - abs(gtd))/(f_new - f) > 0 ):
+        if (c1 > (gtd_new - abs(gtd))/(f_new - f) ) and f_new < f:
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -164,7 +164,7 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
-        if gtd_new < abs(gtd) and f_new < f_best and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
+        if f_new < f_best and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
           success = True
           stall_wolfe = 0
           t_best = t
@@ -180,7 +180,7 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
-            if abs(gtd_new) <= -c2 * abs(gtd) and f_new < f_best and gtd_new < abs(gtd) and c1 > (gtd_new - abs(gtd))/(f_new - f): 
+            if abs(gtd_new) <= -c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f): 
                 print("STRONG WOLFE")
                 success = True
                 done = True
@@ -1169,7 +1169,7 @@ class FBFGS(Optimizer):
 #                  self.y_norms.insert(idx, entry['y_norm'])
       
       any_line_search_failed = False  # Track if any line search failed in this iteration
-      while n_iter < max_iter: # Enforce max_iter
+      while True:
 #          saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #          if ro and len(ro) > 0:
 #              # Use current_ro_threshold instead of ro_threshold_rate
@@ -1509,7 +1509,7 @@ class FBFGS(Optimizer):
                   old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
-                  if not old_dirs:
+                  if not old_dirs or not direction_alignment_mask.any():
                     return orig_loss
                   # Continue to next iteration to retry
                   continue
