@@ -1443,8 +1443,8 @@ class FBFGS(Optimizer):
               del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
 #TODO: this or the above should be redundant trace and remove redundancy
-#          if n_iter >= max_iter or loss == 0:
-#            break
+          if n_iter >= max_iter or loss == 0:
+            break
           prev_flat_grad = flat_grad.cpu().clone()# TODO: this may be redundant, to should be clone not copy
           prev_loss = loss
           # The direction d is already normalized by sparse_direction_approximate
