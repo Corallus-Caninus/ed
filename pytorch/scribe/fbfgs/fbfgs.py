@@ -12,20 +12,7 @@ import time
 import torch.distributed as dist
 import sys
 from concurrent.futures import ThreadPoolExecutor
-#def trace_calls(frame, event, arg):
-#    if event == 'line':
-#        if 'gtd' in frame.f_locals or 'gtd_new' in frame.f_locals:
-#            print(f"gtd: {frame.f_locals.get('gtd', 'N/A')}, gtd_new: {frame.f_locals.get('gtd_new', 'N/A')}")
-#    return trace_calls
-#
-#sys.settrace(trace_calls)
 from torch.optim.optimizer import Optimizer, ParamsT
-#TODO: ensure we are memory efficient. Gather Grads should replace the grads with the view. Im not sure about the implementation but at least we wont allocate a lot of indices for the views? this should not take as much memory as CUDA is saying it does so theres a lot of stuff that can be GC optimized
-#TODO: distribution: need to also distributed the norm. Write our own l1 and turn norm hyperparam into a scalar coefficient to ensure the l1 is stable for networks with high parameter count and low type precision.
-#TODO: implement SparseFlatTensor addition correctly via AI rendering
-#TODO: extract this to a module and begin FBFGS project structuring
-#TODO: if we have 1 segment (we havent induced sparsity) its probably worth it to do a dense computation both in terms of memory and compute resources.
-#TODO: WE STILL HAVE PRECISION ERRORS IN THESE OPS. gtd calculated from the dense was not the same as gtd calculated from the sparse. This could be preventing gaps and causing a lot of other errors.
 from .sparse_flat_tensor import SparseFlatTensor
 __all__ = ["FBFGS"]
 def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
@@ -55,10 +42,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
         xmax_bound_tensor = torch.tensor(xmax_bound, device=min_pos_tensor.device)
         return min(max(min_pos_tensor, xmin_bound_tensor), xmax_bound_tensor)
     else:
-#TODO: this is bad we can do much better. in zoom phase this shouldnt matter but this can retard bracket phase.
         return torch.tensor((xmin_bound + xmax_bound) / 2.0, device=g1.device)
-#TODO: on relaxed wolfe, if loss is reduced from the previous iteration of this data point, accept it (the first iteration is the relaxed wolfe).
-#TODO: c3 along with armijo that is c2 but for overconvergence? To prevent early convergence on insta-wolfes? Probably not necessary and would probably slow things down #TODO: cleanup all the AI device mess
 def _strong_wolfe(
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100, optimizer_device: str = 'cuda'):
     g = g
@@ -224,8 +208,6 @@ def _split_tensor_to_groups_jit(
     flat_tensor: torch.Tensor,
     split_sizes: List[int]
 ) -> List[torch.Tensor]:
-#    if not split_sizes: # Handle case of empty split_sizes (e.g., if total_size is 0)
-#        return []
     return torch.split(flat_tensor, split_sizes, dim=0)
 @torch.jit.script
 def _apply_backward_loop_update(
@@ -1507,7 +1489,6 @@ class FBFGS(Optimizer):
               if not success:
                   for p, p_saved in zip(self._params, self.saved_params):
                       p.copy_(p_saved)
-#TODO: there is still a param restore bug here.
                   # Reset parameters to the state before line search
                   print("\033[91mLinesearch failure, retrying with adjusted parameters.\033[0m")
                   # Mark failure and reset step size to 1
