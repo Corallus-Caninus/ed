@@ -75,7 +75,7 @@ def _strong_wolfe(
     stall_wolfe=0
     while ls_iter < max_ls:
 #        if gtd_new < abs(gtd) and ( abs(abs(gtd_new)) <= -c2 * abs(gtd) and f_new < f) and (c1 > (abs(gtd_new) - abs(gtd))/(f_new - f) > 0 ):
-        if gtd_new < abs(gtd) and (c1 > (gtd_new - abs(gtd))/(f_new - f) ) :
+        if gtd_new < abs(gtd) and (c1 > (gtd_new - abs(gtd))/(f_new - f) ) and f_new < f:
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -172,8 +172,8 @@ def _strong_wolfe(
           g_best = g_new
         print("Ward condition: " + str((gtd_new - abs(gtd))/(f_new - f) ))
 #        if gtd_new > abs(gtd) or c1 < (gtd_new - abs(gtd))/ (f_new - f)   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
-#        if  c1 < (gtd_new - abs(gtd))/ (f_new - f)   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
-        if  f_new >= bracket_f[low_pos] or f_new != f_new:
+        if  c1 < (gtd_new - abs(gtd))/ (f_new - f)   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
+#        if  f_new >= bracket_f[low_pos] or f_new != f_new:
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
             bracket_g[high_pos] = g_new  # type: ignore[possibly-undefined]
