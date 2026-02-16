@@ -63,7 +63,7 @@ def _strong_wolfe(
     gtd_best = gtd
     c1 = 1/c1
     print("Ward condition: " + str((gtd_new - abs(gtd))/(f_new - f) ))
-    if f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
+    if f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) and gtd_new < abs(gtd):
       success = True
       stall_wolfe = 0
       t_best = t
@@ -75,7 +75,7 @@ def _strong_wolfe(
     stall_wolfe=0
     while ls_iter < max_ls:
 #        if ( abs(abs(gtd_new)) <= -c2 * abs(gtd) and f_new < f) and (c1 > (abs(gtd_new) - abs(gtd))/(f_new - f) > 0 ):
-        if (c1 > (gtd_new - abs(gtd))/(f_new - f) ) and f_new < f:
+        if (c1 > (gtd_new - abs(gtd))/(f_new - f) ) and f_new < f and gtd_new < abs(gtd):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -164,7 +164,7 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
-        if f_new < f_best and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
+        if f_new < f_best and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) and gtd_new < abs(gtd):
           success = True
           stall_wolfe = 0
           t_best = t
@@ -180,7 +180,8 @@ def _strong_wolfe(
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
-            if abs(gtd_new) <= -c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f): 
+#            if abs(gtd_new) <= -c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f): 
+            if abs(gtd_new) <= c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f) and gtd_new < abs(gtd): 
                 print("STRONG WOLFE")
                 success = True
                 done = True
@@ -1079,7 +1080,7 @@ class FBFGS(Optimizer):
     def step(self, closure):
       """Perform a single optimization step.
       Args:
-          closure (Callable): A closure that reevaluates the model
+          closure (Callable): A closure that reevaluates the mo
               and returns the loss.
       """
       assert len(self.param_groups) == 1
@@ -1210,8 +1211,10 @@ class FBFGS(Optimizer):
           ############################################################
           # If this is the first iteration or history was reset
 #TODO: add a special condition such that if num iters is 1 we start with the direction otherwise we do the gradient.
-          if  n_iter== 1 or prev_flat_grad is None:
+          if  n_iter== 1 or prev_flat_grad is None :
 #          if prev_flat_grad is None:
+              if n_iter == max_iter:
+                break
               restart = False # Flag for restart
               print("RESET (n_iter=1 or prev_flat_grad is None)")
 #TODO: this is wrong since it uses the grad from failed linesearch but it manages to wiggle the gradient out of being unstuck a lot. We should either analyze why this tends to work or remove it but if we remove it we need to return if we are on the gradient descent since it will fail deterministically
@@ -1269,7 +1272,7 @@ class FBFGS(Optimizer):
 #SELECTION SUBROUTINE
               # Calculate y_dense using clone and in-place operations to reduce allocations
               # Apply L2 norm clipping to flat_grad and prev_flat_grad
-              # prev_flat_grad is moved to optimizer_device for calculation, then immediately deleted
+              # prev_flat_grad is moved to optimizer_device for calculation, then immediately eted
               # to free up memory.
               y_dense = flat_grad.clone().to(torch.float32) # y_dense is on flat_grad's device (optimizer_device)
               y_dense.sub_(prev_flat_grad.to(torch.float32).to(self.optimizer_device)) # Ensure prev_flat_grad.to(torch.float32) is on optimizer_device
@@ -1281,7 +1284,6 @@ class FBFGS(Optimizer):
               if ys > 0:
                 y_squared = y_dense.dot(y_dense)
                 H_diag = ys / y_squared  
-                del y_squared  
               else:
                 H_diag = 1.
                 H_diag = torch.tensor(H_diag, device=self.optimizer_device)  
@@ -1305,19 +1307,16 @@ class FBFGS(Optimizer):
               print("y dense + s_mask  " + str((y_dense != 0).sum()))
               # Layerwise normalization for the second step (replacing norm_yf)
               # Calculate global norm for debugging/compatibility
-              del ys_dense
-              del y_mask
-              del s_mask
               torch.cuda.empty_cache()
               gc.collect() # Collect garbage
               print(f"ys: {ys}")
 #              # Powell dampening modification
-#              delta =1   #existing curvature threshold
-#              if 0 < ys < delta:
+#              ta =1   #existing curvature threshold
+#              if 0 < ys < ta:
 ##                   Calculate ||s||^2 #efficiently from sparse components
 #                  ss = (s_sparse.values**2).sum() + (s_sparse.unit_values**2).sum()
 #                  if ss > 1e-10:   #avoid division by zero
-#                      theta = (delta - ys) / ss
+#                      theta = (ta - ys) / ss
 #                      _add_sparse_dense_alpha(s_sparse, y_dense, alpha=theta, offset=0)
 #                      ys = SparseFlatTensor.sparse_dot_dense(s_sparse, y_dense)
 #                      print(f"\033[94mApplied Powell dampening. New ys: {ys}\033[0m")
@@ -1335,7 +1334,7 @@ class FBFGS(Optimizer):
               print("d-delta elements: " + str((d.to_dense() != 0).sum()) + " total: " + str(d.to_dense().numel()), end=' ')
 #              print("S elements: " + str((s_dense != 0).sum()) + " total: " + str(s_dense.numel()), end=' ') # Print S elements
               print("y-delta elements: " + str((y_dense != 0).sum()) + " total: " + str(y_dense.numel()), end=' ')
-#TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be modeled as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
+#TODO: this is correct, but maybe there is something more elegant. Possibly reduce based on the mean or the l1/l2 distribution with a hyperparameter. This can be moed as a outlier distribution problem. We want to maximize Rho so only remove what we need to stabilize the direction-- how we quantify this is TODO
 #TODO: this is arguably better than similarity. I wonder if recency matters, such as remove the oldest entries of large Rho (but more elegant)
 #TODO: maybe we can even have a weighted pop for the sliding window that considers both the recency and magnitude of the Rho entries? This is all observations on something that needs to be fundamentally quantified.
               # Rho Rewind when ys is too small
@@ -1425,8 +1424,7 @@ class FBFGS(Optimizer):
               gc.collect()
               y = y #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
               ys = ys #NOTE: was cpu #TODO: these should be GCD here this just slows stuff down unless py/torch does an optimization pass on it.
-              del y # Delete y
-#              del s
+#               s
               # compute the approximate (L-BFGS) inverse Hessian
               # multiplied by the gradient
               num_old = len(old_dirs)
@@ -1443,7 +1441,6 @@ class FBFGS(Optimizer):
               d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=self.norm_group_y_val, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s_val, ro_threshold_val=ro_threshold_val )
               state["direction_alignment_mask"] = direction_alignment_mask
               # sparse_direction_approximate already applies norm_select
-              del H_diag
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
 #TODO: this or the above should be redundant trace and remove redundancy
           if n_iter >= max_iter or loss == 0:
@@ -1456,7 +1453,7 @@ class FBFGS(Optimizer):
           ############################################################
           # reset initial guess for step size
           # directional derivative
-   #TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the model information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
+   #TODO: see if we can get bracketing instead to make this faster, e.g. set to 1 so we start t_prev and t at 0,1 this allows for one of the most interesting aspects of L-BFGS: maximum loss reduction with minimal gradient magnitude (CRAM the mo information wise) since we would be preferentially bracketing lowest Strong Wolfe points first in terms of step size
           # Unpack d from tuple before using it
           gtd_sparse_product = flat_grad * d.to(self.optimizer_device) # Ensure d is on optimizer_device
           gtd = gtd_sparse_product.sum()  # g * d
@@ -1466,7 +1463,6 @@ class FBFGS(Optimizer):
 #            state["ro"] = ro
 #            state["old_dirs"] = old_dirs
 #            break
-          del gtd_sparse_product
           gc.collect()
           torch.cuda.empty_cache()
           d = SparseFlatTensor.dense_to_sparse_flat_tensor(d)
@@ -1512,7 +1508,17 @@ class FBFGS(Optimizer):
                   old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                   # Cleanup: always store direction alignment mask in state
                   state["direction_alignment_mask"] = direction_alignment_mask.detach().cpu()
-                  if True or not old_dirs or not direction_alignment_mask.any():
+                  if  not old_dirs or not direction_alignment_mask.any():
+                    state["old_stps"] = old_stps
+                    state["ro"] = ro
+                    state["old_dirs"] = old_dirs
+                    recycle_bin = state["recycle_bin"]
+                    while recycle_bin:
+                        entry = recycle_bin.pop()
+                        idx = entry['index']
+                        old_dirs.insert(idx, entry['dir'])
+                        old_stps.insert(idx, entry['stp'])
+                        ro.insert(idx, entry['ro'])
                     return orig_loss
                   # Continue to next iteration to retry
                   continue
