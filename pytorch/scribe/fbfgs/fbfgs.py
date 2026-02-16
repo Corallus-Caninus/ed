@@ -436,7 +436,7 @@ class FBFGS(Optimizer):
         self._calculate_param_info() # Calculate param_sizes, total_size, num_layers, and offsets
         # Store norm_group values directly, default logic will use these to pick precomputed split_sizes
         self.norm_group_s_val = norm_group_s if norm_group_s is not None else float(self._num_layers) # Default to vector norm (one group for all parameters)
-        self.norm_group_y_val = norm_group_y if norm_group_y is not None else 1.0 # Default to matrix norm (one group per layer)
+        self.norm_group_y_val = norm_group_y if norm_group_y is not None else float(self._num_layers) # Default to matrix norm (one group per layer)
         # Precompute split_sizes for all relevant scenarios
         self._split_sizes_map: Dict[str, List[int]] = {}
         # Scenario 1: One group per layer (effective_norm_group == 1.0)
