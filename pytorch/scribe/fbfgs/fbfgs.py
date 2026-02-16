@@ -269,7 +269,6 @@ def _apply_backward_loop_update(
         # 2. Calculate L2 norms for all chunks at once using torch.segment_reduce
         sum_of_squares_per_segment = torch.segment_reduce(concatenated_chunks.pow(2), reduce="sum", lengths=segment_lengths_tensor_y)
         l2_norms = sum_of_squares_per_segment.sqrt()
-
         # 3. Calculate factors: Only scale down when l2_norm/radius_ball >= 1
         factors = torch.where(
             (l2_norms / radius_ball >= 1),
@@ -500,11 +499,9 @@ class FBFGS(Optimizer):
             if f'gt_num_layers_y_{self.norm_group_y_val}' not in self._split_sizes_map:
                 self._split_sizes_map[f'gt_num_layers_y_{self.norm_group_y_val}'] = self._get_split_sizes_total_groups(self.norm_group_y_val)
             self._active_split_sizes_y = self._split_sizes_map[f'gt_num_layers_y_{self.norm_group_y_val}']
-
         # Precompute segment lengths as tensors for JIT-friendly segment_reduce and repeat_interleave
         self._segment_lengths_tensor_y = torch.tensor(self._active_split_sizes_y, dtype=torch.int64, device=self.optimizer_device)
         self._segment_lengths_tensor_s = torch.tensor(self._active_split_sizes_s, dtype=torch.int64, device=self.optimizer_device)
-
         self.prefetch_buffer = prefetch_buffer
         self.ro_threshold_rate = ro_threshold_rate
         self.current_ro_threshold = 0
@@ -988,8 +985,8 @@ class FBFGS(Optimizer):
                         event.wait()
                         wait_end = time.time()
                     
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
-#                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self._offsets, self.radius_ball, self.norm_group_y)
+#                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y)
                     
                     # Cleanup
                     del forward_buffer_dict[idx]
@@ -1358,40 +1355,6 @@ class FBFGS(Optimizer):
                 old_dirs, old_stps, ro = self._rho_rewind(state, old_dirs, old_stps, ro, direction_similarities)
                 ls_failed = True
                 state["ls_failed"] = True
-#                # Calculate product of ro[i] and direction_similarity[i]
-#                ro_products = [abs(ro[i].item() * direction_similarities[i]) 
-#                               for i in range(len(ro))]
-#                
-#                # Calculate total history length including recycle bin
-#                total_history_len = len(ro) + len(recycle_bin)
-#                # Calculate 10% of total history (minimum 1)
-#                rewind_amount = max(1, int(0.1 * total_history_len))
-#                # Ensure we don't rewind more than available active history
-#                rewind_amount = min(rewind_amount, len(ro))
-#                
-#                if rewind_amount > 0:
-#                    # Sort indices by ro*direction_similarity product descending
-#                    ro_product_tensor = torch.tensor(ro_products)
-#                    sorted_values, sorted_indices = torch.sort(ro_product_tensor, descending=True)
-#                    
-#                    # Select top rewind_amount largest ro*direction_similarity products
-#                    indices_to_remove = sorted_indices[:rewind_amount].tolist()
-#                    
-#                    # Sort indices in reverse order to safely remove from lists
-#                    indices_to_remove.sort(reverse=True)
-#                    
-#                    for idx in indices_to_remove:
-#                        recycle_entry = {
-#                            'index': idx,
-#                            'dir': old_dirs.pop(idx),
-#                            'stp': old_stps.pop(idx),
-#                            'ro': ro.pop(idx),
-#                        }
-#                        if idx < len(self.y_norms):
-#                            recycle_entry['y_norm'] = self.y_norms.pop(idx)
-#                        recycle_bin.append(recycle_entry)
-#                    print(f"Moved {rewind_amount} largest ro*direction_similarity products to recycle_bin (ys threshold)")
-#                
                 ls_failed = True
                 state["ls_failed"] = True
               # Only add to history if ys meets threshold
@@ -1565,37 +1528,6 @@ class FBFGS(Optimizer):
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
                   state["ls_failed"] = False # Store ls_failed state
-                  # Ensure t and d are on the correct device (optimizer_device) for _add_grad
-#                  t = t.to(self.optimizer_device)
-#                  d = d.to(self.optimizer_device)
-                  # _add_grad expects 'update' to be the direction 'd' scaled by 'step_size'
-                  # If 'd' is SparseFlatTensor, use _add_sparse_dense with alpha=step_size
-                  # If 'd' is dense Tensor, use it directly with alpha=step_size
-                  # The _add_grad function itself takes step_size and update.
-                  # It applies update to parameters using step_size.
-                  # The existing implementation calls p_slice.add(view.view_as(p_slice), alpha=step_size).
-                  # If 'update' is a SparseFlatTensor, this would fail.
-                  # The prompt implies _add_grad needs the scaling functionality.
-                  # For now, we are directly applying the scaled sparse update
-                  # in _directional_evaluate. If _add_grad is also meant to
-                  # take a SparseFlatTensor as 'update', it would need refactoring.
-                  # The current logic in _add_grad handles dense 'update' with alpha.
-                  # If 'd' is sparse, _directional_evaluate handles it.
-                  # For now, we assume _add_grad might not directly receive sparse 'd'.
-#                  if isinstance(d, SparseFlatTensor):
-#                      offset = 0
-#                      for p in self._params:
-#                          numel = p.numel()
-#                          if torch.is_complex(p):
-#                              p_view = torch.view_as_real(p).view(-1)
-#                          else:
-#                              p_view = p.view(-1)
-#                          # Apply the scaled sparse direction to the dense parameter
-#                          # using the new function.
-#                          # --- Key Change: Pass the current offset ---
-#                          _add_sparse_dense_alpha(d, p_view, alpha=t, offset=offset)
-#                          offset += numel
-#                  else: # d is a dense Tensor
                   self._add_grad(t, d)
                   self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 # TODO: we need a second closure that just does loss not generate gradients..
