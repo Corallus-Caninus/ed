@@ -63,7 +63,7 @@ def _strong_wolfe(
     gtd_best = gtd
     c1 = 1/c1
     print("Ward condition: " + str((gtd_new - abs(gtd))/(f_new - f) ))
-    if f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) and gtd_new < abs(gtd):
+    if f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
       success = True
       stall_wolfe = 0
       t_best = t
@@ -75,7 +75,7 @@ def _strong_wolfe(
     stall_wolfe=0
     while ls_iter < max_ls:
 #        if ( abs(abs(gtd_new)) <= -c2 * abs(gtd) and f_new < f) and (c1 > (abs(gtd_new) - abs(gtd))/(f_new - f) > 0 ):
-        if (c1 > (gtd_new - abs(gtd))/(f_new - f) ) and f_new < f and gtd_new < abs(gtd):
+        if (c1 > (gtd_new - abs(gtd))/(f_new - f) ) and f_new < f :
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
@@ -164,7 +164,7 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
-        if f_new < f_best and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) and gtd_new < abs(gtd):
+        if f_new < f_best and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
           success = True
           stall_wolfe = 0
           t_best = t
@@ -181,7 +181,7 @@ def _strong_wolfe(
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
 #            if abs(gtd_new) <= -c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f): 
-            if abs(gtd_new) <= c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f) and gtd_new < abs(gtd): 
+            if abs(gtd_new) <= c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f) : 
                 print("STRONG WOLFE")
                 success = True
                 done = True
