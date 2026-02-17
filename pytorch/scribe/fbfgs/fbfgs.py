@@ -659,8 +659,6 @@ class FBFGS(Optimizer):
                     for chk, factor in zip(chunks, factors)
                 ]
             
-            if len(chunks) == 0:
-                return tensor  # Return original if no chunks
             return torch.cat(chunks)
 #TODO: allow this to be distributive, such that we can have multiple nodes generate grads and keep them on their respective devices for all of fbfgs.
     def _gather_flat_grad(self):
@@ -738,6 +736,7 @@ class FBFGS(Optimizer):
         if isinstance(update, SparseFlatTensor):
             flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
             SparseFlatTensor._add_sparse_dense_alpha(update, flat_param_copy, alpha=step_size)
+            flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=self.radius_ball_s)
             torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
         
         # Dense tensor handling (original logic)

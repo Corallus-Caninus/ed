@@ -119,7 +119,7 @@ batch_train = None
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
 #optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e2, radius_ball=1, radius_ball_s=1e3, radius_s=1e4, c1e=1e-7, c2=0.001, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogona0.01, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e2, radius_ball=1e3, radius_ball_s=0.1, radius_s=5e4, c1=1e-7, c2=0.001, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.008, max_ls=5, norm_group_s=5, norm_group_y=1, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e2, radius_ball=1e3, radius_ball_s=1, radius_s=5e4, c1=1e-7, c2=0.001, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.008, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
@@ -398,37 +398,37 @@ def closure():
 #START OF REGULARIZER
 #    reg_term = torch.zeros(1, requires_grad=True).to(batch_input_ids_list[0].device)
 #    reg_count = 0
-    for name, param in model.named_parameters():
-        pdp = torch.sqrt(torch.dot(param.detach().view(-1), param.detach().view(-1)))
-#        pdg = torch.dot(param.grad.view(-1), param.detach().view(-1))
-        if param is not None: # and pdp > 50 :
-            if pdp > 500:
-                print("PDP: " + " on layer: " + str(name) + str(pdp))
-#            lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
-##                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-500)**2
-#            param.grad += param.detach()*lam
-#            param.grad += param.detach() * 0.5*(pdp-500)**2
-#            reg_term += torch.sum(param.grad * param.data).item()
-#If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
-#            if pdg > 0:
-#            if pdg >= 0:
-            param.grad += (1/500) * 0.5*param.detach() * pdp**2
-##                lam = pdg/ ((pdp-500) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-##                lam = pdg/ ( torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
-##                lam = lam * torch.dot(param.detach().view(-1), param.detach().view(-1))
-#                lam = pdg
-##                lam = pdg* (pdp-500)**2
-#                param.grad += param.detach()*lam
-#                print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
-#            if pdg <= 0:
-#                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
-##                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))*(pdp-500)**2
-##                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-500)**2
-#                param.grad += param.detach()*lam
-#                print("Triggered orthogonal event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
-#            if torch.dot(param.grad.view(-1), param.grad.view(-1)) == 0:# TODO: do this on negative too or add GSO just for the negative alignment
-#                print("Triggered zero event horizon..")
-#                param.grad += param.detach()*(pdp - 50)
+#    for name, param in model.named_parameters():
+#        pdp = torch.sqrt(torch.dot(param.detach().view(-1), param.detach().view(-1)))
+##        pdg = torch.dot(param.grad.view(-1), param.detach().view(-1))
+#        if param is not None: # and pdp > 50 :
+#            if pdp > 500:
+#                print("PDP: " + " on layer: " + str(name) + str(pdp))
+##            lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
+###                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-500)**2
+##            param.grad += param.detach()*lam
+##            param.grad += param.detach() * 0.5*(pdp-500)**2
+##            reg_term += torch.sum(param.grad * param.data).item()
+##If its already reducing (negative p@g) than let it decay by the data instead of bleeding it
+##            if pdg > 0:
+##            if pdg >= 0:
+#            param.grad += (1/500) * 0.5*param.detach() * pdp**2
+###                lam = pdg/ ((pdp-500) * torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+###                lam = pdg/ ( torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1))))
+###                lam = lam * torch.dot(param.detach().view(-1), param.detach().view(-1))
+##                lam = pdg
+###                lam = pdg* (pdp-500)**2
+##                param.grad += param.detach()*lam
+##                print("Triggered event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
+##            if pdg <= 0:
+##                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))
+###                lam = torch.sqrt(torch.dot(param.grad.view(-1), param.grad.view(-1)))*(pdp-500)**2
+###                lam = torch.dot(param.view(-1), param.view(-1)) - (pdp-500)**2
+##                param.grad += param.detach()*lam
+##                print("Triggered orthogonal event horizon.."+ " PDP: " + str(pdp) + " lam: " + str(lam))
+##            if torch.dot(param.grad.view(-1), param.grad.view(-1)) == 0:# TODO: do this on negative too or add GSO just for the negative alignment
+##                print("Triggered zero event horizon..")
+##                param.grad += param.detach()*(pdp - 50)
     return total_loss
 # Main training loop
 while True:
