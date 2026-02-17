@@ -884,7 +884,7 @@ class FBFGS(Optimizer):
                 
 #EXTRACT ME GEMINI
                 q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, 1e20, self._active_split_sizes_y, self._segment_lengths_tensor_y
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, 1e10, self._active_split_sizes_y, self._segment_lengths_tensor_y
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
@@ -989,7 +989,7 @@ class FBFGS(Optimizer):
                         wait_end = time.time()
                     
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], 1e20, self._active_split_sizes_s, self._segment_lengths_tensor_s)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], 1e10, self._active_split_sizes_s, self._segment_lengths_tensor_s)
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y)
                     
                     # Cleanup
