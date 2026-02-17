@@ -284,6 +284,7 @@ def _apply_backward_loop_update(
         divided_concatenated_chunks = concatenated_chunks / expanded_factors
         chunks = _split_tensor_to_groups_jit(divided_concatenated_chunks, active_split_sizes_y)
         q = torch.cat(chunks)
+        q_inv_norm = 1/torch.linalg.vector_norm(q, ord=2.)
     
     return q, direction_alignment_mask, direction_similarities, q_inv_norm # Return original q_inv_norm
 @torch.jit.script
@@ -749,8 +750,8 @@ class FBFGS(Optimizer):
         # SparseFlatTensor handling (new logic)
         if isinstance(update, SparseFlatTensor):
             flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
-            flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
             SparseFlatTensor._add_sparse_dense_alpha(update, flat_param_copy, alpha=step_size)
+            flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
             torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
         
         # Dense tensor handling (original logic)
@@ -883,7 +884,7 @@ class FBFGS(Optimizer):
                 
 #EXTRACT ME GEMINI
                 q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, 1e3, self._active_split_sizes_y, self._segment_lengths_tensor_y
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, 1e20, self._active_split_sizes_y, self._segment_lengths_tensor_y
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
@@ -988,7 +989,7 @@ class FBFGS(Optimizer):
                         wait_end = time.time()
                     
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], 1e3, self._active_split_sizes_s, self._segment_lengths_tensor_s)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], 1e20, self._active_split_sizes_s, self._segment_lengths_tensor_s)
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y)
                     
                     # Cleanup
@@ -1540,7 +1541,7 @@ class FBFGS(Optimizer):
                   state["ls_failed"] = False # Store ls_failed state
                   self._add_grad(t, d)
                   flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
-                  flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=10)
+                  flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
                   torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
 # TODO: norm the params back again after add_grad
                   self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
