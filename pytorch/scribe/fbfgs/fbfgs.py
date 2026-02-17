@@ -46,7 +46,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100, optimizer_device: str = 'cuda'):
     g = g
-    t = torch.tensor(1) # Ensure t is a tensor before the loop
+#    t = torch.tensor(1e-5) # Ensure t is a tensor before the loop
     f_new, g_new = obj_func(t, d)
     ls_func_evals = 1
     gtd_new = (g_new * d).sum() # Keep as scalar tensor
@@ -55,15 +55,15 @@ def _strong_wolfe(
     t_prev, f_prev, g_prev, gtd_prev = 0, f, g, gtd
     done = False
     ls_iter = 0 # Initialize ls_iter
-    t = torch.tensor(1) # Ensure t is a tensor before the loop
     t_best = t
     device = gtd.device
     f_best = torch.tensor(f, device=device)
     g_best = g
     gtd_best = gtd
-    c1 = 1/c1
+#    c1 = 1/c1
+# TODO: ward condition likely needs to consider the normalized convergence e.g. what percantage from gtd to 0
     print("Ward condition: " + str((gtd_new - abs(gtd))/(f_new - f) ))
-    if f_new < f_best  and done != True  and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
+    if f_new < f_best  and done != True  and f_new == f_new and f_new < f - c1 * t * abs(gtd):
       success = True
       stall_wolfe = 0
       t_best = t
@@ -75,10 +75,23 @@ def _strong_wolfe(
     stall_wolfe=0
     while ls_iter < max_ls:
 #        if ( abs(abs(gtd_new)) <= -c2 * abs(gtd) and f_new < f) and (c1 > (abs(gtd_new) - abs(gtd))/(f_new - f) > 0 ):
-        if (c1 > (gtd_new - abs(gtd))/(f_new - f) ) and f_new < f :
+        if f_new > f - c1 * t * abs(gtd) and f_new > f :
+            bracket = [t_prev, t]
+            bracket_f = [f_prev, f_new]
+            bracket_g = [g_prev, g_new]
+            bracket_gtd = [gtd_prev, gtd_new]
+#            done = True
+#            success = True
+#            t_best = t
+#            f_best = torch.tensor(f_new, device=device)
+#            g_best = g_new
+#            print("FAST WOLFE")
+            break
+        if abs(gtd_new) < c2*abs(gtd):
             bracket = [t]  #type: ignore[list-item]
             bracket_f = [f_new]
             bracket_g = [g_new]
+            bracket_gtd = [gtd_new]
             done = True
             success = True
             t_best = t
@@ -86,7 +99,7 @@ def _strong_wolfe(
             g_best = g_new
             print("FAST WOLFE")
             break
-        if gtd_new >= 0 or True:
+        if gtd_new >= 0 :
             print("NOT DESCENDING")
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
@@ -164,15 +177,15 @@ def _strong_wolfe(
         gtd_prev = gtd_new
         gtd_new = (g_new * d).sum() # Keep as scalar tensor
         ls_iter += 1 #TODO: how can we ensure the bracket length is sufficiently small that this isn't a terrible worst case?
-        if f_new < f_best and f_new == f_new and c1 > (gtd_new - abs(gtd))/(f_new - f) :
+        if f_new < f_best and f_new == f_new and f_new < f - c1 * t * abs(gtd):
           success = True
           stall_wolfe = 0
           t_best = t
           f_best = torch.tensor(f_new, device=device)
           g_best = g_new
         print("Ward condition: " + str((gtd_new - abs(gtd))/(f_new - f) ))
-#        if gtd_new > abs(gtd) or c1 < (gtd_new - abs(gtd))/ (f_new - f)   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
-        if  c1 < (gtd_new - abs(gtd))/ (f_new - f)   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
+#        if gtd_new > abs(gtd) or f_new > f + c1 * t * gtd   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
+        if  f_new > f - c1 * t * abs(gtd)   or f_new >= bracket_f[low_pos] or f_new != f_new: #or f_new > f_best: #NOTE: Ward condition#NOTE: PREV SETTING
 #        if  f_new >= bracket_f[low_pos] or f_new != f_new:
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
@@ -181,7 +194,7 @@ def _strong_wolfe(
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0) # type: ignore[possibly-undefined]
         else:
 #            if abs(gtd_new) <= -c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f): 
-            if abs(gtd_new) <= c2 * abs(gtd) and f_new < f_best  and c1 > (gtd_new - abs(gtd))/(f_new - f) : 
+            if abs(gtd_new) <= c2 * abs(gtd) and f_new < f_best  and f_new < f - c1 * t * abs(gtd):
                 print("STRONG WOLFE")
                 success = True
                 done = True
@@ -270,6 +283,7 @@ def _apply_backward_loop_update(
         
         divided_concatenated_chunks = concatenated_chunks / expanded_factors
         chunks = _split_tensor_to_groups_jit(divided_concatenated_chunks, active_split_sizes_y)
+        q = torch.cat(chunks)
     
     return q, direction_alignment_mask, direction_similarities, q_inv_norm # Return original q_inv_norm
 @torch.jit.script
@@ -735,8 +749,8 @@ class FBFGS(Optimizer):
         # SparseFlatTensor handling (new logic)
         if isinstance(update, SparseFlatTensor):
             flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
+            flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
             SparseFlatTensor._add_sparse_dense_alpha(update, flat_param_copy, alpha=step_size)
-            flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=self.radius_ball_s)
             torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
         
         # Dense tensor handling (original logic)
@@ -1231,8 +1245,8 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache() # Clear cache before history update
               # Calculate the top k ro threshold if we have history
 #TODO: clean this up
-#              if len(old_dirs) != 0  : # or n_iter != 1 :
-              if n_iter != 1:
+              if len(old_dirs) != 0  : # or n_iter != 1 :
+#              if n_iter != 1:
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
@@ -1456,7 +1470,7 @@ class FBFGS(Optimizer):
           # Unpack d from tuple before using it
           gtd_sparse_product = flat_grad * d.to(self.optimizer_device) # Ensure d is on optimizer_device
           gtd = gtd_sparse_product.sum()  # g * d
-#          if gtd >= -tolerance_change:
+#          if gtd >= 0:
 #            print(f"Exiting: gtd element {gtd} < tolerance {tolerance_change} (q max: {max_abs_q})")
 #            state["old_stps"] = old_stps
 #            state["ro"] = ro
@@ -1525,11 +1539,12 @@ class FBFGS(Optimizer):
                   ls_failed = False
                   state["ls_failed"] = False # Store ls_failed state
                   self._add_grad(t, d)
+                  flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
+                  flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=10)
+                  torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
+# TODO: norm the params back again after add_grad
                   self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
-# TODO: we need a second closure that just does loss not generate gradients..
-# TODO: find what is causing this it could just be a bug somewhere in linesearch or the restore routine
 #                  if closure() == loss:
-## TODO: maybe check closure == loss instead? as long as we have the right gradient this should be correct but if it is due to numerical instabilities the grad difference may poison the hessian
 #                      self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #                  else:
 #                      print("LOSS PARITY FAILURE")
