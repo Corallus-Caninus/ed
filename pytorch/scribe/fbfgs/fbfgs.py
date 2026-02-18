@@ -1250,8 +1250,8 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache() # Clear cache before history update
               # Calculate the top k ro threshold if we have history
 #TODO: clean this up
-              if len(old_dirs) != 0  : # or n_iter != 1 :
-#              if n_iter != 1:
+#              if len(old_dirs) != 0  : # or n_iter != 1 :
+              if n_iter != 1:
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
@@ -1586,6 +1586,15 @@ class FBFGS(Optimizer):
 #      state["t"] = t
       # Update optimizer state with current history
       flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
+      mask = flat_param_copy.abs() > 1
+      xbox = flat_param_copy* mask.float()
+      flat_param_copy[mask] = 0
+      xbox = self.norm_select(xbox, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
+      flat_param_copy= flat_param_copy + xbox
+#      l2_xbox = torch.norm(xbox, p=2)
+#      flat_param_copy[mask] = xbox/l2_xbox
+#      flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
+# TODO: instead of this, capture the max and min values of the ball and after the step, norm all values above and below the max and min then norm again with this so we dont push out data from the model
       flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
       torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
       state["old_dirs"] = old_dirs
