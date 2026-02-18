@@ -750,8 +750,9 @@ class FBFGS(Optimizer):
         # SparseFlatTensor handling (new logic)
         if isinstance(update, SparseFlatTensor):
             flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
+#            flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
             SparseFlatTensor._add_sparse_dense_alpha(update, flat_param_copy, alpha=step_size)
-            flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
+#            flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
             torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
         
         # Dense tensor handling (original logic)
@@ -1185,6 +1186,8 @@ class FBFGS(Optimizer):
 #                  self.y_norms.insert(idx, entry['y_norm'])
       
       any_line_search_failed = False  # Track if any line search failed in this iteration
+#      self.t = 0.001
+#      t = 0.001
       while True:
 #          saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #          if ro and len(ro) > 0:
@@ -1240,7 +1243,8 @@ class FBFGS(Optimizer):
               max_abs_q = q.abs().max()
               if max_abs_grad <= tolerance_change:
                 print(f"Exiting: max gradient element {max_abs_grad} < tolerance {tolerance_change} (q max: {max_abs_q})")
-                return orig_loss
+#                return orig_loss
+                break
               H_diag = 1
               H_diag = torch.tensor(H_diag, device=self.optimizer_device) # Ensure H_diag is on optimizer_device
               torch.cuda.empty_cache() # Clear cache before history update
@@ -1533,16 +1537,17 @@ class FBFGS(Optimizer):
                         old_dirs.insert(idx, entry['dir'])
                         old_stps.insert(idx, entry['stp'])
                         ro.insert(idx, entry['ro'])
-                    return orig_loss
+#                    return orig_loss
+                    break
                   # Continue to next iteration to retry
                   continue
               else: # Strong Wolfe line search succeeded
                   ls_failed = False
                   state["ls_failed"] = False # Store ls_failed state
                   self._add_grad(t, d)
-                  flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
-                  flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
-                  torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
+#                  flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
+##                  flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
+#                  torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
 # TODO: norm the params back again after add_grad
                   self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 #                  if closure() == loss:
@@ -1580,6 +1585,9 @@ class FBFGS(Optimizer):
 #      state["d"] = d
 #      state["t"] = t
       # Update optimizer state with current history
+      flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
+      flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
+      torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
       state["old_dirs"] = old_dirs
       state["d"] = d
       state["old_stps"] = old_stps
@@ -1618,7 +1626,8 @@ class FBFGS(Optimizer):
         # Calculate total history length including recycle bin
         total_history_len = len(ro) + len(recycle_bin)
         # Calculate 10% of total history (minimum 1)
-        rewind_amount = max(1, int(1/self.max_iter * total_history_len))
+#        rewind_amount = max(1, int(1/self.rho_rewind * total_history_len))
+        rewind_amount = max(1, int(1/3 * total_history_len))
         # Ensure we don't rewind more than available active history
         rewind_amount = min(rewind_amount, len(ro))
         print("rewinding " + str(rewind_amount) + " of history: " + str(total_history_len))
