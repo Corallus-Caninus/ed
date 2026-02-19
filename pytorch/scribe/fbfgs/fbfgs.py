@@ -46,7 +46,7 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
 def _strong_wolfe(
     obj_func, direction_device, t, d, f, g, gtd, c1=1e-20, c2=0.9, tolerance_change=1e-16, max_ls=5, bracket_shift=(1/3), bracket_shove=(1/3), capture_min_step=1e-4, capture_max_step=100, optimizer_device: str = 'cuda'):
     g = g
-#    t = torch.tensor(1e-5) # Ensure t is a tensor before the loop
+    t = torch.tensor(1.)  
     f_new, g_new = obj_func(t, d)
     ls_func_evals = 1
     gtd_new = (g_new * d).sum() # Keep as scalar tensor
@@ -75,23 +75,11 @@ def _strong_wolfe(
     stall_wolfe=0
     while ls_iter < max_ls:
 #        if ( abs(abs(gtd_new)) <= -c2 * abs(gtd) and f_new < f) and (c1 > (abs(gtd_new) - abs(gtd))/(f_new - f) > 0 ):
-        if f_new > f - c1 * t * abs(gtd) and f_new > f :
+        if f_new < f - c1 * t * abs(gtd) and f_new < f :
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
             bracket_g = [g_prev, g_new]
             bracket_gtd = [gtd_prev, gtd_new]
-#            done = True
-#            success = True
-#            t_best = t
-#            f_best = torch.tensor(f_new, device=device)
-#            g_best = g_new
-#            print("FAST WOLFE")
-            break
-        if abs(gtd_new) < c2*abs(gtd):
-            bracket = [t]  #type: ignore[list-item]
-            bracket_f = [f_new]
-            bracket_g = [g_new]
-            bracket_gtd = [gtd_new]
             done = True
             success = True
             t_best = t
@@ -99,7 +87,19 @@ def _strong_wolfe(
             g_best = g_new
             print("FAST WOLFE")
             break
-        if gtd_new >= 0 :
+#        if abs(gtd_new) < c2*abs(gtd) :
+#            bracket = [t]  #type: ignore[list-item]
+#            bracket_f = [f_new]
+#            bracket_g = [g_new]
+#            bracket_gtd = [gtd_new]
+#            done = True
+#            success = True
+#            t_best = t
+#            f_best = torch.tensor(f_new, device=device)
+#            g_best = g_new
+#            print("FAST WOLFE")
+#            break
+        if gtd_new >= 0 or True:
             print("NOT DESCENDING")
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
@@ -261,12 +261,13 @@ def _apply_backward_loop_update(
         q = SparseFlatTensor.add_sparse_dense(sparse_old_dir_scaled, q) # Update q
         # Apply the norm_select logic directly within the jitted function
         # Split tensor into groups based on norm_group_y
-        chunks = _split_tensor_to_groups_jit(q, active_split_sizes_y)
+#        chunks = _split_tensor_to_groups_jit(q, active_split_sizes_y)
         # Vectorized and simplified ball projection (radius_ball is assumed > 0)
         # Assuming chunks will NEVER contain numel() == 0 tensors, and is NEVER empty.
         
         # 1. Concatenate all chunks (required for segment operations)
-        concatenated_chunks = torch.cat(chunks)
+#        concatenated_chunks = torch.cat(chunks)
+        concatenated_chunks = q
         
         # 2. Calculate L2 norms for all chunks at once using torch.segment_reduce
         sum_of_squares_per_segment = torch.segment_reduce(concatenated_chunks.pow(2), reduce="sum", lengths=segment_lengths_tensor_y)
@@ -282,8 +283,8 @@ def _apply_backward_loop_update(
         expanded_factors = torch.repeat_interleave(factors, segment_lengths_tensor_y)
         
         divided_concatenated_chunks = concatenated_chunks / expanded_factors
-        chunks = _split_tensor_to_groups_jit(divided_concatenated_chunks, active_split_sizes_y)
-        q = torch.cat(chunks)
+#        chunks = _split_tensor_to_groups_jit(divided_concatenated_chunks, active_split_sizes_y)
+        q = divided_concatenated_chunks
         q_inv_norm = 1/torch.linalg.vector_norm(q, ord=2.)
     
     return q, direction_alignment_mask, direction_similarities, q_inv_norm # Return original q_inv_norm
@@ -310,12 +311,13 @@ def _apply_forward_loop_update(
     d = SparseFlatTensor.add_sparse_dense(scaled_stp, d)
     # Apply the norm_select logic directly within the jitted function (forward loop)
     # Split tensor into groups based on norm_group_s
-    d_chunks = _split_tensor_to_groups_jit(d, active_split_sizes_s)
+#    d_chunks = _split_tensor_to_groups_jit(d, active_split_sizes_s)
     # Ball projection (radius_ball_s is assumed > 0)
     # Assuming d_chunks will NEVER contain numel() == 0 tensors, and is NEVER empty.
     
     # 1. Concatenate all d_chunks (required for segment operations)
-    concatenated_d_chunks = torch.cat(d_chunks)
+#    concatenated_d_chunks = torch.cat(d_chunks)
+    concatenated_d_chunks = d
     
     # 2. Calculate L2 norms for all d_chunks at once using torch.segment_reduce
     sum_of_squares_per_segment_d = torch.segment_reduce(concatenated_d_chunks.pow(2), reduce="sum", lengths=segment_lengths_tensor_s)
@@ -332,12 +334,13 @@ def _apply_forward_loop_update(
     #    Use precomputed segment_lengths_tensor_s for expanded_factors_d
     expanded_factors_d = torch.repeat_interleave(factors_d, segment_lengths_tensor_s)
     divided_concatenated_d_chunks = concatenated_d_chunks / expanded_factors_d
-    d_chunks = _split_tensor_to_groups_jit(divided_concatenated_d_chunks, active_split_sizes_s)
+    d = divided_concatenated_d_chunks 
+#    d_chunks = _split_tensor_to_groups_jit(divided_concatenated_d_chunks, active_split_sizes_s)
     
 #    if len(d_chunks) == 0:
 #        d = d
 #    else:
-    d = torch.cat(d_chunks)
+#    d = torch.cat(d_chunks)
     return d
 class FBFGS(Optimizer):
     """Implements L-BFGS algorithm.
@@ -885,7 +888,7 @@ class FBFGS(Optimizer):
                 
 #EXTRACT ME GEMINI
                 q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, 1e10, self._active_split_sizes_y, self._segment_lengths_tensor_y
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, 1e3, self._active_split_sizes_y, self._segment_lengths_tensor_y
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
@@ -990,7 +993,7 @@ class FBFGS(Optimizer):
                         wait_end = time.time()
                     
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], 1e10, self._active_split_sizes_s, self._segment_lengths_tensor_s)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], 1e3, self._active_split_sizes_s, self._segment_lengths_tensor_s)
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y)
                     
                     # Cleanup
@@ -1250,8 +1253,8 @@ class FBFGS(Optimizer):
               torch.cuda.empty_cache() # Clear cache before history update
               # Calculate the top k ro threshold if we have history
 #TODO: clean this up
-#              if len(old_dirs) != 0  : # or n_iter != 1 :
-              if n_iter != 1:
+              if len(old_dirs) != 0  :  #or n_iter != 1 :
+#              if n_iter != 1:
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
@@ -1585,18 +1588,19 @@ class FBFGS(Optimizer):
 #      state["d"] = d
 #      state["t"] = t
       # Update optimizer state with current history
-      flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
-      mask = flat_param_copy.abs() > 1
-      xbox = flat_param_copy* mask.float()
-      flat_param_copy[mask] = 0
-      xbox = self.norm_select(xbox, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
-      flat_param_copy= flat_param_copy + xbox
+#      flat_param_copy = torch.nn.utils.parameters_to_vector(self._params)
+#      mask = flat_param_copy.abs() > 1
+#      xbox = flat_param_copy* mask.float()
+#      flat_param_copy[mask] = 0
+#      xbox = self.norm_select(xbox, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
+#      flat_param_copy= flat_param_copy + xbox
 #      l2_xbox = torch.norm(xbox, p=2)
 #      flat_param_copy[mask] = xbox/l2_xbox
 #      flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
 # TODO: instead of this, capture the max and min values of the ball and after the step, norm all values above and below the max and min then norm again with this so we dont push out data from the model
-      flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
-      torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
+# TODO: ideally we would form a mask of all parameters that were selected and norm that.
+#      flat_param_copy = self.norm_select(flat_param_copy, self._active_split_sizes_y,  radius_scaling=0, radius_ball=1)
+#      torch.nn.utils.vector_to_parameters(flat_param_copy, self._params)
       state["old_dirs"] = old_dirs
       state["d"] = d
       state["old_stps"] = old_stps
