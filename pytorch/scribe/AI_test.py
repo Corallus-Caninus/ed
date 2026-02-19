@@ -119,7 +119,7 @@ batch_train = None
 optimizer_device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using optimizer device: {optimizer_device}")
 #optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e2, radius_ball=1, radius_ball_s=1e3, radius_s=1e4, c1e=1e-7, c2=0.001, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogona0.01, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
-optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=0.01, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.33, radius_y=5e2, radius_ball=1e3, radius_ball_s=1, radius_s=5e4, c1=1e-7, c2=0.001, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.008, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
+optimizer = FBFGS(model.parameters(),  history_size=9, tolerance_change=1e-7, max_iter=10,  line_search_fn="strong_wolfe", y_norm=1.5, norm=1.2, radius_s=5e4, radius_y=5e2, radius_ball=1e3, radius_ball_s=0.1, c1=0, c2=0.1, direction_device="cpu", optimizer_device=optimizer_device, bracket_shift=1/3, bracket_shove=1/3, capture_max_step=10, capture_min_step=0.001, rho_rewind=3, orthogonality=0.001, max_ls=5, norm_group_s=5, norm_group_y=0.2, prefetch_buffer=50e6)# TODO: try reducing tolerance change with angle based orthogonality since it doesnt converge the direction now (more point breaks)
 # Load FBFGS history if it exists
 if os.path.exists(history_filename):
     # Allow the SparseFlatTensor class from fbfgs module for safe loading
@@ -603,7 +603,7 @@ while True:
     print(f"Loss before step: {loss_without_regularizer:.16f}")
     
     # Save model parameters before the step
-    saved_model_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+#    saved_model_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
     
     optimizer.step(closure)
     step_text = f" STEP {step_count} "
@@ -624,13 +624,13 @@ while True:
     
     loss_delta = loss_before - loss_after  # Use pure loss before - pure loss after
     
-    if loss_delta < 0: # Allow for small floating point inaccuracies
-        print(f"\033[91mLoss delta is negative ({loss_delta:.16f}), restoring model parameters.\033[0m")
-        model.load_state_dict(saved_model_state_dict)
-        # Re-evaluate loss_after to reflect restored state for logging purposes
-        loss_after = closure()
-        loss_after = loss_without_regularizer
-        loss_delta = loss_before - loss_after # Recalculate loss_delta after restore
+#    if loss_delta < 0: # Allow for small floating point inaccuracies
+#        print(f"\033[91mLoss delta is negative ({loss_delta:.16f}), restoring model parameters.\033[0m")
+#        model.load_state_dict(saved_model_state_dict)
+#        # Re-evaluate loss_after to reflect restored state for logging purposes
+#        loss_after = closure()
+#        loss_after = loss_without_regularizer
+#        loss_delta = loss_before - loss_after # Recalculate loss_delta after restore
     
 #    if loss_delta < -1e-6: # Re-add AssertionError for significantly negative loss delta after restoration attempt
 #        raise AssertionError(f"Loss delta is negative ({loss_delta:.16f}) even after restoration, violating Strong Wolfe conditions.")
