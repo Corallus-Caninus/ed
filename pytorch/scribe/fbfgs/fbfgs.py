@@ -1404,7 +1404,7 @@ class FBFGS(Optimizer):
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
               print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
               torch.cuda.empty_cache() # Clear cache before history update
-              if ys > 1e-3:
+              if ys > 1.:
                 # Store new direction/step and compute its L2 norm
                 y_to_store = y.to(self.direction_device, non_blocking=False, pin_memory=True)
                 old_dirs.append(y_to_store)
