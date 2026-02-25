@@ -401,8 +401,8 @@ class FBFGS(Optimizer):
         prefetch_buffer: int = 20_000_000,
         norm_group_s: Optional[Union[int, float]] = None,  # New parameter
         norm_group_y: Optional[Union[int, float]] = None,  # New parameter
-        ro_threshold_rate: float = 1,  # New parameter
         lambda_reg: float = 0.001,  # Regularization strength
+        approximation_radius: Optional[float] = None,
     ):
         self.lambda_reg = lambda_reg  # Regularization strength hyperparameter
 #        self._last_penalty = torch.tensor(0.0, requires_grad=True)  # Track regularization penalty
@@ -433,7 +433,7 @@ class FBFGS(Optimizer):
             prefetch_buffer=prefetch_buffer,
             norm_group_s=norm_group_s,  # Add to defaults
             norm_group_y=norm_group_y,  # Add to defaults
-            ro_threshold_rate=ro_threshold_rate,  # Add to defaults
+            approximation_radius=approximation_radius,
         )
         super().__init__(params, defaults)
         if len(self.param_groups) != 1:
@@ -446,10 +446,12 @@ class FBFGS(Optimizer):
         self.radius_y = radius_y
         self.radius_ball = radius_ball
         self.radius_ball_s = radius_ball_s
+        self.approximation_radius = approximation_radius if approximation_radius is not None else radius_y
         self.direction_device = direction_device
         self.optimizer_device = optimizer_device
         self.max_ls= max_ls
         self.max_iter = max_iter
+        self.rho_rewind = rho_rewind
         self.t = 1
         
         self._calculate_param_info() # Calculate param_sizes, total_size, num_layers, and offsets
@@ -510,7 +512,6 @@ class FBFGS(Optimizer):
         self._segment_lengths_tensor_y = torch.tensor(self._active_split_sizes_y, dtype=torch.int64, device=self.optimizer_device)
         self._segment_lengths_tensor_s = torch.tensor(self._active_split_sizes_s, dtype=torch.int64, device=self.optimizer_device)
         self.prefetch_buffer = prefetch_buffer
-        self.ro_threshold_rate = ro_threshold_rate
         self.current_ro_threshold = 0
         self.y_norms = []
     def _numel(self):
@@ -688,34 +689,6 @@ class FBFGS(Optimizer):
             if p.grad is not None and not p.grad.is_sparse:
                 p_flat = p.view(-1).to(p.grad.dtype)
                 g_flat = p.grad.view(-1)
-                
-#                if p_flat.numel() > 0 and g_flat.numel() > 0 :
-#                    dot = torch.dot(p_flat, g_flat)
-                
-                    # Regularize the gradient for the event horizon reduction (negative alignment)
-#                    p_mag_sq =  (torch.dot(p_flat, p_flat))
-#                    p_mag =  torch.sqrt(torch.dot(p_flat, p_flat))
-#                    p_norm =  torch.sqrt(torch.dot(p_flat, p_flat))/50#/ 50
-## TODO: we can just subtract the positive projection here? essentially remove it completely and adjust the loss by its magnitude?
-#                    if dot > 0 and p_norm > 1:
-## TODO: we want this to be adjusted by the param magnitude somehow but need to review and whiteboard this
-#                        projection_reg= ((dot/p_mag_sq)* p_flat) *p_mag
-##                        projection_reg= torch.dot(projection_reg, projection_reg)
-#                        dot_reg += torch.sqrt(torch.dot(projection_reg, projection_reg))#*p_mag
-## TODO: ensure the loss is correct. We have the square here for the grad mag
-#                        self._last_penalty= self._last_penalty + torch.sqrt(torch.dot(projection_reg, projection_reg))#*p_mag
-#                        print("grad mag before: " + str(torch.dot(g_flat, g_flat)))
-## TODO: this doesnt preserve the direction angle? need to travel along the vector
-#                        p.grad.view(-1).sub_(projection_reg )# TODO: projection_reg */ p_flat?
-#                        print("grad mag after: " + str(torch.dot(g_flat, g_flat)))
-##                    if dot == 0 and p_norm > 1:# TODO: negative orthogonality is retarded here whereas it would be boosted by gso.
-### TODO: this is more aggresive than the positive projection? balance/tune this.
-###                        ortho_limiter = torch.dot(g_flat, g_flat) * p_norm
-##                        ortho_limiter = g_flat * p_norm*p_mag
-##                        self._last_penalty= self._last_penalty + torch.sqrt(torch.dot(ortho_limiter, ortho_limiter))#*p_mag
-##                        dot_reg += torch.sqrt(torch.dot(ortho_limiter, ortho_limiter))#*p_mag
-##                        p.grad.view(-1).sub_(ortho_limiter)
-#                    
             
             view = p.grad.view(-1)
                 
@@ -798,7 +771,7 @@ class FBFGS(Optimizer):
             p.copy_(p_saved)
             
         return loss, flat_grad
-    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0) -> tuple[Tensor, Tensor, list[float]]:
+    def sparse_direction_approximate(self, old_stps: list[SparseFlatTensor], old_dirs: list[SparseFlatTensor], ro: list[Tensor], flat_grad: Tensor, H_diag: Tensor, y_norms: list[Tensor], optimizer_device: str, t: float, radius_s: float, radius_ball_s: float, norm: float, y_norm: float, ls_failed: bool, orthogonality: float, n_iter: int, norm_group: Optional[Union[int, float]] = None, ro_threshold_val: float = 0, approximation_radius: float = 1e3) -> tuple[Tensor, Tensor, list[float]]:
         PREFETCH_THRESHOLD_VALUES = self.prefetch_buffer  # Use hyperparameter
         compute_stream = torch.cuda.current_stream()
         transfer_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
@@ -888,7 +861,7 @@ class FBFGS(Optimizer):
                 
 #EXTRACT ME GEMINI
                 q, direction_alignment_mask, direction_similarities, q_inv_norm = _apply_backward_loop_update(
-                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, 1e3, self._active_split_sizes_y, self._segment_lengths_tensor_y
+                    q, dir_device, stp_device, self.y_norms, i, orthogonality, al, direction_alignment_mask, direction_similarities, optimizer_device, ro[i], q_inv_norm, approximation_radius, self._active_split_sizes_y, self._segment_lengths_tensor_y
                 )
 #END OF EXTRACT ME GEMINI q
 #                print("dir align: " + str(direction_alignment_mask))
@@ -993,7 +966,7 @@ class FBFGS(Optimizer):
                         wait_end = time.time()
                     
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball_s, self._active_split_sizes_s, self._segment_lengths_tensor_s)
-                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], 1e3, self._active_split_sizes_s, self._segment_lengths_tensor_s)
+                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], approximation_radius, self._active_split_sizes_s, self._segment_lengths_tensor_s)
 #                    d = _apply_forward_loop_update(d, stp_device, dir_device, al, idx, ro[idx], self.radius_ball, self._active_split_sizes_y, self._segment_lengths_tensor_y)
                     
                     # Cleanup
@@ -1120,7 +1093,6 @@ class FBFGS(Optimizer):
       y_norm = group["y_norm"]
       rho_rewind = group["rho_rewind"]
       orthogonality = group["orthogonality"]
-      ro_thresholding = 1
       self.saved_params = [p.clone(memory_format=torch.contiguous_format) for p in self._params]
       # NOTE: FBFGS has only global state, but we register it as state for
       # the first param, because this helps with casting in load_state_dict
@@ -1259,14 +1231,14 @@ class FBFGS(Optimizer):
                     old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=self.norm_group_y_val, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, 
-                    norm_group=self.norm_group_s_val, ro_threshold_val=ro_threshold_val
+                    norm_group=self.norm_group_s_val, ro_threshold_val=ro_threshold_val, approximation_radius=self.approximation_radius
                 )
               else:
                 d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(
                     [], [], [], flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, 
                     t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, 
                     y_norm=self.norm_group_y_val, ls_failed=ls_failed, orthogonality=orthogonality, 
-                    n_iter=n_iter, norm_group=self.norm_group_s_val, ro_threshold_val=0
+                    n_iter=n_iter, norm_group=self.norm_group_s_val, ro_threshold_val=0, approximation_radius=self.approximation_radius
                 )
 #                  d = self._gather_flat_grad().neg().to(self.optimizer_device) # Ensure d is on optimizer_device
 #                  #TODO: should we also do norm float("inf") here to match direction S?
@@ -1404,7 +1376,7 @@ class FBFGS(Optimizer):
                     print(f"CPU RAM check failed: {e}. Falling back to default memory management.")
               print(f"L-BFGS history popped. History size reduced to: {len(old_dirs)}")
               torch.cuda.empty_cache() # Clear cache before history update
-              if ys > 1.:
+              if ys > 1e-3:
                 # Store new direction/step and compute its L2 norm
                 y_to_store = y.to(self.direction_device, non_blocking=False, pin_memory=True)
                 old_dirs.append(y_to_store)
@@ -1412,12 +1384,7 @@ class FBFGS(Optimizer):
                 ro.append(torch.tensor([(1. / ys)]))
                 self.y_norms.append(1/y_norm_l2)
               new_ys_x = new_ys_x + 1
-              # Set ls_failed if ys is below threshold (moved here)
-              if ys < self.ro_threshold_rate:
-                  ls_failed = True
-                  state["ls_failed"] = True
               if n_iter >= max_iter or loss == 0:
-                self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
@@ -1428,7 +1395,6 @@ class FBFGS(Optimizer):
               if max_abs_grad <= tolerance_change:
 # TODO: we probably also need gtd check since we dont abs in sw linesearch
                 print(f"Exiting: max gradient element {max_abs_grad} < tolerance {tolerance_change} (q max: {max_abs_q})")
-                self.ro_thresholding = max(1.0 - self.ro_threshold_rate, 0.0)
                 state["old_stps"] = old_stps
                 state["ro"] = ro
                 state["old_dirs"] = old_dirs
@@ -1459,7 +1425,7 @@ class FBFGS(Optimizer):
 #              if self.radius_alpha == 0: # Check if radius_alphaping is disabled
 #                d = self.dense_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, direction_device=self.direction_device, t=t, radius_alpha=self.radius_alpha, norm=norm)
 #              else:
-              d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=self.norm_group_y_val, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s_val, ro_threshold_val=ro_threshold_val )
+              d, direction_alignment_mask, direction_similarities = self.sparse_direction_approximate(old_stps, old_dirs, ro, flat_grad, H_diag, self.y_norms, optimizer_device=self.optimizer_device, t=t, radius_s=self.radius_s, radius_ball_s=self.radius_ball, norm=norm, y_norm=self.norm_group_y_val, ls_failed=ls_failed, orthogonality=orthogonality, n_iter=new_ys_x, norm_group=self.norm_group_s_val, ro_threshold_val=ro_threshold_val, approximation_radius=self.approximation_radius )
               state["direction_alignment_mask"] = direction_alignment_mask
               # sparse_direction_approximate already applies norm_select
 #TODO: fix this, we just need to write to hist not calculate everything else but we shouldnt check ys for this condition
@@ -1638,9 +1604,8 @@ class FBFGS(Optimizer):
         
         # Calculate total history length including recycle bin
         total_history_len = len(ro) + len(recycle_bin)
-        # Calculate 10% of total history (minimum 1)
-#        rewind_amount = max(1, int(1/self.rho_rewind * total_history_len))
-        rewind_amount = max(1, int(1/3 * total_history_len))
+        # Calculate 1/rho_rewind of total history (minimum 1)
+        rewind_amount = max(1, int(1/self.rho_rewind * total_history_len))
         # Ensure we don't rewind more than available active history
         rewind_amount = min(rewind_amount, len(ro))
         print("rewinding " + str(rewind_amount) + " of history: " + str(total_history_len))
